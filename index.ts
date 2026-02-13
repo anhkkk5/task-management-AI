@@ -11,9 +11,17 @@ const app: Express = express();
 const port: number | string = process.env.PORT || 3002;
 
 app.use(cors());
+app.use((req: Request, _res: Response, next) => {
+  console.log(`${req.method} ${req.url}`);
+  next();
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-// mainV1Routes(app);
+
+app.get("/", (req: Request, res: Response) => {
+  res.send("hello");
+});
+
 // Lắng nghe cổng
 app.listen(port, () => {
   console.log(`App listening on port ${port}`);
