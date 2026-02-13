@@ -11,6 +11,11 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "index.ts", "config/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/types/**/*.d.ts",
+    "index.ts",
+    "config/**/*.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

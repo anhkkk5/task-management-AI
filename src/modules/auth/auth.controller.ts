@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { authService } from "./auth.service";
+import { authRepository } from "./auth.repository";
 
 export const register = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -71,7 +72,32 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
 };
 
 export const me = async (_req: Request, res: Response): Promise<void> => {
-  res.status(501).json({ message: "Not implemented" });
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const user = await authRepository.findById(userId);
+    if (!user) {
+      res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return;
+    }
+
+    res.status(200).json({
+      id: String(user._id),
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      avatar: user.avatar,
+      isVerified: user.isVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    });
+  } catch (_err) {
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
 };
 
 export const updateProfile = async (
