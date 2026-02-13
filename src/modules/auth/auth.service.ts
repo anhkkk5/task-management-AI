@@ -1,8 +1,15 @@
 import bcrypt from "bcryptjs";
 import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { authRepository } from "./auth.repository";
-import { LoginDto, RegisterDto, UpdateProfileDto } from "./auth.dto";
+import {
+  LoginDto,
+  RegisterDto,
+  SendOtpDto,
+  UpdateProfileDto,
+} from "./auth.dto";
 import { UserRole } from "./auth.model";
+import { otpService } from "./otp.service";
+import { emailService } from "./email.service";
 
 type PublicUser = {
   id: string;
@@ -16,8 +23,8 @@ type PublicUser = {
 };
 
 type RegisterResult = {
-  accessToken: string;
-  user: PublicUser;
+  message: string;
+  ttlSeconds: number;
 };
 
 type LoginResult = {
@@ -93,23 +100,54 @@ export const authService = {
       ? Number(process.env.BCRYPT_SALT_ROUNDS)
       : 10;
     const hashed = await bcrypt.hash(password, saltRounds);
-    const user = await authRepository.createUser({
+
+    await otpService.savePendingRegister({
       email,
-      password: hashed,
+      passwordHash: hashed,
       name,
-      role: "user",
+      createdAt: Date.now(),
     });
 
-    const accessToken = signAccessToken({
-      userId: String(user._id),
-      email: user.email,
-      role: user.role,
-    });
+    const otp = otpService.generateOtp();
+    await otpService.saveOtp(email, otp);
+    await emailService.sendOtpEmail(email, otp);
 
     return {
-      accessToken,
-      user: toPublicUser(user),
+      message: "Vui lòng kiểm tra email và xác thực OTP",
+      ttlSeconds: otpService.getOtpTtlSeconds(),
     };
+  },
+
+  sendOtp: async (
+    dto: SendOtpDto,
+  ): Promise<{ message: string; ttlSeconds: number }> => {
+    const email = dto.email?.trim().toLowerCase();
+    if (!email) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (!isValidEmail(email)) {
+      throw new Error("INVALID_EMAIL");
+    }
+
+    const pending = await otpService.getPendingRegister(email);
+    if (!pending) {
+      throw new Error("PENDING_NOT_FOUND");
+    }
+
+    const otp = otpService.generateOtp();
+    await otpService.saveOtp(email, otp);
+    await emailService.sendOtpEmail(email, otp);
+
+    return {
+      message: "Đã gửi OTP",
+      ttlSeconds: otpService.getOtpTtlSeconds(),
+    };
+  },
+
+  resendOtp: async (
+    dto: SendOtpDto,
+  ): Promise<{ message: string; ttlSeconds: number }> => {
+    return authService.sendOtp(dto);
   },
 
   login: async (dto: LoginDto): Promise<LoginResult> => {

@@ -39,6 +39,48 @@ export const register = async (_req: Request, res: Response): Promise<void> => {
   }
 };
 
+export const sendOtp = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const result = await authService.sendOtp({
+      email: String(_req.body?.email ?? ""),
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "INVALID_EMAIL") {
+      res.status(400).json({ message: "Email không hợp lệ" });
+      return;
+    }
+    if (message === "INVALID_INPUT") {
+      res.status(400).json({ message: "Thiếu email" });
+      return;
+    }
+    if (message === "PENDING_NOT_FOUND") {
+      res.status(404).json({ message: "Không có đăng ký đang chờ xác thực" });
+      return;
+    }
+    if (message.includes("Missing env SMTP")) {
+      res.status(500).json({ message: "Thiếu cấu hình SMTP" });
+      return;
+    }
+    if (message === "Missing env EMAIL_FROM") {
+      res.status(500).json({ message: "Thiếu cấu hình EMAIL_FROM" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const resendOtp = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  return sendOtp(_req, res);
+};
+
 export const login = async (_req: Request, res: Response): Promise<void> => {
   try {
     const result = await authService.login({

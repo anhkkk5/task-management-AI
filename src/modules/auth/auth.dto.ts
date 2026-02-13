@@ -13,3 +13,12 @@ export type UpdateProfileDto = {
   name?: string;
   avatar?: string;
 };
+
+export type SendOtpDto = {
+  email: string;
+};
+
+export type VerifyOtpDto = {
+  email: string;
+  otp: string;
+};
