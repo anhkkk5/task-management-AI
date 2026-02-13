@@ -30,8 +30,8 @@ export const register = async (_req: Request, res: Response): Promise<void> => {
       res.status(400).json({ message: "Thiếu thông tin đăng ký" });
       return;
     }
-    if (message === "Missing env JWT_SECRET") {
-      res.status(500).json({ message: "Thiếu cấu hình JWT_SECRET" });
+    if (message === "Missing env JWT_ACCESS_SECRET") {
+      res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
       return;
     }
 

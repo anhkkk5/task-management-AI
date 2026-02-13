@@ -7,7 +7,7 @@
     "test": "jest",
     "build": "rimraf dist && tsc",
     "ts.check": "tsc --project tsconfig.json --noEmit",
-    "dev": "nodemon --watch \"**/*.ts\" --exec ts-node src/server.ts",
+    "dev": "nodemon --watch \"**/*.ts\" --exec \"ts-node --files src/server.ts\"",
     "start": "node dist/server.js"
   },
   "pre-commit": [
