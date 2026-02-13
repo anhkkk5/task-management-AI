@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { authRepository } from "./auth.repository";
-import { LoginDto, RegisterDto } from "./auth.dto";
+import { LoginDto, RegisterDto, UpdateProfileDto } from "./auth.dto";
 import { UserRole } from "./auth.model";
 
 type PublicUser = {
@@ -143,5 +143,27 @@ export const authService = {
       accessToken,
       user: toPublicUser(user),
     };
+  },
+
+  updateProfile: async (
+    userId: string,
+    dto: UpdateProfileDto,
+  ): Promise<PublicUser> => {
+    const name = dto.name?.trim();
+    const avatar = dto.avatar?.trim();
+
+    if (name !== undefined && name.length === 0) {
+      throw new Error("INVALID_NAME");
+    }
+
+    const updated = await authRepository.updateProfile(userId, {
+      name,
+      avatar,
+    });
+    if (!updated) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    return toPublicUser(updated);
   },
 };
