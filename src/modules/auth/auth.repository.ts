@@ -6,6 +6,14 @@ export const authRepository = {
     return User.findOne({ email }).exec();
   },
 
+  findByEmailWithPassword: async (
+    email: string,
+  ): Promise<(UserDoc & { password: string }) | null> => {
+    return User.findOne({ email }).select("+password").exec() as Promise<
+      (UserDoc & { password: string }) | null
+    >;
+  },
+
   findById: async (
     userId: string | Types.ObjectId,
   ): Promise<UserDoc | null> => {

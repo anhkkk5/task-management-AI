@@ -39,7 +39,35 @@ export const register = async (_req: Request, res: Response): Promise<void> => {
 };
 
 export const login = async (_req: Request, res: Response): Promise<void> => {
-  res.status(501).json({ message: "Not implemented" });
+  try {
+    const result = await authService.login({
+      email: String(_req.body?.email ?? ""),
+      password: String(_req.body?.password ?? ""),
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "INVALID_CREDENTIALS") {
+      res.status(401).json({ message: "Sai email hoặc mật khẩu" });
+      return;
+    }
+    if (message === "INVALID_EMAIL") {
+      res.status(400).json({ message: "Email không hợp lệ" });
+      return;
+    }
+    if (message === "INVALID_INPUT") {
+      res.status(400).json({ message: "Thiếu thông tin đăng nhập" });
+      return;
+    }
+    if (message === "Missing env JWT_ACCESS_SECRET") {
+      res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
 };
 
 export const me = async (_req: Request, res: Response): Promise<void> => {
