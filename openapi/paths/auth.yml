@@ -11,13 +11,112 @@ authRegister:
             $ref: "../openapi.yml#/components/schemas/RegisterRequest"
     responses:
       "201":
-        description: Tạo tài khoản thành công
+        description: Tạo OTP và lưu đăng ký tạm
         content:
           application/json:
             schema:
-              $ref: "../openapi.yml#/components/schemas/AuthResponse"
+              $ref: "../components/schemas/auth.yml#/RegisterOtpResponse"
       "400":
         description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "409":
+        description: Email đã tồn tại
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authSendOtp:
+  post:
+    tags:
+      - Auth
+    summary: Gửi OTP (khi đang có đăng ký pending)
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/SendOtpRequest"
+    responses:
+      "200":
+        description: Đã gửi OTP
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/SendOtpResponse"
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không có đăng ký pending
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authResendOtp:
+  post:
+    tags:
+      - Auth
+    summary: Gửi lại OTP
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/SendOtpRequest"
+    responses:
+      "200":
+        description: Đã gửi OTP
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/SendOtpResponse"
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không có đăng ký pending
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authVerifyOtp:
+  post:
+    tags:
+      - Auth
+    summary: Xác thực OTP và tạo tài khoản trong DB
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/VerifyOtpRequest"
+    responses:
+      "200":
+        description: Xác thực thành công
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/VerifyOtpResponse"
+      "400":
+        description: OTP sai hoặc hết hạn
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không có đăng ký pending
         content:
           application/json:
             schema:

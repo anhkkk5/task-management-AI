@@ -12,6 +12,12 @@ tags:
 paths:
   /auth/register:
     $ref: "./paths/auth.yml#/authRegister"
+  /auth/send-otp:
+    $ref: "./paths/auth.yml#/authSendOtp"
+  /auth/resend-otp:
+    $ref: "./paths/auth.yml#/authResendOtp"
+  /auth/verify-otp:
+    $ref: "./paths/auth.yml#/authVerifyOtp"
   /auth/login:
     $ref: "./paths/auth.yml#/authLogin"
   /auth/me:

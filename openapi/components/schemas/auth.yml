@@ -15,6 +15,63 @@ RegisterRequest:
     - password
     - name
 
+SendOtpRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+  required:
+    - email
+
+VerifyOtpRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+    otp:
+      type: string
+      example: "123456"
+  required:
+    - email
+    - otp
+
+RegisterOtpResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      example: Vui lòng kiểm tra email và xác thực OTP
+    ttlSeconds:
+      type: number
+      example: 300
+  required:
+    - message
+    - ttlSeconds
+
+SendOtpResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      example: Đã gửi OTP
+    ttlSeconds:
+      type: number
+      example: 300
+  required:
+    - message
+    - ttlSeconds
+
+VerifyOtpResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      example: Xác thực OTP thành công
+  required:
+    - message
+
 LoginRequest:
   type: object
   properties:

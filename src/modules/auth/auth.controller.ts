@@ -30,8 +30,12 @@ export const register = async (_req: Request, res: Response): Promise<void> => {
       res.status(400).json({ message: "Thiếu thông tin đăng ký" });
       return;
     }
-    if (message === "Missing env JWT_ACCESS_SECRET") {
-      res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
+    if (message.includes("Missing env SMTP")) {
+      res.status(500).json({ message: "Thiếu cấu hình SMTP" });
+      return;
+    }
+    if (message === "Missing env EMAIL_FROM") {
+      res.status(500).json({ message: "Thiếu cấu hình EMAIL_FROM" });
       return;
     }
 
@@ -81,6 +85,49 @@ export const resendOtp = async (
   return sendOtp(_req, res);
 };
 
+export const verifyOtp = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const result = await authService.verifyOtp({
+      email: String(_req.body?.email ?? ""),
+      otp: String(_req.body?.otp ?? ""),
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "INVALID_EMAIL") {
+      res.status(400).json({ message: "Email không hợp lệ" });
+      return;
+    }
+    if (message === "INVALID_OTP") {
+      res.status(400).json({ message: "OTP không hợp lệ" });
+      return;
+    }
+    if (message === "INVALID_INPUT") {
+      res.status(400).json({ message: "Thiếu email hoặc otp" });
+      return;
+    }
+    if (message === "PENDING_NOT_FOUND") {
+      res.status(404).json({ message: "Không có đăng ký đang chờ xác thực" });
+      return;
+    }
+    if (message === "OTP_INVALID_OR_EXPIRED") {
+      res.status(400).json({ message: "OTP sai hoặc đã hết hạn" });
+      return;
+    }
+    if (message === "EMAIL_EXISTS") {
+      res.status(409).json({ message: "Email đã tồn tại" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
 export const login = async (_req: Request, res: Response): Promise<void> => {
   try {
     const result = await authService.login({
@@ -94,6 +141,10 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
 
     if (message === "INVALID_CREDENTIALS") {
       res.status(401).json({ message: "Sai email hoặc mật khẩu" });
+      return;
+    }
+    if (message === "EMAIL_NOT_VERIFIED") {
+      res.status(403).json({ message: "Email chưa được xác thực OTP" });
       return;
     }
     if (message === "INVALID_EMAIL") {

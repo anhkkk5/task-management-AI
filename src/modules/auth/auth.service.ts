@@ -6,6 +6,7 @@ import {
   RegisterDto,
   SendOtpDto,
   UpdateProfileDto,
+  VerifyOtpDto,
 } from "./auth.dto";
 import { UserRole } from "./auth.model";
 import { otpService } from "./otp.service";
@@ -30,6 +31,10 @@ type RegisterResult = {
 type LoginResult = {
   accessToken: string;
   user: PublicUser;
+};
+
+type VerifyOtpResult = {
+  message: string;
 };
 
 const signAccessToken = (payload: {
@@ -150,6 +155,51 @@ export const authService = {
     return authService.sendOtp(dto);
   },
 
+  verifyOtp: async (dto: VerifyOtpDto): Promise<VerifyOtpResult> => {
+    const email = dto.email?.trim().toLowerCase();
+    const otp = dto.otp?.trim();
+
+    if (!email || !otp) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (!isValidEmail(email)) {
+      throw new Error("INVALID_EMAIL");
+    }
+    if (!/^\d{6}$/.test(otp)) {
+      throw new Error("INVALID_OTP");
+    }
+
+    const pending = await otpService.getPendingRegister(email);
+    if (!pending) {
+      throw new Error("PENDING_NOT_FOUND");
+    }
+
+    const ok = await otpService.verifyOtp(email, otp);
+    if (!ok) {
+      throw new Error("OTP_INVALID_OR_EXPIRED");
+    }
+
+    const existing = await authRepository.findByEmail(email);
+    if (existing) {
+      await otpService.deleteOtp(email);
+      await otpService.deletePendingRegister(email);
+      throw new Error("EMAIL_EXISTS");
+    }
+
+    await authRepository.createUser({
+      email,
+      password: pending.passwordHash,
+      name: pending.name,
+      role: "user",
+      isVerified: true,
+    });
+
+    await otpService.deleteOtp(email);
+    await otpService.deletePendingRegister(email);
+
+    return { message: "Xác thực OTP thành công" };
+  },
+
   login: async (dto: LoginDto): Promise<LoginResult> => {
     const email = dto.email?.trim().toLowerCase();
     const password = dto.password;
@@ -164,6 +214,10 @@ export const authService = {
     const user = await authRepository.findByEmailWithPassword(email);
     if (!user) {
       throw new Error("INVALID_CREDENTIALS");
+    }
+
+    if (!user.isVerified) {
+      throw new Error("EMAIL_NOT_VERIFIED");
     }
 
     const ok = await bcrypt.compare(password, user.password);
