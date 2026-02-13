@@ -1,0 +1,38 @@
+type: object
+properties:
+  id:
+    type: string
+    example: 65f1c2a8a9b1c8d1e2f3a4b5
+  email:
+    type: string
+    example: user@gmail.com
+  name:
+    type: string
+    example: Nguyen Van A
+  role:
+    type: string
+    enum:
+      - user
+      - admin
+    example: user
+  avatar:
+    type: string
+    nullable: true
+    example: https://example.com/avatar.png
+  isVerified:
+    type: boolean
+    example: false
+  createdAt:
+    type: string
+    format: date-time
+  updatedAt:
+    type: string
+    format: date-time
+required:
+  - id
+  - email
+  - name
+  - role
+  - isVerified
+  - createdAt
+  - updatedAt

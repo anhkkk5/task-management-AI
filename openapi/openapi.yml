@@ -1,0 +1,43 @@
+openapi: 3.0.3
+info:
+  title: Task Management AI API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3002
+tags:
+  - name: Auth
+    description: Xác thực & tài khoản
+  - name: Task
+    description: Quản lý công việc
+paths:
+  /auth/register:
+    $ref: "./paths/auth.yml#/authRegister"
+  /auth/login:
+    $ref: "./paths/auth.yml#/authLogin"
+  /auth/me:
+    $ref: "./paths/auth.yml#/authMe"
+  /auth/update-profile:
+    $ref: "./paths/auth.yml#/authUpdateProfile"
+  /tasks:
+    $ref: "./paths/task.yml#/tasks"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    User:
+      $ref: "./components/schemas/user.yml"
+    RegisterRequest:
+      $ref: "./components/schemas/auth.yml#/RegisterRequest"
+    LoginRequest:
+      $ref: "./components/schemas/auth.yml#/LoginRequest"
+    UpdateProfileRequest:
+      $ref: "./components/schemas/auth.yml#/UpdateProfileRequest"
+    AuthResponse:
+      $ref: "./components/schemas/auth.yml#/AuthResponse"
+    MeResponse:
+      $ref: "./components/schemas/auth.yml#/MeResponse"
+    ErrorResponse:
+      $ref: "./components/schemas/common.yml#/ErrorResponse"

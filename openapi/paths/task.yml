@@ -1,0 +1,15 @@
+tasks:
+  get:
+    tags:
+      - Task
+    summary: Danh sách task (chưa implement)
+    responses:
+      "501":
+        description: Not implemented
+  post:
+    tags:
+      - Task
+    summary: Tạo task (chưa implement)
+    responses:
+      "501":
+        description: Not implemented

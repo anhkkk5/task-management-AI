@@ -1,0 +1,54 @@
+RegisterRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+    password:
+      type: string
+      example: "123456"
+    name:
+      type: string
+      example: Nguyen Van A
+  required:
+    - email
+    - password
+    - name
+
+LoginRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+    password:
+      type: string
+      example: "123456"
+  required:
+    - email
+    - password
+
+UpdateProfileRequest:
+  type: object
+  properties:
+    name:
+      type: string
+      example: Ten moi
+    avatar:
+      type: string
+      example: https://example.com/avatar.png
+
+AuthResponse:
+  type: object
+  properties:
+    accessToken:
+      type: string
+    user:
+      $ref: "./user.yml"
+  required:
+    - accessToken
+    - user
+
+MeResponse:
+  allOf:
+    - $ref: "./user.yml"
