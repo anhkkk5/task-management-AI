@@ -1,6 +1,8 @@
 import { UserRole } from "../auth/auth.model";
 import { userRepository } from "./user.repository";
-import { UpdateUserProfileDto } from "./user.dto";
+import bcrypt from "bcryptjs";
+import { ChangePasswordDto, UpdateUserProfileDto } from "./user.dto";
+import { getRedis } from "../../services/redis.service";
 
 export type PublicUser = {
   id: string;
@@ -99,5 +101,62 @@ export const userService = {
       throw new Error("USER_NOT_FOUND");
     }
     return toPublicUser(updated);
+  },
+
+  changePassword: async (
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<{ message: string }> => {
+    const oldPassword = dto.oldPassword;
+    const newPassword = dto.newPassword;
+
+    if (!oldPassword || !newPassword) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (newPassword.length < 6) {
+      throw new Error("INVALID_PASSWORD");
+    }
+
+    const user = await userRepository.findByIdWithPassword(userId);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const ok = await bcrypt.compare(oldPassword, user.password);
+    if (!ok) {
+      throw new Error("OLD_PASSWORD_INCORRECT");
+    }
+
+    const saltRounds = process.env.BCRYPT_SALT_ROUNDS
+      ? Number(process.env.BCRYPT_SALT_ROUNDS)
+      : 10;
+    const hashed = await bcrypt.hash(newPassword, saltRounds);
+
+    await userRepository.updatePassword(userId, hashed);
+
+    const redis = getRedis();
+    const prefix = `refresh:${userId}:`;
+    const keys: string[] = [];
+
+    let cursor = "0";
+    do {
+      const [next, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      if (Array.isArray(batch) && batch.length) {
+        keys.push(...batch);
+      }
+    } while (cursor !== "0");
+
+    if (keys.length) {
+      await redis.del(...keys);
+    }
+
+    return { message: "Đổi mật khẩu thành công" };
   },
 };

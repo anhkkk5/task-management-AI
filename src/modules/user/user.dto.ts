@@ -6,3 +6,8 @@ export type UpdateUserProfileDto = {
   address?: string;
   settings?: Record<string, unknown>;
 };
+
+export type ChangePasswordDto = {
+  oldPassword: string;
+  newPassword: string;
+};

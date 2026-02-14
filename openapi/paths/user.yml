@@ -128,9 +128,45 @@ userChangePassword:
     summary: Đổi mật khẩu
     security:
       - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              oldPassword:
+                type: string
+              newPassword:
+                type: string
+            required:
+              - oldPassword
+              - newPassword
     responses:
-      "501":
-        description: Not implemented
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Đổi mật khẩu thành công
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Mật khẩu cũ sai / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
         content:
           application/json:
             schema:

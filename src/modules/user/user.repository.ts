@@ -8,6 +8,14 @@ export const userRepository = {
     return User.findById(userId).exec();
   },
 
+  findByIdWithPassword: async (
+    userId: string | Types.ObjectId,
+  ): Promise<(UserDoc & { password: string }) | null> => {
+    return User.findById(userId).select("+password").exec() as Promise<
+      (UserDoc & { password: string }) | null
+    >;
+  },
+
   updateProfile: async (
     userId: string | Types.ObjectId,
     update: {
@@ -46,6 +54,21 @@ export const userRepository = {
       {
         $set: {
           avatar,
+        },
+      },
+      { new: true },
+    ).exec();
+  },
+
+  updatePassword: async (
+    userId: string | Types.ObjectId,
+    passwordHash: string,
+  ): Promise<UserDoc | null> => {
+    return User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          password: passwordHash,
         },
       },
       { new: true },
