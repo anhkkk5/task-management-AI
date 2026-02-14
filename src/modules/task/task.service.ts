@@ -1,6 +1,11 @@
 import { Types } from "mongoose";
 import { taskRepository } from "./task.repository";
-import { CreateTaskDto, TaskPriority, TaskStatus } from "./task.dto";
+import {
+  CreateTaskDto,
+  TaskPriority,
+  TaskStatus,
+  UpdateTaskDto,
+} from "./task.dto";
 
 export type PublicTask = {
   id: string;
@@ -63,6 +68,30 @@ export const taskService = {
       throw new Error("TASK_NOT_FOUND");
     }
     return toPublicTask(doc);
+  },
+
+  update: async (taskId: string, dto: UpdateTaskDto): Promise<PublicTask> => {
+    const title = dto.title !== undefined ? dto.title.trim() : undefined;
+    if (title !== undefined && title.length === 0) {
+      throw new Error("INVALID_TITLE");
+    }
+
+    const updated = await taskRepository.updateById(taskId, {
+      title,
+      description: dto.description,
+      status: dto.status,
+      priority: dto.priority,
+      deadline: dto.deadline,
+      tags: dto.tags,
+      reminderAt: dto.reminderAt,
+      aiBreakdown: dto.aiBreakdown,
+    });
+
+    if (!updated) {
+      throw new Error("TASK_NOT_FOUND");
+    }
+
+    return toPublicTask(updated);
   },
 
   list: async (

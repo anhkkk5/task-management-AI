@@ -23,6 +23,47 @@ export const taskRepository = {
     return Task.findById(taskId).exec();
   },
 
+  updateById: async (
+    taskId: string | Types.ObjectId,
+    update: {
+      title?: string;
+      description?: string;
+      status?: TaskStatus;
+      priority?: TaskPriority;
+      deadline?: Date;
+      tags?: string[];
+      reminderAt?: Date;
+      aiBreakdown?: { title: string; status?: TaskStatus }[];
+    },
+  ): Promise<TaskDoc | null> => {
+    return Task.findByIdAndUpdate(
+      taskId,
+      {
+        $set: {
+          ...(update.title !== undefined ? { title: update.title } : {}),
+          ...(update.description !== undefined
+            ? { description: update.description }
+            : {}),
+          ...(update.status !== undefined ? { status: update.status } : {}),
+          ...(update.priority !== undefined
+            ? { priority: update.priority }
+            : {}),
+          ...(update.deadline !== undefined
+            ? { deadline: update.deadline }
+            : {}),
+          ...(update.tags !== undefined ? { tags: update.tags } : {}),
+          ...(update.reminderAt !== undefined
+            ? { reminderAt: update.reminderAt }
+            : {}),
+          ...(update.aiBreakdown !== undefined
+            ? { aiBreakdown: update.aiBreakdown }
+            : {}),
+        },
+      },
+      { new: true },
+    ).exec();
+  },
+
   listByUser: async (params: {
     userId: string | Types.ObjectId;
     status?: TaskStatus;

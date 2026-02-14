@@ -144,3 +144,64 @@ taskById:
           application/json:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+  patch:
+    tags:
+      - Task
+    summary: Cập nhật task
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              status:
+                type: string
+                enum: [todo, in_progress, completed, cancelled]
+              priority:
+                type: string
+                enum: [low, medium, high, urgent]
+              deadline:
+                type: string
+                format: date-time
+              tags:
+                type: array
+                items:
+                  type: string
+              reminderAt:
+                type: string
+                format: date-time
+    responses:
+      "200":
+        description: OK
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy task
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
