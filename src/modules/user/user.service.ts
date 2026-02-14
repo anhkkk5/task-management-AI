@@ -58,13 +58,73 @@ const toPublicUser = (u: {
   };
 };
 
+const userProfileCacheKey = (userId: string): string =>
+  `user:profile:${userId}`;
+
+const getProfileCacheTtlSeconds = (): number => {
+  const min = 600;
+  const max = 1800;
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+};
+
+const parseCachedPublicUser = (raw: string): PublicUser => {
+  const obj = JSON.parse(raw) as Omit<
+    PublicUser,
+    "dob" | "createdAt" | "updatedAt"
+  > & {
+    dob?: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+
+  return {
+    ...obj,
+    dob: obj.dob ? new Date(obj.dob) : undefined,
+    createdAt: new Date(obj.createdAt),
+    updatedAt: new Date(obj.updatedAt),
+  };
+};
+
+const invalidateUserProfileCache = async (userId: string): Promise<void> => {
+  try {
+    const redis = getRedis();
+    await redis.del(userProfileCacheKey(userId));
+  } catch (_err) {
+    return;
+  }
+};
+
 export const userService = {
   me: async (userId: string): Promise<PublicUser> => {
+    try {
+      const redis = getRedis();
+      const cached = await redis.get(userProfileCacheKey(userId));
+      if (cached) {
+        return parseCachedPublicUser(cached);
+      }
+    } catch (_err) {
+      // ignore cache errors
+    }
+
     const user = await userRepository.findById(userId);
     if (!user) {
       throw new Error("USER_NOT_FOUND");
     }
-    return toPublicUser(user);
+
+    const pub = toPublicUser(user);
+    try {
+      const redis = getRedis();
+      await redis.set(
+        userProfileCacheKey(userId),
+        JSON.stringify(pub),
+        "EX",
+        getProfileCacheTtlSeconds(),
+      );
+    } catch (_err) {
+      // ignore cache errors
+    }
+
+    return pub;
   },
 
   updateProfile: async (
@@ -95,6 +155,7 @@ export const userService = {
       throw new Error("USER_NOT_FOUND");
     }
 
+    await invalidateUserProfileCache(userId);
     return toPublicUser(updated);
   },
 
@@ -106,6 +167,8 @@ export const userService = {
     if (!updated) {
       throw new Error("USER_NOT_FOUND");
     }
+
+    await invalidateUserProfileCache(userId);
     return toPublicUser(updated);
   },
 
@@ -241,6 +304,8 @@ export const userService = {
     if (keys.length) {
       await redis.del(...keys);
     }
+
+    await invalidateUserProfileCache(userId);
 
     return { message: "Đổi mật khẩu thành công" };
   },
