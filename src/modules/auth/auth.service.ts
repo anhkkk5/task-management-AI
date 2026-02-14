@@ -1,8 +1,10 @@
 import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { authRepository } from "./auth.repository";
 import {
   LoginDto,
+  RefreshTokenDto,
   RegisterDto,
   SendOtpDto,
   UpdateProfileDto,
@@ -11,6 +13,7 @@ import {
 import { UserRole } from "./auth.model";
 import { otpService } from "./otp.service";
 import { emailService } from "./email.service";
+import { getRedis } from "../../services/redis.service";
 
 type PublicUser = {
   id: string;
@@ -30,7 +33,13 @@ type RegisterResult = {
 
 type LoginResult = {
   accessToken: string;
+  refreshToken: string;
   user: PublicUser;
+};
+
+type RefreshTokenResult = {
+  accessToken: string;
+  refreshToken: string;
 };
 
 type VerifyOtpResult = {
@@ -52,6 +61,44 @@ const signAccessToken = (payload: {
     .JWT_ACCESS_EXPIRES_IN ?? "1h") as SignOptions["expiresIn"];
 
   return jwt.sign(payload, secret, { expiresIn });
+};
+
+const getRefreshSecret = (): Secret => {
+  const rawSecret =
+    process.env.JWT_REFRESH_SECRET ??
+    process.env.JWT_ACCESS_SECRET ??
+    process.env.JWT_SECRET;
+  if (!rawSecret) {
+    throw new Error("Missing env JWT_REFRESH_SECRET");
+  }
+  return rawSecret;
+};
+
+const getRefreshExpiresIn = (): SignOptions["expiresIn"] => {
+  return (process.env.JWT_REFRESH_EXPIRES_IN ??
+    "1d") as SignOptions["expiresIn"];
+};
+
+const getRefreshTtlSeconds = (): number => {
+  const env = process.env.JWT_REFRESH_TTL_SECONDS;
+  if (!env) return 60 * 60 * 24;
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? n : 60 * 60 * 24;
+};
+
+const signRefreshToken = (payload: {
+  userId: string;
+  email: string;
+  role: UserRole;
+  jti: string;
+}): string => {
+  return jwt.sign(payload, getRefreshSecret(), {
+    expiresIn: getRefreshExpiresIn(),
+  });
+};
+
+const getRefreshKey = (jti: string): string => {
+  return `refresh:${jti}`;
 };
 
 const toPublicUser = (u: {
@@ -231,10 +278,89 @@ export const authService = {
       role: user.role,
     });
 
+    const jti = randomUUID();
+    const refreshToken = signRefreshToken({
+      userId: String(user._id),
+      email: user.email,
+      role: user.role,
+      jti,
+    });
+
+    const redis = getRedis();
+    await redis.set(
+      getRefreshKey(jti),
+      String(user._id),
+      "EX",
+      getRefreshTtlSeconds(),
+    );
+
     return {
       accessToken,
+      refreshToken,
       user: toPublicUser(user),
     };
+  },
+
+  refreshToken: async (dto: RefreshTokenDto): Promise<RefreshTokenResult> => {
+    const token = dto.refreshToken?.trim();
+    if (!token) {
+      throw new Error("INVALID_INPUT");
+    }
+
+    type RefreshPayload = {
+      userId: string;
+      email: string;
+      role: UserRole;
+      jti: string;
+    };
+
+    let payload: RefreshPayload;
+    try {
+      payload = jwt.verify(token, getRefreshSecret()) as RefreshPayload;
+    } catch (_err) {
+      throw new Error("REFRESH_TOKEN_INVALID");
+    }
+
+    if (!payload?.userId || !payload.email || !payload.role || !payload.jti) {
+      throw new Error("REFRESH_TOKEN_INVALID");
+    }
+
+    const redis = getRedis();
+    const key = getRefreshKey(payload.jti);
+    const storedUserId = await redis.get(key);
+    if (!storedUserId || storedUserId !== payload.userId) {
+      throw new Error("REFRESH_TOKEN_REVOKED");
+    }
+
+    await redis.del(key);
+
+    const user = await authRepository.findById(payload.userId);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const accessToken = signAccessToken({
+      userId: String(user._id),
+      email: user.email,
+      role: user.role,
+    });
+
+    const newJti = randomUUID();
+    const refreshToken = signRefreshToken({
+      userId: String(user._id),
+      email: user.email,
+      role: user.role,
+      jti: newJti,
+    });
+
+    await redis.set(
+      getRefreshKey(newJti),
+      String(user._id),
+      "EX",
+      getRefreshTtlSeconds(),
+    );
+
+    return { accessToken, refreshToken };
   },
 
   updateProfile: async (

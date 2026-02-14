@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   login,
   me,
+  refreshToken,
   register,
   resendOtp,
   sendOtp,
@@ -17,6 +18,7 @@ authRouter.post("/send-otp", sendOtp);
 authRouter.post("/resend-otp", resendOtp);
 authRouter.post("/verify-otp", verifyOtp);
 authRouter.post("/login", login);
+authRouter.post("/refresh-token", refreshToken);
 authRouter.get("/me", authMiddleware, me);
 authRouter.patch("/update-profile", authMiddleware, updateProfile);
 

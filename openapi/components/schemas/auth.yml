@@ -15,6 +15,14 @@ RegisterRequest:
     - password
     - name
 
+RefreshTokenRequest:
+  type: object
+  properties:
+    refreshToken:
+      type: string
+  required:
+    - refreshToken
+
 SendOtpRequest:
   type: object
   properties:
@@ -100,11 +108,25 @@ AuthResponse:
   properties:
     accessToken:
       type: string
+    refreshToken:
+      type: string
     user:
       $ref: "./user.yml"
   required:
     - accessToken
+    - refreshToken
     - user
+
+RefreshTokenResponse:
+  type: object
+  properties:
+    accessToken:
+      type: string
+    refreshToken:
+      type: string
+  required:
+    - accessToken
+    - refreshToken
 
 MeResponse:
   allOf:

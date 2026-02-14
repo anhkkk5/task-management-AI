@@ -159,6 +159,52 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
       res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
       return;
     }
+    if (message === "Missing env JWT_REFRESH_SECRET") {
+      res.status(500).json({ message: "Thiếu cấu hình JWT_REFRESH_SECRET" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const refreshToken = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const result = await authService.refreshToken({
+      refreshToken: String(_req.body?.refreshToken ?? ""),
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "INVALID_INPUT") {
+      res.status(400).json({ message: "Thiếu refresh token" });
+      return;
+    }
+    if (message === "REFRESH_TOKEN_INVALID") {
+      res.status(401).json({ message: "Refresh token không hợp lệ" });
+      return;
+    }
+    if (message === "REFRESH_TOKEN_REVOKED") {
+      res.status(401).json({ message: "Refresh token đã bị thu hồi" });
+      return;
+    }
+    if (message === "USER_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return;
+    }
+    if (message === "Missing env JWT_ACCESS_SECRET") {
+      res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
+      return;
+    }
+    if (message === "Missing env JWT_REFRESH_SECRET") {
+      res.status(500).json({ message: "Thiếu cấu hình JWT_REFRESH_SECRET" });
+      return;
+    }
 
     res.status(500).json({ message: "Lỗi hệ thống" });
   }

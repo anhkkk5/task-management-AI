@@ -22,3 +22,7 @@ export type VerifyOtpDto = {
   email: string;
   otp: string;
 };
+
+export type RefreshTokenDto = {
+  refreshToken: string;
+};

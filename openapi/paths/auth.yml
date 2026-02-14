@@ -159,6 +159,43 @@ authLogin:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
 
+authRefreshToken:
+  post:
+    tags:
+      - Auth
+    summary: Làm mới access token bằng refresh token
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/RefreshTokenRequest"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/RefreshTokenResponse"
+      "400":
+        description: Thiếu refresh token
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Refresh token không hợp lệ / đã bị thu hồi
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
 authMe:
   get:
     tags:

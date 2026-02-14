@@ -20,6 +20,8 @@ paths:
     $ref: "./paths/auth.yml#/authVerifyOtp"
   /auth/login:
     $ref: "./paths/auth.yml#/authLogin"
+  /auth/refresh-token:
+    $ref: "./paths/auth.yml#/authRefreshToken"
   /auth/me:
     $ref: "./paths/auth.yml#/authMe"
   /auth/update-profile:
@@ -43,6 +45,10 @@ components:
       $ref: "./components/schemas/auth.yml#/UpdateProfileRequest"
     AuthResponse:
       $ref: "./components/schemas/auth.yml#/AuthResponse"
+    RefreshTokenRequest:
+      $ref: "./components/schemas/auth.yml#/RefreshTokenRequest"
+    RefreshTokenResponse:
+      $ref: "./components/schemas/auth.yml#/RefreshTokenResponse"
     MeResponse:
       $ref: "./components/schemas/auth.yml#/MeResponse"
     ErrorResponse:
