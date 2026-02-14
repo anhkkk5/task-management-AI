@@ -23,6 +23,13 @@ export const taskRepository = {
     return Task.findById(taskId).exec();
   },
 
+  findByIdForUser: async (params: {
+    taskId: string | Types.ObjectId;
+    userId: string | Types.ObjectId;
+  }): Promise<TaskDoc | null> => {
+    return Task.findOne({ _id: params.taskId, userId: params.userId }).exec();
+  },
+
   updateById: async (
     taskId: string | Types.ObjectId,
     update: {
@@ -64,10 +71,64 @@ export const taskRepository = {
     ).exec();
   },
 
+  updateByIdForUser: async (
+    params: {
+      taskId: string | Types.ObjectId;
+      userId: string | Types.ObjectId;
+    },
+    update: {
+      title?: string;
+      description?: string;
+      status?: TaskStatus;
+      priority?: TaskPriority;
+      deadline?: Date;
+      tags?: string[];
+      reminderAt?: Date;
+      aiBreakdown?: { title: string; status?: TaskStatus }[];
+    },
+  ): Promise<TaskDoc | null> => {
+    return Task.findOneAndUpdate(
+      { _id: params.taskId, userId: params.userId },
+      {
+        $set: {
+          ...(update.title !== undefined ? { title: update.title } : {}),
+          ...(update.description !== undefined
+            ? { description: update.description }
+            : {}),
+          ...(update.status !== undefined ? { status: update.status } : {}),
+          ...(update.priority !== undefined
+            ? { priority: update.priority }
+            : {}),
+          ...(update.deadline !== undefined
+            ? { deadline: update.deadline }
+            : {}),
+          ...(update.tags !== undefined ? { tags: update.tags } : {}),
+          ...(update.reminderAt !== undefined
+            ? { reminderAt: update.reminderAt }
+            : {}),
+          ...(update.aiBreakdown !== undefined
+            ? { aiBreakdown: update.aiBreakdown }
+            : {}),
+        },
+      },
+      { new: true },
+    ).exec();
+  },
+
   deleteById: async (
     taskId: string | Types.ObjectId,
   ): Promise<TaskDoc | null> => {
     return Task.findByIdAndDelete(taskId).exec();
+  },
+
+  deleteByIdForUser: async (params: {
+    taskId: string | Types.ObjectId;
+    userId: string | Types.ObjectId;
+  }): Promise<TaskDoc | null> => {
+    return Task.findOneAndDelete({
+      _id: params.taskId,
+      userId: params.userId,
+    }).exec();
   },
 
   listByUser: async (params: {

@@ -105,13 +105,19 @@ export const getTaskById = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const task = await taskService.getById(String(_req.params.id));
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const task = await taskService.getById(userId, String(_req.params.id));
     res.status(200).json({ task });
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
 
-    if (message === "TASK_NOT_FOUND") {
-      res.status(404).json({ message: "Không tìm thấy task" });
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền truy cập task này" });
       return;
     }
 
@@ -236,7 +242,7 @@ export const updateTask = async (
       return;
     }
 
-    const task = await taskService.update(String(_req.params.id), {
+    const task = await taskService.update(userId, String(_req.params.id), {
       title:
         _req.body?.title !== undefined ? String(_req.body.title) : undefined,
       description:
@@ -258,8 +264,9 @@ export const updateTask = async (
       res.status(400).json({ message: "Title không hợp lệ" });
       return;
     }
-    if (message === "TASK_NOT_FOUND") {
-      res.status(404).json({ message: "Không tìm thấy task" });
+
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền cập nhật task này" });
       return;
     }
 
@@ -278,13 +285,13 @@ export const deleteTask = async (
       return;
     }
 
-    const result = await taskService.delete(String(_req.params.id));
+    const result = await taskService.delete(userId, String(_req.params.id));
     res.status(200).json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
 
-    if (message === "TASK_NOT_FOUND") {
-      res.status(404).json({ message: "Không tìm thấy task" });
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền xóa task này" });
       return;
     }
 

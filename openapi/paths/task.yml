@@ -138,30 +138,8 @@ taskById:
           application/json:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
-      "404":
-        description: Không tìm thấy task
-        content:
-          application/json:
-            schema:
-              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
-
-  delete:
-    tags:
-      - Task
-    summary: Xóa task
-    security:
-      - bearerAuth: []
-    parameters:
-      - in: path
-        name: id
-        required: true
-        schema:
-          type: string
-    responses:
-      "200":
-        description: OK
-      "401":
-        description: Chưa đăng nhập / token không hợp lệ
+      "403":
+        description: Không có quyền truy cập
         content:
           application/json:
             schema:
@@ -223,6 +201,46 @@ taskById:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
       "401":
         description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "403":
+        description: Không có quyền cập nhật
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy task
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+  delete:
+    tags:
+      - Task
+    summary: Xóa task
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: OK
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "403":
+        description: Không có quyền xóa
         content:
           application/json:
             schema:

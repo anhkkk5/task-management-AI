@@ -62,42 +62,61 @@ export const taskService = {
     return toPublicTask(doc);
   },
 
-  getById: async (taskId: string): Promise<PublicTask> => {
-    const doc = await taskRepository.findById(taskId);
+  getById: async (userId: string, taskId: string): Promise<PublicTask> => {
+    const doc = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
     if (!doc) {
-      throw new Error("TASK_NOT_FOUND");
+      throw new Error("TASK_FORBIDDEN");
     }
     return toPublicTask(doc);
   },
 
-  update: async (taskId: string, dto: UpdateTaskDto): Promise<PublicTask> => {
+  update: async (
+    userId: string,
+    taskId: string,
+    dto: UpdateTaskDto,
+  ): Promise<PublicTask> => {
     const title = dto.title !== undefined ? dto.title.trim() : undefined;
     if (title !== undefined && title.length === 0) {
       throw new Error("INVALID_TITLE");
     }
 
-    const updated = await taskRepository.updateById(taskId, {
-      title,
-      description: dto.description,
-      status: dto.status,
-      priority: dto.priority,
-      deadline: dto.deadline,
-      tags: dto.tags,
-      reminderAt: dto.reminderAt,
-      aiBreakdown: dto.aiBreakdown,
-    });
+    const updated = await taskRepository.updateByIdForUser(
+      {
+        taskId,
+        userId: new Types.ObjectId(userId),
+      },
+      {
+        title,
+        description: dto.description,
+        status: dto.status,
+        priority: dto.priority,
+        deadline: dto.deadline,
+        tags: dto.tags,
+        reminderAt: dto.reminderAt,
+        aiBreakdown: dto.aiBreakdown,
+      },
+    );
 
     if (!updated) {
-      throw new Error("TASK_NOT_FOUND");
+      throw new Error("TASK_FORBIDDEN");
     }
 
     return toPublicTask(updated);
   },
 
-  delete: async (taskId: string): Promise<{ message: string }> => {
-    const deleted = await taskRepository.deleteById(taskId);
+  delete: async (
+    userId: string,
+    taskId: string,
+  ): Promise<{ message: string }> => {
+    const deleted = await taskRepository.deleteByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
     if (!deleted) {
-      throw new Error("TASK_NOT_FOUND");
+      throw new Error("TASK_FORBIDDEN");
     }
     return { message: "Xóa task thành công" };
   },
