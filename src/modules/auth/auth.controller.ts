@@ -185,6 +185,13 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
     const result = await authService.login({
       email: String(_req.body?.email ?? ""),
       password: String(_req.body?.password ?? ""),
+      ip: String(
+        (Array.isArray(_req.headers["x-forwarded-for"])
+          ? _req.headers["x-forwarded-for"][0]
+          : _req.headers["x-forwarded-for"]) ??
+          _req.ip ??
+          "",
+      ),
     });
 
     res.cookie("refreshToken", result.refreshToken, {
@@ -203,6 +210,12 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
 
     if (message === "INVALID_CREDENTIALS") {
       res.status(401).json({ message: "Sai email hoặc mật khẩu" });
+      return;
+    }
+    if (message === "TOO_MANY_ATTEMPTS") {
+      res
+        .status(429)
+        .json({ message: "Bạn đã thử quá nhiều lần, vui lòng thử lại sau" });
       return;
     }
     if (message === "EMAIL_NOT_VERIFIED") {

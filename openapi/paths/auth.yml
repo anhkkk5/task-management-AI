@@ -158,6 +158,12 @@ authLogin:
           application/json:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "429":
+        description: Thử quá nhiều lần
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
 
 authRefreshToken:
   post:

@@ -109,6 +109,26 @@ const getRefreshUserPrefix = (userId: string): string => {
   return `refresh:${userId}:`;
 };
 
+const getLoginRateLimitMaxAttempts = (): number => {
+  const env = process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS;
+  if (!env) return 5;
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 5;
+};
+
+const getLoginRateLimitWindowSeconds = (): number => {
+  const env = process.env.LOGIN_RATE_LIMIT_WINDOW_SECONDS;
+  if (!env) return 10 * 60;
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 10 * 60;
+};
+
+const getLoginRateLimitKey = (ip: string, email: string): string => {
+  const safeIp = ip || "unknown";
+  const safeEmail = email || "unknown";
+  return `login_rl:${safeIp}:${safeEmail}`;
+};
+
 const toPublicUser = (u: {
   _id: unknown;
   email: string;
@@ -259,15 +279,26 @@ export const authService = {
     return { message: "Xác thực OTP thành công" };
   },
 
-  login: async (dto: LoginDto): Promise<LoginResult> => {
+  login: async (dto: LoginDto & { ip?: string }): Promise<LoginResult> => {
     const email = dto.email?.trim().toLowerCase();
     const password = dto.password;
+    const ip = dto.ip?.trim() || "unknown";
 
     if (!email || !password) {
       throw new Error("INVALID_INPUT");
     }
     if (!isValidEmail(email)) {
       throw new Error("INVALID_EMAIL");
+    }
+
+    const redis = getRedis();
+    const rlKey = getLoginRateLimitKey(ip, email);
+    const attempts = await redis.incr(rlKey);
+    if (attempts === 1) {
+      await redis.expire(rlKey, getLoginRateLimitWindowSeconds());
+    }
+    if (attempts > getLoginRateLimitMaxAttempts()) {
+      throw new Error("TOO_MANY_ATTEMPTS");
     }
 
     const user = await authRepository.findByEmailWithPassword(email);
@@ -284,6 +315,8 @@ export const authService = {
       throw new Error("INVALID_CREDENTIALS");
     }
 
+    await redis.del(rlKey);
+
     const accessToken = signAccessToken({
       userId: String(user._id),
       email: user.email,
@@ -298,7 +331,6 @@ export const authService = {
       jti,
     });
 
-    const redis = getRedis();
     await redis.set(
       getRefreshKeyByUser(String(user._id), jti),
       "1",
