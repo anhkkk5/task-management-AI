@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import authRouter from "./modules/auth/auth.routes";
 import userRouter from "./modules/user/user.routes";
 import taskRouter from "./modules/task/task.routes";
+import aiRouter from "./modules/ai/ai.routes";
 
 export const createApp = (): Express => {
   const app: Express = express();
@@ -25,6 +26,7 @@ export const createApp = (): Express => {
   app.use("/auth", authRouter);
   app.use("/users", userRouter);
   app.use("/tasks", taskRouter);
+  app.use("/ai", aiRouter);
 
   return app;
 };
