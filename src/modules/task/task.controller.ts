@@ -271,5 +271,23 @@ export const deleteTask = async (
   _req: Request,
   res: Response,
 ): Promise<void> => {
-  res.status(501).json({ message: "Not implemented" });
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const result = await taskService.delete(String(_req.params.id));
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "TASK_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy task" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
 };

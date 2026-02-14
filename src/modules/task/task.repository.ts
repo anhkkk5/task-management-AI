@@ -64,6 +64,12 @@ export const taskRepository = {
     ).exec();
   },
 
+  deleteById: async (
+    taskId: string | Types.ObjectId,
+  ): Promise<TaskDoc | null> => {
+    return Task.findByIdAndDelete(taskId).exec();
+  },
+
   listByUser: async (params: {
     userId: string | Types.ObjectId;
     status?: TaskStatus;

@@ -94,6 +94,14 @@ export const taskService = {
     return toPublicTask(updated);
   },
 
+  delete: async (taskId: string): Promise<{ message: string }> => {
+    const deleted = await taskRepository.deleteById(taskId);
+    if (!deleted) {
+      throw new Error("TASK_NOT_FOUND");
+    }
+    return { message: "Xóa task thành công" };
+  },
+
   list: async (
     userId: string,
     params: {
