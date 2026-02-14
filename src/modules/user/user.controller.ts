@@ -25,6 +25,31 @@ export const me = async (_req: Request, res: Response): Promise<void> => {
   }
 };
 
+export const sendChangePasswordOtp = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const result = await userService.sendChangePasswordOtp(userId);
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "USER_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
 export const updateProfile = async (
   _req: Request,
   res: Response,
@@ -135,8 +160,8 @@ export const changePassword = async (
       return;
     }
 
-    const result = await userService.changePassword(userId, {
-      oldPassword: String(_req.body?.oldPassword ?? ""),
+    const result = await userService.verifyChangePasswordOtp(userId, {
+      otp: String(_req.body?.otp ?? "").trim(),
       newPassword: String(_req.body?.newPassword ?? ""),
     });
 
@@ -146,15 +171,19 @@ export const changePassword = async (
     const message = err instanceof Error ? err.message : "UNKNOWN";
 
     if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu mật khẩu cũ hoặc mật khẩu mới" });
+      res.status(400).json({ message: "Thiếu OTP hoặc mật khẩu mới" });
+      return;
+    }
+    if (message === "INVALID_OTP") {
+      res.status(400).json({ message: "OTP không hợp lệ" });
       return;
     }
     if (message === "INVALID_PASSWORD") {
       res.status(400).json({ message: "Mật khẩu mới phải ít nhất 6 ký tự" });
       return;
     }
-    if (message === "OLD_PASSWORD_INCORRECT") {
-      res.status(401).json({ message: "Mật khẩu cũ không đúng" });
+    if (message === "OTP_INVALID_OR_EXPIRED") {
+      res.status(401).json({ message: "OTP không đúng hoặc đã hết hạn" });
       return;
     }
     if (message === "USER_NOT_FOUND") {

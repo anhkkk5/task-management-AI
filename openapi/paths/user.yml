@@ -75,6 +75,40 @@ userUpdateProfile:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
 
+userSendChangePasswordOtp:
+  post:
+    tags:
+      - User
+    summary: Gửi OTP đổi mật khẩu
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Đã gửi OTP
+                ttlSeconds:
+                  type: number
+                  example: 300
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
 userUploadAvatar:
   patch:
     tags:
@@ -135,12 +169,13 @@ userChangePassword:
           schema:
             type: object
             properties:
-              oldPassword:
+              otp:
                 type: string
+                example: "123456"
               newPassword:
                 type: string
             required:
-              - oldPassword
+              - otp
               - newPassword
     responses:
       "200":
@@ -160,7 +195,7 @@ userChangePassword:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
       "401":
-        description: Mật khẩu cũ sai / token không hợp lệ
+        description: OTP sai/hết hạn hoặc token không hợp lệ
         content:
           application/json:
             schema:

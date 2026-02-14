@@ -11,6 +11,8 @@ const OTP_TTL_SECONDS = 300;
 
 const otpKey = (email: string): string => `otp:${email}`;
 const pendingKey = (email: string): string => `pending_register:${email}`;
+const changePasswordOtpKey = (email: string): string =>
+  `otp:change_password:${email}`;
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
 
@@ -32,6 +34,33 @@ export const otpService = {
     return redis.get(key);
   },
 
+  saveChangePasswordOtp: async (email: string, otp: string): Promise<void> => {
+    const redis = getRedis();
+    const key = changePasswordOtpKey(normalizeEmail(email));
+    await redis.set(key, otp, "EX", OTP_TTL_SECONDS);
+  },
+
+  getChangePasswordOtp: async (email: string): Promise<string | null> => {
+    const redis = getRedis();
+    const key = changePasswordOtpKey(normalizeEmail(email));
+    return redis.get(key);
+  },
+
+  deleteChangePasswordOtp: async (email: string): Promise<void> => {
+    const redis = getRedis();
+    const key = changePasswordOtpKey(normalizeEmail(email));
+    await redis.del(key);
+  },
+
+  verifyChangePasswordOtp: async (
+    email: string,
+    otp: string,
+  ): Promise<boolean> => {
+    const current = await otpService.getChangePasswordOtp(email);
+    if (!current) return false;
+    return current === otp;
+  },
+
   deleteOtp: async (email: string): Promise<void> => {
     const redis = getRedis();
     const key = otpKey(normalizeEmail(email));
@@ -42,10 +71,17 @@ export const otpService = {
     const redis = getRedis();
     const email = normalizeEmail(pending.email);
     const key = pendingKey(email);
-    await redis.set(key, JSON.stringify({ ...pending, email }), "EX", OTP_TTL_SECONDS);
+    await redis.set(
+      key,
+      JSON.stringify({ ...pending, email }),
+      "EX",
+      OTP_TTL_SECONDS,
+    );
   },
 
-  getPendingRegister: async (email: string): Promise<PendingRegister | null> => {
+  getPendingRegister: async (
+    email: string,
+  ): Promise<PendingRegister | null> => {
     const redis = getRedis();
     const key = pendingKey(normalizeEmail(email));
     const raw = await redis.get(key);

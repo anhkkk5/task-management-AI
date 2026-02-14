@@ -1,8 +1,14 @@
 import { UserRole } from "../auth/auth.model";
 import { userRepository } from "./user.repository";
 import bcrypt from "bcryptjs";
-import { ChangePasswordDto, UpdateUserProfileDto } from "./user.dto";
+import {
+  ChangePasswordDto,
+  UpdateUserProfileDto,
+  VerifyChangePasswordOtpDto,
+} from "./user.dto";
 import { getRedis } from "../../services/redis.service";
+import { otpService } from "../auth/otp.service";
+import { emailService } from "../auth/email.service";
 
 export type PublicUser = {
   id: string;
@@ -133,6 +139,85 @@ export const userService = {
     const hashed = await bcrypt.hash(newPassword, saltRounds);
 
     await userRepository.updatePassword(userId, hashed);
+
+    const redis = getRedis();
+    const prefix = `refresh:${userId}:`;
+    const keys: string[] = [];
+
+    let cursor = "0";
+    do {
+      const [next, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      if (Array.isArray(batch) && batch.length) {
+        keys.push(...batch);
+      }
+    } while (cursor !== "0");
+
+    if (keys.length) {
+      await redis.del(...keys);
+    }
+
+    return { message: "Đổi mật khẩu thành công" };
+  },
+
+  sendChangePasswordOtp: async (
+    userId: string,
+  ): Promise<{ message: string; ttlSeconds: number }> => {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const otp = otpService.generateOtp();
+    await otpService.saveChangePasswordOtp(user.email, otp);
+    await emailService.sendChangePasswordOtpEmail(user.email, otp);
+
+    return {
+      message: "Đã gửi OTP",
+      ttlSeconds: otpService.getOtpTtlSeconds(),
+    };
+  },
+
+  verifyChangePasswordOtp: async (
+    userId: string,
+    dto: VerifyChangePasswordOtpDto,
+  ): Promise<{ message: string }> => {
+    const otp = dto.otp?.trim();
+    const newPassword = dto.newPassword;
+
+    if (!otp || !newPassword) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (!/^\d{6}$/.test(otp)) {
+      throw new Error("INVALID_OTP");
+    }
+    if (newPassword.length < 6) {
+      throw new Error("INVALID_PASSWORD");
+    }
+
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const ok = await otpService.verifyChangePasswordOtp(user.email, otp);
+    if (!ok) {
+      throw new Error("OTP_INVALID_OR_EXPIRED");
+    }
+
+    const saltRounds = process.env.BCRYPT_SALT_ROUNDS
+      ? Number(process.env.BCRYPT_SALT_ROUNDS)
+      : 10;
+    const hashed = await bcrypt.hash(newPassword, saltRounds);
+    await userRepository.updatePassword(userId, hashed);
+
+    await otpService.deleteChangePasswordOtp(user.email);
 
     const redis = getRedis();
     const prefix = `refresh:${userId}:`;

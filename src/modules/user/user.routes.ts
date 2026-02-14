@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   changePassword,
+  sendChangePasswordOtp,
   getById,
   me,
   updateProfile,
@@ -20,6 +21,11 @@ userRouter.patch(
   uploadAvatar,
 );
 userRouter.patch("/change-password", authMiddleware, changePassword);
+userRouter.post(
+  "/change-password/send-otp",
+  authMiddleware,
+  sendChangePasswordOtp,
+);
 userRouter.get("/:id", authMiddleware, getById);
 
 export default userRouter;

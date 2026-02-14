@@ -40,6 +40,8 @@ paths:
     $ref: "./paths/user.yml#/userUploadAvatar"
   /users/change-password:
     $ref: "./paths/user.yml#/userChangePassword"
+  /users/change-password/send-otp:
+    $ref: "./paths/user.yml#/userSendChangePasswordOtp"
   /users/{id}:
     $ref: "./paths/user.yml#/userGetById"
   /tasks:
