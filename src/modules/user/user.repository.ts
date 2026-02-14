@@ -36,4 +36,19 @@ export const userRepository = {
       { new: true },
     ).exec();
   },
+
+  updateAvatar: async (
+    userId: string | Types.ObjectId,
+    avatar: string,
+  ): Promise<UserDoc | null> => {
+    return User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          avatar,
+        },
+      },
+      { new: true },
+    ).exec();
+  },
 };

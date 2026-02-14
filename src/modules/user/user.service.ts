@@ -89,4 +89,15 @@ export const userService = {
 
     return toPublicUser(updated);
   },
+
+  uploadAvatar: async (
+    userId: string,
+    avatarUrl: string,
+  ): Promise<PublicUser> => {
+    const updated = await userRepository.updateAvatar(userId, avatarUrl);
+    if (!updated) {
+      throw new Error("USER_NOT_FOUND");
+    }
+    return toPublicUser(updated);
+  },
 };

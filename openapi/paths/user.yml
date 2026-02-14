@@ -82,9 +82,40 @@ userUploadAvatar:
     summary: Upload avatar
     security:
       - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              avatar:
+                type: string
+                format: binary
     responses:
-      "501":
-        description: Not implemented
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user:
+                  $ref: "../openapi.yml#/components/schemas/User"
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
         content:
           application/json:
             schema:

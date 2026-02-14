@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { userService } from "./user.service";
+import { uploadImageBuffer } from "../../services/cloudinary.service";
 
 export const me = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -79,7 +80,47 @@ export const uploadAvatar = async (
   _req: Request,
   res: Response,
 ): Promise<void> => {
-  res.status(501).json({ message: "Not implemented" });
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const file = (_req as any).file as
+      | { buffer: Buffer; mimetype?: string }
+      | undefined;
+
+    if (!file?.buffer) {
+      res.status(400).json({ message: "Thiếu file avatar" });
+      return;
+    }
+    if (file.mimetype && !file.mimetype.startsWith("image/")) {
+      res.status(400).json({ message: "File không phải hình ảnh" });
+      return;
+    }
+
+    const uploaded = await uploadImageBuffer(file.buffer, {
+      folder: "task-management-ai/avatars",
+      publicId: `user_${userId}_${Date.now()}`,
+    });
+
+    const user = await userService.uploadAvatar(userId, uploaded.url);
+    res.status(200).json({ user });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "Missing env CLOUDINARY") {
+      res.status(500).json({ message: "Thiếu cấu hình Cloudinary" });
+      return;
+    }
+    if (message === "USER_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
 };
 
 export const changePassword = async (
