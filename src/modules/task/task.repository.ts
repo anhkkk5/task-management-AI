@@ -135,6 +135,7 @@ export const taskRepository = {
     userId: string | Types.ObjectId;
     status?: TaskStatus;
     priority?: TaskPriority;
+    title?: RegExp;
     deadlineFrom?: Date;
     deadlineTo?: Date;
     page: number;
@@ -149,6 +150,9 @@ export const taskRepository = {
     }
     if (params.priority) {
       filter.priority = params.priority;
+    }
+    if (params.title) {
+      filter.title = params.title;
     }
     if (params.deadlineFrom || params.deadlineTo) {
       filter.deadline = {

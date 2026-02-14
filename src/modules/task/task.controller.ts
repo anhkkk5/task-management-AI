@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { taskService } from "./task.service";
 import { TaskPriority, TaskStatus } from "./task.dto";
+import searchHelper from "../../common/utils/search-helper";
+import paginationHelper from "../../common/utils/pagination-helper";
 
 const parsePriority = (value: unknown): TaskPriority | undefined => {
   if (value === undefined || value === null) return undefined;
@@ -140,9 +142,19 @@ export const listTasks = async (
     const priority = parsePriority((_req.query as any)?.priority);
     const deadlineQuery = (_req.query as any)?.deadline;
 
-    const page = parsePositiveInt((_req.query as any)?.page, 1);
-    const limitRaw = parsePositiveInt((_req.query as any)?.limit, 20);
-    const limit = Math.min(limitRaw, 100);
+    const search = searchHelper(_req.query as any);
+
+    const initialPagination = paginationHelper(
+      {
+        currentPage: 1,
+        limitItem: 20,
+      },
+      _req.query as any,
+      0,
+    );
+
+    const page = initialPagination.currentPage;
+    const limit = Math.min(initialPagination.limitItem, 100);
 
     const deadlineFromTo =
       deadlineQuery && String(deadlineQuery) === "today"
@@ -152,6 +164,8 @@ export const listTasks = async (
     const result = await taskService.list(userId, {
       status,
       priority,
+      title: search.regex,
+      keyword: search.keyword,
       deadlineFrom: deadlineFromTo?.from,
       deadlineTo: deadlineFromTo?.to,
       page,

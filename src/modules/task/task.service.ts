@@ -54,6 +54,7 @@ const tasksListCacheKey = (params: {
   userId: string;
   status?: TaskStatus;
   priority?: TaskPriority;
+  keyword?: string;
   deadlineFrom?: Date;
   deadlineTo?: Date;
   page: number;
@@ -63,6 +64,7 @@ const tasksListCacheKey = (params: {
     `tasks:user:${params.userId}`,
     `status=${params.status ?? ""}`,
     `priority=${params.priority ?? ""}`,
+    `keyword=${params.keyword ?? ""}`,
     `deadlineFrom=${params.deadlineFrom ? params.deadlineFrom.toISOString() : ""}`,
     `deadlineTo=${params.deadlineTo ? params.deadlineTo.toISOString() : ""}`,
     `page=${params.page}`,
@@ -229,6 +231,8 @@ export const taskService = {
     params: {
       status?: TaskStatus;
       priority?: TaskPriority;
+      title?: RegExp;
+      keyword?: string;
       deadlineFrom?: Date;
       deadlineTo?: Date;
       page: number;
@@ -244,6 +248,7 @@ export const taskService = {
       userId,
       status: params.status,
       priority: params.priority,
+      keyword: params.keyword,
       deadlineFrom: params.deadlineFrom,
       deadlineTo: params.deadlineTo,
       page: params.page,
@@ -264,6 +269,7 @@ export const taskService = {
       userId: new Types.ObjectId(userId),
       status: params.status,
       priority: params.priority,
+      title: params.title,
       deadlineFrom: params.deadlineFrom,
       deadlineTo: params.deadlineTo,
       page: params.page,
