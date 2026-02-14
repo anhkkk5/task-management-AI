@@ -1,6 +1,102 @@
 import { Request, Response } from "express";
 import { authService } from "./auth.service";
 import { authRepository } from "./auth.repository";
+import { handleAuthError } from "../../common/errors/auth.error-handler";
+import {
+  clearRefreshCookie,
+  setRefreshCookie,
+} from "../../common/cookies/refresh-cookie";
+import { extractRefreshToken } from "../../common/utils/extract-refresh-token";
+
+const cookieInput = () => {
+  return {
+    maxAgeMs: authService.getRefreshCookieMaxAgeMs(),
+    nodeEnv: process.env.NODE_ENV,
+  };
+};
+
+const registerErrorMap = {
+  EMAIL_EXISTS: { status: 409, message: "Email đã tồn tại" },
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  INVALID_PASSWORD: { status: 400, message: "Mật khẩu phải ít nhất 6 ký tự" },
+  INVALID_INPUT: { status: 400, message: "Thiếu thông tin đăng ký" },
+  "Missing env EMAIL_FROM": {
+    status: 500,
+    message: "Thiếu cấu hình EMAIL_FROM",
+  },
+} as const;
+
+const sendOtpErrorMap = {
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  INVALID_INPUT: { status: 400, message: "Thiếu email" },
+  PENDING_NOT_FOUND: {
+    status: 404,
+    message: "Không có đăng ký đang chờ xác thực",
+  },
+  "Missing env EMAIL_FROM": {
+    status: 500,
+    message: "Thiếu cấu hình EMAIL_FROM",
+  },
+} as const;
+
+const verifyOtpErrorMap = {
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  INVALID_OTP: { status: 400, message: "OTP không hợp lệ" },
+  INVALID_INPUT: { status: 400, message: "Thiếu email hoặc otp" },
+  PENDING_NOT_FOUND: {
+    status: 404,
+    message: "Không có đăng ký đang chờ xác thực",
+  },
+  OTP_INVALID_OR_EXPIRED: { status: 400, message: "OTP sai hoặc đã hết hạn" },
+  EMAIL_EXISTS: { status: 409, message: "Email đã tồn tại" },
+} as const;
+
+const loginErrorMap = {
+  INVALID_CREDENTIALS: { status: 401, message: "Sai email hoặc mật khẩu" },
+  TOO_MANY_ATTEMPTS: {
+    status: 429,
+    message: "Bạn đã thử quá nhiều lần, vui lòng thử lại sau",
+  },
+  EMAIL_NOT_VERIFIED: { status: 403, message: "Email chưa được xác thực OTP" },
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  INVALID_INPUT: { status: 400, message: "Thiếu thông tin đăng nhập" },
+  "Missing env JWT_ACCESS_SECRET": {
+    status: 500,
+    message: "Thiếu cấu hình JWT_ACCESS_SECRET",
+  },
+  "Missing env JWT_REFRESH_SECRET": {
+    status: 500,
+    message: "Thiếu cấu hình JWT_REFRESH_SECRET",
+  },
+} as const;
+
+const refreshTokenErrorMap = {
+  INVALID_INPUT: { status: 400, message: "Thiếu refresh token" },
+  REFRESH_TOKEN_INVALID: { status: 401, message: "Refresh token không hợp lệ" },
+  REFRESH_TOKEN_REVOKED: {
+    status: 401,
+    message: "Refresh token đã bị thu hồi",
+  },
+  USER_NOT_FOUND: { status: 404, message: "Không tìm thấy người dùng" },
+  "Missing env JWT_ACCESS_SECRET": {
+    status: 500,
+    message: "Thiếu cấu hình JWT_ACCESS_SECRET",
+  },
+  "Missing env JWT_REFRESH_SECRET": {
+    status: 500,
+    message: "Thiếu cấu hình JWT_REFRESH_SECRET",
+  },
+} as const;
+
+const logoutErrorMap = {
+  INVALID_INPUT: { status: 400, message: "Thiếu refresh token" },
+  REFRESH_TOKEN_INVALID: { status: 401, message: "Refresh token không hợp lệ" },
+} as const;
+
+const updateProfileErrorMap = {
+  INVALID_NAME: { status: 400, message: "Tên không hợp lệ" },
+  USER_NOT_FOUND: { status: 404, message: "Không tìm thấy người dùng" },
+} as const;
 
 export const register = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -12,63 +108,19 @@ export const register = async (_req: Request, res: Response): Promise<void> => {
 
     res.status(201).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "EMAIL_EXISTS") {
-      res.status(409).json({ message: "Email đã tồn tại" });
-      return;
-    }
-    if (message === "INVALID_EMAIL") {
-      res.status(400).json({ message: "Email không hợp lệ" });
-      return;
-    }
-    if (message === "INVALID_PASSWORD") {
-      res.status(400).json({ message: "Mật khẩu phải ít nhất 6 ký tự" });
-      return;
-    }
-    if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu thông tin đăng ký" });
-      return;
-    }
-    if (message.includes("Missing env SMTP")) {
-      res.status(500).json({ message: "Thiếu cấu hình SMTP" });
-      return;
-    }
-    if (message === "Missing env EMAIL_FROM") {
-      res.status(500).json({ message: "Thiếu cấu hình EMAIL_FROM" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, registerErrorMap);
   }
 };
 
 export const logout = async (_req: Request, res: Response): Promise<void> => {
   try {
-    const cookieToken = String((_req as any).cookies?.refreshToken ?? "");
-    const bodyToken = String(_req.body?.refreshToken ?? "");
-    const token = cookieToken || bodyToken;
-
+    const token = extractRefreshToken(_req);
     await authService.logout({ refreshToken: token });
 
-    res.clearCookie("refreshToken", {
-      path: "/auth",
-    });
-
+    clearRefreshCookie(res);
     res.status(200).json({ message: "Đăng xuất thành công" });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu refresh token" });
-      return;
-    }
-    if (message === "REFRESH_TOKEN_INVALID") {
-      res.status(401).json({ message: "Refresh token không hợp lệ" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, logoutErrorMap);
   }
 };
 
@@ -103,30 +155,7 @@ export const sendOtp = async (_req: Request, res: Response): Promise<void> => {
 
     res.status(200).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "INVALID_EMAIL") {
-      res.status(400).json({ message: "Email không hợp lệ" });
-      return;
-    }
-    if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu email" });
-      return;
-    }
-    if (message === "PENDING_NOT_FOUND") {
-      res.status(404).json({ message: "Không có đăng ký đang chờ xác thực" });
-      return;
-    }
-    if (message.includes("Missing env SMTP")) {
-      res.status(500).json({ message: "Thiếu cấu hình SMTP" });
-      return;
-    }
-    if (message === "Missing env EMAIL_FROM") {
-      res.status(500).json({ message: "Thiếu cấu hình EMAIL_FROM" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, sendOtpErrorMap);
   }
 };
 
@@ -149,34 +178,7 @@ export const verifyOtp = async (
 
     res.status(200).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "INVALID_EMAIL") {
-      res.status(400).json({ message: "Email không hợp lệ" });
-      return;
-    }
-    if (message === "INVALID_OTP") {
-      res.status(400).json({ message: "OTP không hợp lệ" });
-      return;
-    }
-    if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu email hoặc otp" });
-      return;
-    }
-    if (message === "PENDING_NOT_FOUND") {
-      res.status(404).json({ message: "Không có đăng ký đang chờ xác thực" });
-      return;
-    }
-    if (message === "OTP_INVALID_OR_EXPIRED") {
-      res.status(400).json({ message: "OTP sai hoặc đã hết hạn" });
-      return;
-    }
-    if (message === "EMAIL_EXISTS") {
-      res.status(409).json({ message: "Email đã tồn tại" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, verifyOtpErrorMap);
   }
 };
 
@@ -194,52 +196,13 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
       ),
     });
 
-    res.cookie("refreshToken", result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/auth",
-      maxAge: authService.getRefreshCookieMaxAgeMs(),
-    });
+    setRefreshCookie(res, result.refreshToken, cookieInput());
 
     res
       .status(200)
       .json({ accessToken: result.accessToken, user: result.user });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "INVALID_CREDENTIALS") {
-      res.status(401).json({ message: "Sai email hoặc mật khẩu" });
-      return;
-    }
-    if (message === "TOO_MANY_ATTEMPTS") {
-      res
-        .status(429)
-        .json({ message: "Bạn đã thử quá nhiều lần, vui lòng thử lại sau" });
-      return;
-    }
-    if (message === "EMAIL_NOT_VERIFIED") {
-      res.status(403).json({ message: "Email chưa được xác thực OTP" });
-      return;
-    }
-    if (message === "INVALID_EMAIL") {
-      res.status(400).json({ message: "Email không hợp lệ" });
-      return;
-    }
-    if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu thông tin đăng nhập" });
-      return;
-    }
-    if (message === "Missing env JWT_ACCESS_SECRET") {
-      res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
-      return;
-    }
-    if (message === "Missing env JWT_REFRESH_SECRET") {
-      res.status(500).json({ message: "Thiếu cấu hình JWT_REFRESH_SECRET" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, loginErrorMap);
   }
 };
 
@@ -248,50 +211,14 @@ export const refreshToken = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const cookieToken = String((_req as any).cookies?.refreshToken ?? "");
-    const bodyToken = String(_req.body?.refreshToken ?? "");
-    const token = cookieToken || bodyToken;
-
+    const token = extractRefreshToken(_req);
     const result = await authService.refreshToken({ refreshToken: token });
 
-    res.cookie("refreshToken", result.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/auth",
-      maxAge: authService.getRefreshCookieMaxAgeMs(),
-    });
+    setRefreshCookie(res, result.refreshToken, cookieInput());
 
     res.status(200).json({ accessToken: result.accessToken });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "INVALID_INPUT") {
-      res.status(400).json({ message: "Thiếu refresh token" });
-      return;
-    }
-    if (message === "REFRESH_TOKEN_INVALID") {
-      res.status(401).json({ message: "Refresh token không hợp lệ" });
-      return;
-    }
-    if (message === "REFRESH_TOKEN_REVOKED") {
-      res.status(401).json({ message: "Refresh token đã bị thu hồi" });
-      return;
-    }
-    if (message === "USER_NOT_FOUND") {
-      res.status(404).json({ message: "Không tìm thấy người dùng" });
-      return;
-    }
-    if (message === "Missing env JWT_ACCESS_SECRET") {
-      res.status(500).json({ message: "Thiếu cấu hình JWT_ACCESS_SECRET" });
-      return;
-    }
-    if (message === "Missing env JWT_REFRESH_SECRET") {
-      res.status(500).json({ message: "Thiếu cấu hình JWT_REFRESH_SECRET" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, refreshTokenErrorMap);
   }
 };
 
@@ -343,17 +270,6 @@ export const updateProfile = async (
 
     res.status(200).json({ user });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-
-    if (message === "INVALID_NAME") {
-      res.status(400).json({ message: "Tên không hợp lệ" });
-      return;
-    }
-    if (message === "USER_NOT_FOUND") {
-      res.status(404).json({ message: "Không tìm thấy người dùng" });
-      return;
-    }
-
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    handleAuthError(err, res, updateProfileErrorMap);
   }
 };
