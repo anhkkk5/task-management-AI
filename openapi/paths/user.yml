@@ -1,0 +1,86 @@
+userMe:
+  get:
+    tags:
+      - User
+    summary: Lấy profile hiện tại
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/User"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+userUpdateProfile:
+  patch:
+    tags:
+      - User
+    summary: Cập nhật profile
+    security:
+      - bearerAuth: []
+    responses:
+      "501":
+        description: Not implemented
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+userUploadAvatar:
+  patch:
+    tags:
+      - User
+    summary: Upload avatar
+    security:
+      - bearerAuth: []
+    responses:
+      "501":
+        description: Not implemented
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+userChangePassword:
+  patch:
+    tags:
+      - User
+    summary: Đổi mật khẩu
+    security:
+      - bearerAuth: []
+    responses:
+      "501":
+        description: Not implemented
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+userGetById:
+  get:
+    tags:
+      - User
+    summary: Lấy user theo id
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    responses:
+      "501":
+        description: Not implemented
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"

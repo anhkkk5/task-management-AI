@@ -2,6 +2,7 @@ import express, { Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import authRouter from "./modules/auth/auth.routes";
+import userRouter from "./modules/user/user.routes";
 
 export const createApp = (): Express => {
   const app: Express = express();
@@ -21,6 +22,7 @@ export const createApp = (): Express => {
   });
 
   app.use("/auth", authRouter);
+  app.use("/users", userRouter);
 
   return app;
 };

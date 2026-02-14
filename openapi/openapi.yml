@@ -7,6 +7,8 @@ servers:
 tags:
   - name: Auth
     description: Xác thực & tài khoản
+  - name: User
+    description: Hồ sơ người dùng
   - name: Task
     description: Quản lý công việc
 paths:
@@ -30,6 +32,16 @@ paths:
     $ref: "./paths/auth.yml#/authMe"
   /auth/update-profile:
     $ref: "./paths/auth.yml#/authUpdateProfile"
+  /users/me:
+    $ref: "./paths/user.yml#/userMe"
+  /users/update-profile:
+    $ref: "./paths/user.yml#/userUpdateProfile"
+  /users/upload-avatar:
+    $ref: "./paths/user.yml#/userUploadAvatar"
+  /users/change-password:
+    $ref: "./paths/user.yml#/userChangePassword"
+  /users/{id}:
+    $ref: "./paths/user.yml#/userGetById"
   /tasks:
     $ref: "./paths/task.yml#/tasks"
 components:

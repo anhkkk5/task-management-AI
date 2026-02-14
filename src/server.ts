@@ -15,7 +15,15 @@ const bootstrap = async (): Promise<void> => {
 
   const openApiPath = path.resolve(process.cwd(), "openapi", "openapi.yml");
   const openApi = (await SwaggerParser.dereference(openApiPath)) as object;
-  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApi));
+  app.use(
+    "/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(openApi, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    }),
+  );
 
   const port: number | string = process.env.PORT || 3002;
 
