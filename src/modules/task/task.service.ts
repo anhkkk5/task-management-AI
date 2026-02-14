@@ -1,6 +1,6 @@
 import { Types } from "mongoose";
 import { taskRepository } from "./task.repository";
-import { CreateTaskDto } from "./task.dto";
+import { CreateTaskDto, TaskPriority, TaskStatus } from "./task.dto";
 
 export type PublicTask = {
   id: string;
@@ -63,5 +63,63 @@ export const taskService = {
       throw new Error("TASK_NOT_FOUND");
     }
     return toPublicTask(doc);
+  },
+
+  list: async (
+    userId: string,
+    params: {
+      status?: TaskStatus;
+      priority?: TaskPriority;
+      deadlineFrom?: Date;
+      deadlineTo?: Date;
+      page: number;
+      limit: number;
+    },
+  ): Promise<{
+    items: PublicTask[];
+    page: number;
+    limit: number;
+    total: number;
+  }> => {
+    const { items, total } = await taskRepository.listByUser({
+      userId: new Types.ObjectId(userId),
+      status: params.status,
+      priority: params.priority,
+      deadlineFrom: params.deadlineFrom,
+      deadlineTo: params.deadlineTo,
+      page: params.page,
+      limit: params.limit,
+    });
+
+    return {
+      items: items.map(toPublicTask),
+      page: params.page,
+      limit: params.limit,
+      total,
+    };
+  },
+
+  overdue: async (
+    userId: string,
+    params: { page: number; limit: number },
+  ): Promise<{
+    items: PublicTask[];
+    page: number;
+    limit: number;
+    total: number;
+  }> => {
+    const { items, total } = await taskRepository.listOverdueByUser({
+      userId: new Types.ObjectId(userId),
+      now: new Date(),
+      page: params.page,
+      limit: params.limit,
+    });
+
+    return {
+      items: items.map(toPublicTask),
+      page: params.page,
+      limit: params.limit,
+      total,
+    };
   },
 };

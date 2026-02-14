@@ -2,14 +2,145 @@ tasks:
   get:
     tags:
       - Task
-    summary: Danh sách task (chưa implement)
+    summary: Danh sách task
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum: [todo, in_progress, completed, cancelled]
+      - in: query
+        name: priority
+        schema:
+          type: string
+          enum: [low, medium, high, urgent]
+      - in: query
+        name: deadline
+        schema:
+          type: string
+          enum: [today]
+      - in: query
+        name: page
+        schema:
+          type: number
+          example: 1
+      - in: query
+        name: limit
+        schema:
+          type: number
+          example: 20
     responses:
-      "501":
-        description: Not implemented
+      "200":
+        description: OK
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
   post:
     tags:
       - Task
-    summary: Tạo task (chưa implement)
+    summary: Tạo task
+    security:
+      - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              deadline:
+                type: string
+                format: date-time
+              priority:
+                type: string
+                enum: [low, medium, high, urgent]
+              tags:
+                type: array
+                items:
+                  type: string
+              reminderAt:
+                type: string
+                format: date-time
+            required:
+              - title
     responses:
-      "501":
-        description: Not implemented
+      "201":
+        description: Created
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+tasksOverdue:
+  get:
+    tags:
+      - Task
+    summary: Danh sách task quá hạn
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: query
+        name: page
+        schema:
+          type: number
+          example: 1
+      - in: query
+        name: limit
+        schema:
+          type: number
+          example: 20
+    responses:
+      "200":
+        description: OK
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+taskById:
+  get:
+    tags:
+      - Task
+    summary: Lấy task theo id
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+    responses:
+      "200":
+        description: OK
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy task
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"

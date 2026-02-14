@@ -46,6 +46,10 @@ paths:
     $ref: "./paths/user.yml#/userGetById"
   /tasks:
     $ref: "./paths/task.yml#/tasks"
+  /tasks/overdue:
+    $ref: "./paths/task.yml#/tasksOverdue"
+  /tasks/{id}:
+    $ref: "./paths/task.yml#/taskById"
 components:
   securitySchemes:
     bearerAuth:
