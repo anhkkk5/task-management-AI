@@ -196,6 +196,58 @@ authRefreshToken:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
 
+authLogout:
+  post:
+    tags:
+      - Auth
+    summary: Đăng xuất (thu hồi refresh token hiện tại)
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/RefreshTokenRequest"
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/LogoutResponse"
+      "400":
+        description: Thiếu refresh token
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Refresh token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authLogoutAll:
+  post:
+    tags:
+      - Auth
+    summary: Đăng xuất tất cả thiết bị
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/LogoutResponse"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
 authMe:
   get:
     tags:

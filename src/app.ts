@@ -1,11 +1,18 @@
 import express, { Express } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import authRouter from "./modules/auth/auth.routes";
 
 export const createApp = (): Express => {
   const app: Express = express();
 
-  app.use(cors());
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+    }),
+  );
+  app.use(cookieParser());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 

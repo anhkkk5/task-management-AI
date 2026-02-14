@@ -101,6 +101,14 @@ const getRefreshKey = (jti: string): string => {
   return `refresh:${jti}`;
 };
 
+const getRefreshKeyByUser = (userId: string, jti: string): string => {
+  return `refresh:${userId}:${jti}`;
+};
+
+const getRefreshUserPrefix = (userId: string): string => {
+  return `refresh:${userId}:`;
+};
+
 const toPublicUser = (u: {
   _id: unknown;
   email: string;
@@ -128,6 +136,10 @@ const isValidEmail = (email: string): boolean => {
 };
 
 export const authService = {
+  getRefreshCookieMaxAgeMs: (): number => {
+    return getRefreshTtlSeconds() * 1000;
+  },
+
   register: async (dto: RegisterDto): Promise<RegisterResult> => {
     const email = dto.email?.trim().toLowerCase();
     const password = dto.password;
@@ -288,8 +300,8 @@ export const authService = {
 
     const redis = getRedis();
     await redis.set(
-      getRefreshKey(jti),
-      String(user._id),
+      getRefreshKeyByUser(String(user._id), jti),
+      "1",
       "EX",
       getRefreshTtlSeconds(),
     );
@@ -326,9 +338,9 @@ export const authService = {
     }
 
     const redis = getRedis();
-    const key = getRefreshKey(payload.jti);
-    const storedUserId = await redis.get(key);
-    if (!storedUserId || storedUserId !== payload.userId) {
+    const key = getRefreshKeyByUser(payload.userId, payload.jti);
+    const exists = await redis.get(key);
+    if (!exists) {
       throw new Error("REFRESH_TOKEN_REVOKED");
     }
 
@@ -354,13 +366,69 @@ export const authService = {
     });
 
     await redis.set(
-      getRefreshKey(newJti),
-      String(user._id),
+      getRefreshKeyByUser(String(user._id), newJti),
+      "1",
       "EX",
       getRefreshTtlSeconds(),
     );
 
     return { accessToken, refreshToken };
+  },
+
+  logout: async (dto: RefreshTokenDto): Promise<{ message: string }> => {
+    const token = dto.refreshToken?.trim();
+    if (!token) {
+      throw new Error("INVALID_INPUT");
+    }
+
+    type RefreshPayload = {
+      userId: string;
+      email: string;
+      role: UserRole;
+      jti: string;
+    };
+
+    let payload: RefreshPayload;
+    try {
+      payload = jwt.verify(token, getRefreshSecret()) as RefreshPayload;
+    } catch (_err) {
+      throw new Error("REFRESH_TOKEN_INVALID");
+    }
+
+    if (!payload?.userId || !payload.jti) {
+      throw new Error("REFRESH_TOKEN_INVALID");
+    }
+
+    const redis = getRedis();
+    await redis.del(getRefreshKeyByUser(payload.userId, payload.jti));
+    return { message: "Đăng xuất thành công" };
+  },
+
+  logoutAll: async (userId: string): Promise<{ message: string }> => {
+    const redis = getRedis();
+    const prefix = getRefreshUserPrefix(userId);
+    const keys: string[] = [];
+
+    let cursor = "0";
+    do {
+      const [next, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      if (Array.isArray(batch) && batch.length) {
+        keys.push(...batch);
+      }
+    } while (cursor !== "0");
+
+    if (keys.length) {
+      await redis.del(...keys);
+    }
+
+    return { message: "Đăng xuất tất cả thiết bị thành công" };
   },
 
   updateProfile: async (

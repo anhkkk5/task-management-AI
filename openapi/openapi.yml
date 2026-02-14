@@ -22,6 +22,10 @@ paths:
     $ref: "./paths/auth.yml#/authLogin"
   /auth/refresh-token:
     $ref: "./paths/auth.yml#/authRefreshToken"
+  /auth/logout:
+    $ref: "./paths/auth.yml#/authLogout"
+  /auth/logout-all:
+    $ref: "./paths/auth.yml#/authLogoutAll"
   /auth/me:
     $ref: "./paths/auth.yml#/authMe"
   /auth/update-profile:
@@ -49,6 +53,8 @@ components:
       $ref: "./components/schemas/auth.yml#/RefreshTokenRequest"
     RefreshTokenResponse:
       $ref: "./components/schemas/auth.yml#/RefreshTokenResponse"
+    LogoutResponse:
+      $ref: "./components/schemas/auth.yml#/LogoutResponse"
     MeResponse:
       $ref: "./components/schemas/auth.yml#/MeResponse"
     ErrorResponse:

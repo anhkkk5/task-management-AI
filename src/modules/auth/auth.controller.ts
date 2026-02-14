@@ -43,6 +43,58 @@ export const register = async (_req: Request, res: Response): Promise<void> => {
   }
 };
 
+export const logout = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const cookieToken = String((_req as any).cookies?.refreshToken ?? "");
+    const bodyToken = String(_req.body?.refreshToken ?? "");
+    const token = cookieToken || bodyToken;
+
+    await authService.logout({ refreshToken: token });
+
+    res.clearCookie("refreshToken", {
+      path: "/auth",
+    });
+
+    res.status(200).json({ message: "Đăng xuất thành công" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "INVALID_INPUT") {
+      res.status(400).json({ message: "Thiếu refresh token" });
+      return;
+    }
+    if (message === "REFRESH_TOKEN_INVALID") {
+      res.status(401).json({ message: "Refresh token không hợp lệ" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const logoutAll = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    await authService.logoutAll(userId);
+
+    res.clearCookie("refreshToken", {
+      path: "/auth",
+    });
+
+    res.status(200).json({ message: "Đăng xuất tất cả thiết bị thành công" });
+  } catch (_err) {
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
 export const sendOtp = async (_req: Request, res: Response): Promise<void> => {
   try {
     const result = await authService.sendOtp({
@@ -135,7 +187,17 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
       password: String(_req.body?.password ?? ""),
     });
 
-    res.status(200).json(result);
+    res.cookie("refreshToken", result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/auth",
+      maxAge: authService.getRefreshCookieMaxAgeMs(),
+    });
+
+    res
+      .status(200)
+      .json({ accessToken: result.accessToken, user: result.user });
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
 
@@ -173,11 +235,21 @@ export const refreshToken = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const result = await authService.refreshToken({
-      refreshToken: String(_req.body?.refreshToken ?? ""),
+    const cookieToken = String((_req as any).cookies?.refreshToken ?? "");
+    const bodyToken = String(_req.body?.refreshToken ?? "");
+    const token = cookieToken || bodyToken;
+
+    const result = await authService.refreshToken({ refreshToken: token });
+
+    res.cookie("refreshToken", result.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      path: "/auth",
+      maxAge: authService.getRefreshCookieMaxAgeMs(),
     });
 
-    res.status(200).json(result);
+    res.status(200).json({ accessToken: result.accessToken });
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
 
