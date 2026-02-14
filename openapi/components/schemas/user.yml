@@ -19,6 +19,25 @@ properties:
     type: string
     nullable: true
     example: https://example.com/avatar.png
+  bio:
+    type: string
+    nullable: true
+    example: Xin chao, toi la Nguyen Van A
+  phone:
+    type: string
+    nullable: true
+    example: "0909123456"
+  dob:
+    type: string
+    format: date-time
+    nullable: true
+  address:
+    type: string
+    nullable: true
+    example: Ho Chi Minh
+  settings:
+    type: object
+    nullable: true
   isVerified:
     type: boolean
     example: false

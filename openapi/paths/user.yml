@@ -26,9 +26,50 @@ userUpdateProfile:
     summary: Cập nhật profile
     security:
       - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name:
+                type: string
+              bio:
+                type: string
+              phone:
+                type: string
+              dob:
+                type: string
+                format: date-time
+              address:
+                type: string
+              settings:
+                type: object
     responses:
-      "501":
-        description: Not implemented
+      "200":
+        description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user:
+                  $ref: "../openapi.yml#/components/schemas/User"
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
         content:
           application/json:
             schema:

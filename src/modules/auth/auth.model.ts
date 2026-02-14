@@ -8,6 +8,11 @@ export type UserAttrs = {
   name: string;
   role?: UserRole;
   avatar?: string;
+  bio?: string;
+  phone?: string;
+  dob?: Date;
+  address?: string;
+  settings?: Record<string, unknown>;
   isVerified?: boolean;
 };
 
@@ -18,6 +23,11 @@ export type UserDoc = {
   name: string;
   role: UserRole;
   avatar?: string;
+  bio?: string;
+  phone?: string;
+  dob?: Date;
+  address?: string;
+  settings?: Record<string, unknown>;
   isVerified: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -53,6 +63,26 @@ const userSchema = new Schema<UserDoc>(
     },
     avatar: {
       type: String,
+      required: false,
+    },
+    bio: {
+      type: String,
+      required: false,
+    },
+    phone: {
+      type: String,
+      required: false,
+    },
+    dob: {
+      type: Date,
+      required: false,
+    },
+    address: {
+      type: String,
+      required: false,
+    },
+    settings: {
+      type: Schema.Types.Mixed,
       required: false,
     },
     isVerified: {
