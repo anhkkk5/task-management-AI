@@ -7,6 +7,7 @@ import {
   toPublicConversation,
   toPublicMessage,
 } from "./ai.mapper";
+import { aiCacheService } from "./ai.cache.service";
 
 export const aiService = {
   chat: async (
@@ -267,6 +268,16 @@ export const aiService = {
       throw new Error("USER_ID_INVALID");
     }
 
+    // Check cache first
+    const cached = await aiCacheService.getTaskBreakdown({
+      userId,
+      title: input.title,
+      deadline: input.deadline,
+    });
+    if (cached) {
+      return cached;
+    }
+
     const deadlineText = input.deadline
       ? `Hạn chót: ${input.deadline.toISOString()}`
       : "";
@@ -323,7 +334,7 @@ export const aiService = {
       throw new Error("AI_RESPONSE_INVALID");
     }
 
-    return {
+    const response = {
       steps: normalized.map((s: any) => ({
         title: s.title,
         status:
@@ -335,6 +346,14 @@ export const aiService = {
             : "todo",
       })),
     };
+
+    // Save to cache
+    await aiCacheService.setTaskBreakdown(
+      { userId, title: input.title, deadline: input.deadline },
+      response,
+    );
+
+    return response;
   },
 
   prioritySuggest: async (
@@ -343,6 +362,16 @@ export const aiService = {
   ): Promise<{ priority: string; reason?: string }> => {
     if (!Types.ObjectId.isValid(userId)) {
       throw new Error("USER_ID_INVALID");
+    }
+
+    // Check cache first
+    const cached = await aiCacheService.getPrioritySuggest({
+      userId,
+      title: input.title,
+      deadline: input.deadline,
+    });
+    if (cached) {
+      return cached;
     }
 
     const deadlineText = input.deadline
@@ -399,7 +428,15 @@ export const aiService = {
         ? priorityRaw
         : "medium";
 
-    return { priority: normalizedPriority, reason };
+    const response = { priority: normalizedPriority, reason };
+
+    // Save to cache
+    await aiCacheService.setPrioritySuggest(
+      { userId, title: input.title, deadline: input.deadline },
+      response,
+    );
+
+    return response;
   },
 
   schedulePlan: async (
