@@ -335,6 +335,26 @@ aiTaskBreakdown:
     responses:
       "200":
         description: OK
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      title:
+                        type: string
+                      status:
+                        type: string
+                        enum: [todo, in_progress, completed, cancelled]
+                    required:
+                      - title
+                      - status
+              required:
+                - steps
       "400":
         description: Dữ liệu không hợp lệ
         content:
@@ -343,6 +363,18 @@ aiTaskBreakdown:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
       "401":
         description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "429":
+        description: Rate limit / quota
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "500":
+        description: Lỗi hệ thống
         content:
           application/json:
             schema:

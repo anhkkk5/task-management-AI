@@ -260,10 +260,81 @@ export const aiService = {
   },
 
   taskBreakdown: async (
-    _userId: string,
-    _input: { title: string; deadline?: Date },
+    userId: string,
+    input: { title: string; deadline?: Date },
   ): Promise<{ steps: { title: string; status: string }[] }> => {
-    throw new Error("NOT_IMPLEMENTED");
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+
+    const deadlineText = input.deadline
+      ? `Hạn chót: ${input.deadline.toISOString()}`
+      : "";
+
+    const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, rõ ràng, có thể thực thi.\nCông việc: ${input.title}\n${deadlineText}\n\nYêu cầu bắt buộc:\n- Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).\n- Format: { "steps": [ { "title": string, "status": "todo" } ] }\n- status luôn là "todo".`;
+
+    const result = await aiProvider.chat({
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.2,
+      maxTokens: 600,
+    });
+
+    const raw = (result.content || "").trim();
+
+    const extractJson = (text: string): string => {
+      const firstBrace = text.indexOf("{");
+      const lastBrace = text.lastIndexOf("}");
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+        return text;
+      }
+      return text.slice(firstBrace, lastBrace + 1);
+    };
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(extractJson(raw));
+    } catch {
+      throw new Error("AI_JSON_INVALID");
+    }
+
+    const steps = Array.isArray(parsed?.steps) ? parsed.steps : null;
+    if (!steps) {
+      throw new Error("AI_RESPONSE_INVALID");
+    }
+
+    const normalized = steps
+      .map((s: any) => ({
+        title: String(s?.title ?? "").trim(),
+        status: String(s?.status ?? "todo").trim() || "todo",
+      }))
+      .filter((s: any) => s.title);
+
+    if (!normalized.length) {
+      throw new Error("AI_RESPONSE_INVALID");
+    }
+
+    return {
+      steps: normalized.map((s: any) => ({
+        title: s.title,
+        status:
+          s.status === "todo" ||
+          s.status === "in_progress" ||
+          s.status === "completed" ||
+          s.status === "cancelled"
+            ? s.status
+            : "todo",
+      })),
+    };
   },
 
   prioritySuggest: async (
