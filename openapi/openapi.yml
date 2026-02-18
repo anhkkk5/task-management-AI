@@ -11,6 +11,8 @@ tags:
     description: Hồ sơ người dùng
   - name: Task
     description: Quản lý công việc
+  - name: AI
+    description: AI assistant
 paths:
   /auth/register:
     $ref: "./paths/auth.yml#/authRegister"
@@ -50,6 +52,18 @@ paths:
     $ref: "./paths/task.yml#/tasksOverdue"
   /tasks/{id}:
     $ref: "./paths/task.yml#/taskById"
+  /ai/chat:
+    $ref: "./paths/ai.yml#/aiChat"
+  /ai/conversations:
+    $ref: "./paths/ai.yml#/aiConversations"
+  /ai/conversations/{id}:
+    $ref: "./paths/ai.yml#/aiConversationById"
+  /ai/task-breakdown:
+    $ref: "./paths/ai.yml#/aiTaskBreakdown"
+  /ai/priority-suggest:
+    $ref: "./paths/ai.yml#/aiPrioritySuggest"
+  /ai/schedule-plan:
+    $ref: "./paths/ai.yml#/aiSchedulePlan"
 components:
   securitySchemes:
     bearerAuth:
