@@ -23,12 +23,77 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
     const result = await aiService.chat(userId, { message });
     res.status(200).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
+    const error = err instanceof Error ? err : new Error("UNKNOWN");
+    console.error("[AI_CHAT_ERROR]", error);
+
+    const message = error.message;
     if (message === "NOT_IMPLEMENTED") {
       res.status(501).json({ message: "Chức năng chưa triển khai" });
       return;
     }
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    if (message === "GROQ_API_KEY_MISSING") {
+      res.status(500).json({
+        message: "Thiếu GROQ_API_KEY trong env",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+
+    if (message === "GROQ_UNAUTHORIZED") {
+      res.status(500).json({
+        message: "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+
+    if (message === "GROQ_RATE_LIMIT") {
+      res.status(429).json({
+        message: "Groq bị giới hạn rate limit. Thử lại sau.",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+
+    const lower = message.toLowerCase();
+    if (
+      lower.includes("permission") ||
+      lower.includes("unauthorized") ||
+      lower.includes("403")
+    ) {
+      res.status(500).json({
+        message:
+          "Provider AI bị từ chối (permission/quota/billing). Kiểm tra API key và quyền truy cập.",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+    if (
+      lower.includes("quota") ||
+      lower.includes("rate") ||
+      lower.includes("429")
+    ) {
+      res.status(429).json({
+        message: "Provider AI bị giới hạn quota/rate limit. Thử lại sau.",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+    if (
+      lower.includes("model") &&
+      (lower.includes("not found") || lower.includes("invalid"))
+    ) {
+      res.status(500).json({
+        message: "AI model không hợp lệ. Kiểm tra cấu hình model.",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+
+    res.status(500).json({
+      message: "Lỗi hệ thống",
+      ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+    });
   }
 };
 

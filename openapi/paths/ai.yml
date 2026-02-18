@@ -41,6 +41,12 @@ aiChat:
           application/json:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "429":
+        description: Rate limit / quota
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
       "500":
         description: Lỗi hệ thống
         content:
