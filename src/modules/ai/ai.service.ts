@@ -1,14 +1,44 @@
-import { aiPromptService } from "./ai.prompt.service";
 import { aiProvider } from "./ai.provider";
 
 export const aiService = {
   chat: async (
     _userId: string,
-    input: { message: string },
-  ): Promise<{ reply: string }> => {
-    const prompt = aiPromptService.buildChatPrompt({ message: input.message });
-    const result = await aiProvider.chat({ prompt });
-    return { reply: result.content };
+    input: {
+      message: string;
+      model?: string;
+      temperature?: number;
+      maxTokens?: number;
+    },
+  ): Promise<{
+    reply: string;
+    model?: string;
+    usage?: {
+      promptTokens?: number;
+      completionTokens?: number;
+      totalTokens?: number;
+    };
+  }> => {
+    const result = await aiProvider.chat({
+      messages: [
+        {
+          role: "system",
+          content: "You are a productivity assistant. Reply in Vietnamese.",
+        },
+        {
+          role: "user",
+          content: input.message,
+        },
+      ],
+      model: input.model,
+      temperature: input.temperature,
+      maxTokens: input.maxTokens,
+    });
+
+    return {
+      reply: result.content,
+      model: result.model,
+      usage: result.usage,
+    };
   },
 
   listConversations: async (

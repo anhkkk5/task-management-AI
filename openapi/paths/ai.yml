@@ -15,6 +15,15 @@ aiChat:
               message:
                 type: string
                 example: Plan học React 30 ngày
+              model:
+                type: string
+                example: llama-3.1-8b-instant
+              temperature:
+                type: number
+                example: 0.7
+              maxTokens:
+                type: number
+                example: 512
             required:
               - message
     responses:
@@ -27,6 +36,17 @@ aiChat:
               properties:
                 reply:
                   type: string
+                model:
+                  type: string
+                usage:
+                  type: object
+                  properties:
+                    promptTokens:
+                      type: number
+                    completionTokens:
+                      type: number
+                    totalTokens:
+                      type: number
               required:
                 - reply
       "400":

@@ -14,13 +14,51 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const message = String((req as any).body?.message ?? "").trim();
+    const body = (req as any).body ?? {};
+    const message = String(body?.message ?? "").trim();
     if (!message) {
       res.status(400).json({ message: "Message không hợp lệ" });
       return;
     }
 
-    const result = await aiService.chat(userId, { message });
+    const modelRaw = body?.model;
+    const model =
+      modelRaw !== undefined && modelRaw !== null
+        ? String(modelRaw).trim()
+        : undefined;
+
+    const temperatureRaw = body?.temperature;
+    const temperature =
+      temperatureRaw !== undefined && temperatureRaw !== null
+        ? Number(temperatureRaw)
+        : undefined;
+    if (
+      temperature !== undefined &&
+      (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)
+    ) {
+      res.status(400).json({ message: "Temperature không hợp lệ" });
+      return;
+    }
+
+    const maxTokensRaw = body?.maxTokens;
+    const maxTokens =
+      maxTokensRaw !== undefined && maxTokensRaw !== null
+        ? Number(maxTokensRaw)
+        : undefined;
+    if (
+      maxTokens !== undefined &&
+      (!Number.isFinite(maxTokens) || Math.floor(maxTokens) <= 0)
+    ) {
+      res.status(400).json({ message: "MaxTokens không hợp lệ" });
+      return;
+    }
+
+    const result = await aiService.chat(userId, {
+      message,
+      model,
+      temperature,
+      maxTokens: maxTokens !== undefined ? Math.floor(maxTokens) : undefined,
+    });
     res.status(200).json(result);
   } catch (err) {
     const error = err instanceof Error ? err : new Error("UNKNOWN");
