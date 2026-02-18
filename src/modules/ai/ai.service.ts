@@ -338,10 +338,68 @@ export const aiService = {
   },
 
   prioritySuggest: async (
-    _userId: string,
-    _input: { title: string; deadline?: Date },
+    userId: string,
+    input: { title: string; deadline?: Date },
   ): Promise<{ priority: string; reason?: string }> => {
-    throw new Error("NOT_IMPLEMENTED");
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+
+    const deadlineText = input.deadline
+      ? `Hạn chót: ${input.deadline.toISOString()}`
+      : "";
+
+    const prompt = `Hãy đề xuất mức độ ưu tiên cho công việc sau, dựa trên mức độ khẩn cấp và tác động.\nCông việc: ${input.title}\n${deadlineText}\n\nYêu cầu bắt buộc:\n- Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).\n- Format: { "priority": "low"|"medium"|"high"|"urgent", "reason": string }`;
+
+    const result = await aiProvider.chat({
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.2,
+      maxTokens: 300,
+    });
+
+    const raw = (result.content || "").trim();
+
+    const extractJson = (text: string): string => {
+      const firstBrace = text.indexOf("{");
+      const lastBrace = text.lastIndexOf("}");
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+        return text;
+      }
+      return text.slice(firstBrace, lastBrace + 1);
+    };
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(extractJson(raw));
+    } catch {
+      throw new Error("AI_JSON_INVALID");
+    }
+
+    const priorityRaw = String(parsed?.priority ?? "").trim();
+    const reason =
+      parsed?.reason !== undefined && parsed?.reason !== null
+        ? String(parsed.reason).trim()
+        : undefined;
+
+    const normalizedPriority =
+      priorityRaw === "low" ||
+      priorityRaw === "medium" ||
+      priorityRaw === "high" ||
+      priorityRaw === "urgent"
+        ? priorityRaw
+        : "medium";
+
+    return { priority: normalizedPriority, reason };
   },
 
   schedulePlan: async (

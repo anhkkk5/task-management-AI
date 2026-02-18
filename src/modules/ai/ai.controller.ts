@@ -481,6 +481,33 @@ export const prioritySuggest = async (
     res.status(200).json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "UserId không hợp lệ" });
+      return;
+    }
+    if (message === "AI_JSON_INVALID") {
+      res.status(500).json({
+        message: "AI trả về dữ liệu không đúng định dạng. Thử lại sau.",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+    if (message === "GROQ_API_KEY_MISSING") {
+      res.status(500).json({ message: "Thiếu GROQ_API_KEY trong env" });
+      return;
+    }
+    if (message === "GROQ_UNAUTHORIZED") {
+      res.status(500).json({
+        message: "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
+      });
+      return;
+    }
+    if (message === "GROQ_RATE_LIMIT") {
+      res.status(429).json({
+        message: "Groq bị giới hạn rate limit. Thử lại sau.",
+      });
+      return;
+    }
     if (message === "NOT_IMPLEMENTED") {
       res.status(501).json({ message: "Chức năng chưa triển khai" });
       return;
