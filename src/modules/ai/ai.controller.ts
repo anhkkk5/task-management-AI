@@ -73,6 +73,14 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
     console.error("[AI_CHAT_ERROR]", error);
 
     const message = error.message;
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "UserId không hợp lệ" });
+      return;
+    }
+    if (message === "CONVERSATION_ID_INVALID") {
+      res.status(400).json({ message: "ConversationId không hợp lệ" });
+      return;
+    }
     if (message === "NOT_IMPLEMENTED") {
       res.status(501).json({ message: "Chức năng chưa triển khai" });
       return;
@@ -258,7 +266,11 @@ export const chatStream = async (
         message:
           message === "CONVERSATION_FORBIDDEN"
             ? "Không có quyền truy cập conversation này"
-            : "Lỗi hệ thống",
+            : message === "CONVERSATION_ID_INVALID"
+              ? "ConversationId không hợp lệ"
+              : message === "USER_ID_INVALID"
+                ? "UserId không hợp lệ"
+                : "Lỗi hệ thống",
         ...(process.env.NODE_ENV !== "production"
           ? { detail: error.message }
           : {}),
@@ -273,6 +285,14 @@ export const chatStream = async (
       res
         .status(429)
         .json({ message: "Groq bị giới hạn rate limit. Thử lại sau." });
+      return;
+    }
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "UserId không hợp lệ" });
+      return;
+    }
+    if (message === "CONVERSATION_ID_INVALID") {
+      res.status(400).json({ message: "ConversationId không hợp lệ" });
       return;
     }
     if (message === "CONVERSATION_FORBIDDEN") {
@@ -356,6 +376,10 @@ export const getConversationById = async (
     res.status(200).json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "CONVERSATION_ID_INVALID") {
+      res.status(400).json({ message: "Conversation id không hợp lệ" });
+      return;
+    }
     if (message === "CONVERSATION_FORBIDDEN") {
       res
         .status(403)

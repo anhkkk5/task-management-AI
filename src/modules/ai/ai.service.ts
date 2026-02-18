@@ -28,9 +28,15 @@ export const aiService = {
       totalTokens?: number;
     };
   }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
     const userObjectId = new Types.ObjectId(userId);
     const title = input.message.slice(0, 60);
 
+    if (input.conversationId && !Types.ObjectId.isValid(input.conversationId)) {
+      throw new Error("CONVERSATION_ID_INVALID");
+    }
     const conversationObjectId = input.conversationId
       ? new Types.ObjectId(input.conversationId)
       : (
@@ -104,9 +110,15 @@ export const aiService = {
       maxTokens?: number;
     },
   ): AsyncGenerator<AiChatStreamEvent> {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
     const userObjectId = new Types.ObjectId(userId);
     const title = input.message.slice(0, 60);
 
+    if (input.conversationId && !Types.ObjectId.isValid(input.conversationId)) {
+      throw new Error("CONVERSATION_ID_INVALID");
+    }
     const conversationObjectId = input.conversationId
       ? new Types.ObjectId(input.conversationId)
       : (
@@ -198,6 +210,9 @@ export const aiService = {
     userId: string,
     input?: { limit?: number },
   ): Promise<{ conversations: PublicAiConversation[] }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
     const userObjectId = new Types.ObjectId(userId);
     const limit = Math.min(Math.max(input?.limit ?? 20, 1), 100);
     const items = await aiRepository.listConversationsByUser({
@@ -214,6 +229,12 @@ export const aiService = {
     conversation: PublicAiConversation;
     messages: PublicAiMessage[];
   }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+    if (!Types.ObjectId.isValid(input.id)) {
+      throw new Error("CONVERSATION_ID_INVALID");
+    }
     const userObjectId = new Types.ObjectId(userId);
     const conversationObjectId = new Types.ObjectId(input.id);
 

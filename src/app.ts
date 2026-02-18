@@ -19,6 +19,14 @@ export const createApp = (): Express => {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  app.use(((err: any, _req: any, res: any, next: any) => {
+    if (err instanceof SyntaxError && "body" in err) {
+      res.status(400).json({ message: "JSON không hợp lệ" });
+      return;
+    }
+    next(err);
+  }) as any);
+
   app.get("/", (_req, res) => {
     res.send("hello");
   });
