@@ -54,6 +54,8 @@ paths:
     $ref: "./paths/task.yml#/taskById"
   /ai/chat:
     $ref: "./paths/ai.yml#/aiChat"
+  /ai/chat/stream:
+    $ref: "./paths/ai.yml#/aiChatStream"
   /ai/conversations:
     $ref: "./paths/ai.yml#/aiConversations"
   /ai/conversations/{id}:

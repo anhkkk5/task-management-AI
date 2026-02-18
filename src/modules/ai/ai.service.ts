@@ -1,4 +1,4 @@
-import { aiProvider } from "./ai.provider";
+import { aiProvider, AiChatStreamEvent } from "./ai.provider";
 
 export const aiService = {
   chat: async (
@@ -39,6 +39,36 @@ export const aiService = {
       model: result.model,
       usage: result.usage,
     };
+  },
+
+  chatStream: async function* (
+    _userId: string,
+    input: {
+      message: string;
+      model?: string;
+      temperature?: number;
+      maxTokens?: number;
+    },
+  ): AsyncGenerator<AiChatStreamEvent> {
+    const stream = aiProvider.chatStream({
+      messages: [
+        {
+          role: "system",
+          content: "You are a productivity assistant. Reply in Vietnamese.",
+        },
+        {
+          role: "user",
+          content: input.message,
+        },
+      ],
+      model: input.model,
+      temperature: input.temperature,
+      maxTokens: input.maxTokens,
+    });
+
+    for await (const ev of stream) {
+      yield ev;
+    }
   },
 
   listConversations: async (

@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { aiService } from "./ai.service";
+import { aiStreamingService } from "./ai.streaming.service";
 
 const getUserId = (req: Request): string | null => {
   const userId = (req as any).user?.userId;
@@ -132,6 +133,134 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
       message: "Lỗi hệ thống",
       ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
     });
+  }
+};
+
+export const chatStream = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const body = (req as any).body ?? {};
+    const message = String(body?.message ?? "").trim();
+    if (!message) {
+      res.status(400).json({ message: "Message không hợp lệ" });
+      return;
+    }
+
+    const modelRaw = body?.model;
+    const model =
+      modelRaw !== undefined && modelRaw !== null
+        ? String(modelRaw).trim()
+        : undefined;
+
+    const temperatureRaw = body?.temperature;
+    const temperature =
+      temperatureRaw !== undefined && temperatureRaw !== null
+        ? Number(temperatureRaw)
+        : undefined;
+    if (
+      temperature !== undefined &&
+      (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)
+    ) {
+      res.status(400).json({ message: "Temperature không hợp lệ" });
+      return;
+    }
+
+    const maxTokensRaw = body?.maxTokens;
+    const maxTokens =
+      maxTokensRaw !== undefined && maxTokensRaw !== null
+        ? Number(maxTokensRaw)
+        : undefined;
+    if (
+      maxTokens !== undefined &&
+      (!Number.isFinite(maxTokens) || Math.floor(maxTokens) <= 0)
+    ) {
+      res.status(400).json({ message: "MaxTokens không hợp lệ" });
+      return;
+    }
+
+    aiStreamingService.initSse(res);
+
+    let closed = false;
+    req.on("close", () => {
+      closed = true;
+    });
+
+    const stream = aiService.chatStream(userId, {
+      message,
+      model,
+      temperature,
+      maxTokens: maxTokens !== undefined ? Math.floor(maxTokens) : undefined,
+    });
+
+    for await (const ev of stream) {
+      if (closed) {
+        return;
+      }
+
+      if (ev.type === "delta") {
+        aiStreamingService.sendSseEvent(res, { delta: ev.delta }, "chunk");
+      } else {
+        aiStreamingService.sendSseEvent(
+          res,
+          { model: ev.model, usage: ev.usage },
+          "done",
+        );
+      }
+    }
+
+    if (!closed) {
+      aiStreamingService.closeSse(res);
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error("UNKNOWN");
+    console.error("[AI_CHAT_STREAM_ERROR]", error);
+
+    // If SSE already started, send an error event
+    if (res.headersSent) {
+      aiStreamingService.sendSseEvent(
+        res,
+        {
+          message: "Lỗi hệ thống",
+          ...(process.env.NODE_ENV !== "production"
+            ? { detail: error.message }
+            : {}),
+        },
+        "error",
+      );
+      aiStreamingService.closeSse(res);
+      return;
+    }
+
+    const message = error.message;
+    if (message === "GROQ_RATE_LIMIT") {
+      res
+        .status(429)
+        .json({ message: "Groq bị giới hạn rate limit. Thử lại sau." });
+      return;
+    }
+    if (message === "GROQ_UNAUTHORIZED") {
+      res
+        .status(500)
+        .json({
+          message:
+            "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
+        });
+      return;
+    }
+    if (message === "GROQ_API_KEY_MISSING") {
+      res.status(500).json({ message: "Thiếu GROQ_API_KEY trong env" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
 

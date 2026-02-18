@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import {
   chat,
+  chatStream,
   getConversationById,
   listConversations,
   prioritySuggest,
@@ -12,6 +13,8 @@ import {
 const aiRouter = Router();
 
 aiRouter.post("/chat", authMiddleware, chat);
+
+aiRouter.post("/chat/stream", authMiddleware, chatStream);
 
 aiRouter.get("/conversations", authMiddleware, listConversations);
 

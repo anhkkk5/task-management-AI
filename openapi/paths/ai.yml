@@ -80,6 +80,69 @@ aiChat:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
 
+aiChatStream:
+  post:
+    tags:
+      - AI
+    summary: Chat với AI (stream SSE)
+    description: |
+      Server-Sent Events (SSE). Response sẽ stream từng chunk qua event `chunk`.
+      Kết thúc bằng event `done`.
+    security:
+      - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                example: Plan học React 30 ngày
+              model:
+                type: string
+                example: llama-3.1-8b-instant
+              temperature:
+                type: number
+                example: 0.7
+              maxTokens:
+                type: number
+                example: 512
+            required:
+              - message
+    responses:
+      "200":
+        description: SSE stream
+        content:
+          text/event-stream:
+            schema:
+              type: string
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Chưa đăng nhập / token không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "429":
+        description: Rate limit / quota
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "500":
+        description: Lỗi hệ thống
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
 aiConversations:
   get:
     tags:
