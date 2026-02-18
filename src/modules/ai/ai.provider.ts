@@ -27,6 +27,11 @@ export type AiChatStreamChunk = {
   delta: string;
 };
 
+export type AiChatStreamMeta = {
+  type: "meta";
+  conversationId: string;
+};
+
 export type AiChatStreamDone = {
   type: "done";
   model?: string;
@@ -37,7 +42,10 @@ export type AiChatStreamDone = {
   };
 };
 
-export type AiChatStreamEvent = AiChatStreamChunk | AiChatStreamDone;
+export type AiChatStreamEvent =
+  | AiChatStreamMeta
+  | AiChatStreamChunk
+  | AiChatStreamDone;
 
 export type AiProvider = {
   chat: (input: AiChatInput) => Promise<AiChatResult>;

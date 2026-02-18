@@ -54,8 +54,15 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    const conversationIdRaw = body?.conversationId;
+    const conversationId =
+      conversationIdRaw !== undefined && conversationIdRaw !== null
+        ? String(conversationIdRaw).trim()
+        : undefined;
+
     const result = await aiService.chat(userId, {
       message,
+      conversationId,
       model,
       temperature,
       maxTokens: maxTokens !== undefined ? Math.floor(maxTokens) : undefined,
@@ -91,6 +98,13 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
         message: "Groq bị giới hạn rate limit. Thử lại sau.",
         ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
       });
+      return;
+    }
+
+    if (message === "CONVERSATION_FORBIDDEN") {
+      res
+        .status(403)
+        .json({ message: "Không có quyền truy cập conversation này" });
       return;
     }
 
@@ -186,6 +200,12 @@ export const chatStream = async (
       return;
     }
 
+    const conversationIdRaw = body?.conversationId;
+    const conversationId =
+      conversationIdRaw !== undefined && conversationIdRaw !== null
+        ? String(conversationIdRaw).trim()
+        : undefined;
+
     aiStreamingService.initSse(res);
 
     let closed = false;
@@ -195,6 +215,7 @@ export const chatStream = async (
 
     const stream = aiService.chatStream(userId, {
       message,
+      conversationId,
       model,
       temperature,
       maxTokens: maxTokens !== undefined ? Math.floor(maxTokens) : undefined,
@@ -205,7 +226,13 @@ export const chatStream = async (
         return;
       }
 
-      if (ev.type === "delta") {
+      if (ev.type === "meta") {
+        aiStreamingService.sendSseEvent(
+          res,
+          { conversationId: ev.conversationId },
+          "meta",
+        );
+      } else if (ev.type === "delta") {
         aiStreamingService.sendSseEvent(res, { delta: ev.delta }, "chunk");
       } else {
         aiStreamingService.sendSseEvent(
@@ -223,36 +250,41 @@ export const chatStream = async (
     const error = err instanceof Error ? err : new Error("UNKNOWN");
     console.error("[AI_CHAT_STREAM_ERROR]", error);
 
+    const message = error.message;
+
     // If SSE already started, send an error event
     if (res.headersSent) {
-      aiStreamingService.sendSseEvent(
-        res,
-        {
-          message: "Lỗi hệ thống",
-          ...(process.env.NODE_ENV !== "production"
-            ? { detail: error.message }
-            : {}),
-        },
-        "error",
-      );
+      const payload = {
+        message:
+          message === "CONVERSATION_FORBIDDEN"
+            ? "Không có quyền truy cập conversation này"
+            : "Lỗi hệ thống",
+        ...(process.env.NODE_ENV !== "production"
+          ? { detail: error.message }
+          : {}),
+      };
+
+      aiStreamingService.sendSseEvent(res, payload, "error");
       aiStreamingService.closeSse(res);
       return;
     }
 
-    const message = error.message;
     if (message === "GROQ_RATE_LIMIT") {
       res
         .status(429)
         .json({ message: "Groq bị giới hạn rate limit. Thử lại sau." });
       return;
     }
-    if (message === "GROQ_UNAUTHORIZED") {
+    if (message === "CONVERSATION_FORBIDDEN") {
       res
-        .status(500)
-        .json({
-          message:
-            "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
-        });
+        .status(403)
+        .json({ message: "Không có quyền truy cập conversation này" });
+      return;
+    }
+    if (message === "GROQ_UNAUTHORIZED") {
+      res.status(500).json({
+        message: "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
+      });
       return;
     }
     if (message === "GROQ_API_KEY_MISSING") {
@@ -275,14 +307,19 @@ export const listConversations = async (
       return;
     }
 
-    const result = await aiService.listConversations(userId);
+    const limitRaw = (req as any).query?.limit;
+    const limit =
+      limitRaw !== undefined && limitRaw !== null
+        ? Number(limitRaw)
+        : undefined;
+    const result = await aiService.listConversations(userId, {
+      limit:
+        limit !== undefined && Number.isFinite(limit)
+          ? Math.floor(limit)
+          : undefined,
+    });
     res.status(200).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : "UNKNOWN";
-    if (message === "NOT_IMPLEMENTED") {
-      res.status(501).json({ message: "Chức năng chưa triển khai" });
-      return;
-    }
     res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
@@ -304,12 +341,25 @@ export const getConversationById = async (
       return;
     }
 
-    const result = await aiService.getConversationById(userId, { id });
+    const limitRaw = (req as any).query?.limit;
+    const limit =
+      limitRaw !== undefined && limitRaw !== null
+        ? Number(limitRaw)
+        : undefined;
+    const result = await aiService.getConversationById(userId, {
+      id,
+      limitMessages:
+        limit !== undefined && Number.isFinite(limit)
+          ? Math.floor(limit)
+          : undefined,
+    });
     res.status(200).json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
-    if (message === "NOT_IMPLEMENTED") {
-      res.status(501).json({ message: "Chức năng chưa triển khai" });
+    if (message === "CONVERSATION_FORBIDDEN") {
+      res
+        .status(403)
+        .json({ message: "Không có quyền truy cập conversation này" });
       return;
     }
     res.status(500).json({ message: "Lỗi hệ thống" });
