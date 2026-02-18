@@ -7,6 +7,7 @@ import {
   UpdateTaskDto,
 } from "./task.dto";
 import { getRedis } from "../../services/redis.service";
+import { aiService } from "../ai/ai.service";
 
 export type PublicTask = {
   id: string;
@@ -224,6 +225,38 @@ export const taskService = {
 
     await invalidateTasksCache(userId);
     return { message: "Xóa task thành công" };
+  },
+
+  aiBreakdown: async (userId: string, taskId: string): Promise<PublicTask> => {
+    const task = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!task) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    const breakdown = await aiService.taskBreakdown(userId, {
+      title: task.title,
+      deadline: task.deadline,
+    });
+
+    const updated = await taskRepository.updateByIdForUser(
+      { taskId, userId: new Types.ObjectId(userId) },
+      {
+        aiBreakdown: breakdown.steps.map((s) => ({
+          title: s.title,
+          status: s.status as any,
+        })),
+      },
+    );
+
+    if (!updated) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    await invalidateTasksCache(userId);
+    return toPublicTask(updated);
   },
 
   list: async (

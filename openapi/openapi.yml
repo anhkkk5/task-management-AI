@@ -52,6 +52,8 @@ paths:
     $ref: "./paths/task.yml#/tasksOverdue"
   /tasks/{id}:
     $ref: "./paths/task.yml#/taskById"
+  /tasks/{id}/ai-breakdown:
+    $ref: "./paths/task.yml#/taskAiBreakdown"
   /ai/chat:
     $ref: "./paths/ai.yml#/aiChat"
   /ai/chat/stream:

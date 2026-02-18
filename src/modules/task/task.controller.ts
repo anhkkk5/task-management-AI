@@ -11,6 +11,59 @@ const parsePriority = (value: unknown): TaskPriority | undefined => {
   return undefined;
 };
 
+export const aiBreakdownTask = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const taskId = String(_req.params.id ?? "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Task id không hợp lệ" });
+      return;
+    }
+
+    const task = await taskService.aiBreakdown(userId, taskId);
+    res.status(200).json({ task });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền truy cập task này" });
+      return;
+    }
+    if (message === "AI_JSON_INVALID" || message === "AI_RESPONSE_INVALID") {
+      res.status(500).json({
+        message: "AI trả về dữ liệu không đúng định dạng. Thử lại sau.",
+        ...(process.env.NODE_ENV !== "production" ? { detail: message } : {}),
+      });
+      return;
+    }
+    if (message === "GROQ_RATE_LIMIT") {
+      res
+        .status(429)
+        .json({ message: "Groq bị giới hạn rate limit. Thử lại sau." });
+      return;
+    }
+    if (message === "GROQ_API_KEY_MISSING") {
+      res.status(500).json({ message: "Thiếu GROQ_API_KEY trong env" });
+      return;
+    }
+    if (message === "GROQ_UNAUTHORIZED") {
+      res.status(500).json({
+        message: "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
+      });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
 const parseStatus = (value: unknown): TaskStatus | undefined => {
   if (value === undefined || value === null) return undefined;
   const v = String(value);
