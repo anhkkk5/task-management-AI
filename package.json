@@ -24,6 +24,7 @@
     "bcryptjs": "^3.0.3",
     "body-parse": "^0.1.0",
     "body-parser": "^2.2.2",
+    "bullmq": "^5.69.3",
     "cloudinary": "^2.8.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
