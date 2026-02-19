@@ -6,6 +6,7 @@ import userRouter from "./modules/user/user.routes";
 import taskRouter from "./modules/task/task.routes";
 import aiRouter from "./modules/ai/ai.routes";
 import chatRouter from "./modules/chat/chat.routes";
+import notificationRouter from "./modules/notification/notification.routes";
 
 export const createApp = (): Express => {
   const app: Express = express();
@@ -37,6 +38,7 @@ export const createApp = (): Express => {
   app.use("/tasks", taskRouter);
   app.use("/ai", aiRouter);
   app.use("/chat", chatRouter);
+  app.use("/notifications", notificationRouter);
 
   return app;
 };
