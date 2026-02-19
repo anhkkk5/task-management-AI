@@ -9,6 +9,7 @@ import path from "path";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import swaggerUi from "swagger-ui-express";
 import { initChatGateway } from "./modules/chat/chat.gateway";
+import { reminderCronService } from "./modules/notification/reminder.cron";
 
 const bootstrap = async (): Promise<void> => {
   await connect();
@@ -39,6 +40,10 @@ const bootstrap = async (): Promise<void> => {
   server.listen(port, () => {
     console.log(`App listening on port ${port}`);
     console.log(`Socket.IO ready for realtime chat`);
+
+    // Start reminder cron job
+    reminderCronService.start();
+    console.log(`Reminder cron job started for deadline alerts`);
   });
 };
 
