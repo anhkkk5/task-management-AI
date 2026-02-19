@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔔 Notification System Demo</title>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      opacity: 0.9;
+    }
+
+    .connection-panel {
+      padding: 20px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 12px 15px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      min-width: 300px;
+    }
+
+    button {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.3s;
+    }
+
+    .btn-connect {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .btn-connect:hover {
+      background: #45a049;
+    }
+
+    .btn-disconnect {
+      background: #f44336;
+      color: white;
+    }
+
+    .btn-disconnect:hover {
+      background: #da190b;
+    }
+
+    .btn-test {
+      background: #2196F3;
+      color: white;
+    }
+
+    .status {
+      padding: 5px 15px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-connected {
+      background: #e8f5e9;
+      color: #4CAF50;
+    }
+
+    .status-disconnected {
+      background: #ffebee;
+      color: #f44336;
+    }
+
+    .content {
+      padding: 20px;
+    }
+
+    .section {
+      margin-bottom: 30px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .notification-card {
+      background: #f8f9fa;
+      border-left: 4px solid #ff9800;
+      padding: 15px;
+      margin-bottom: 10px;
+      border-radius: 8px;
+      transition: all 0.3s;
+    }
+
+    .notification-card.read {
+      border-left-color: #4CAF50;
+      opacity: 0.7;
+    }
+
+    .notification-card:hover {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .notification-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 8px;
+    }
+
+    .notification-type {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .type-deadline_alert {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .type-task_reminder {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .type-chat_message {
+      background: #f3e5f5;
+      color: #6a1b9a;
+    }
+
+    .type-ai_suggestion {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .notification-title {
+      font-weight: 600;
+      font-size: 15px;
+      color: #333;
+      margin-bottom: 5px;
+    }
+
+    .notification-content {
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .notification-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #999;
+    }
+
+    .btn-mark-read {
+      background: transparent;
+      border: 1px solid #4CAF50;
+      color: #4CAF50;
+      padding: 5px 15px;
+      font-size: 12px;
+    }
+
+    .btn-mark-read:hover {
+      background: #4CAF50;
+      color: white;
+    }
+
+    .logs-panel {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      height: 300px;
+      overflow-y: auto;
+    }
+
+    .log-entry {
+      margin-bottom: 5px;
+      padding: 3px 0;
+      border-bottom: 1px solid #333;
+    }
+
+    .log-time {
+      color: #858585;
+    }
+
+    .log-info {
+      color: #4fc1ff;
+    }
+
+    .log-success {
+      color: #89d185;
+    }
+
+    .log-error {
+      color: #f48771;
+    }
+
+    .log-event {
+      color: #ffd700;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: #f8f9fa;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 13px;
+      color: #666;
+      margin-top: 5px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔔 Notification System Demo</h1>
+      <p>Realtime notifications with Socket.IO • Task reminders • Email alerts</p>
+    </div>
+
+    <div class="connection-panel">
+      <input type="text" id="tokenInput" placeholder="Paste JWT token here..." />
+      <button class="btn-connect" onclick="connect()">Connect</button>
+      <button class="btn-disconnect" onclick="disconnect()">Disconnect</button>
+      <span id="connectionStatus" class="status status-disconnected">Disconnected</span>
+    </div>
+
+    <div class="content">
+      <!-- Stats -->
+      <div class="section">
+        <div class="stats">
+          <div class="stat-card">
+            <div class="stat-value" id="unreadCount">0</div>
+            <div class="stat-label">Unread</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="totalCount">0</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="eventsCount">0</div>
+            <div class="stat-label">Events</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notifications -->
+      <div class="section">
+        <h2 class="section-title">
+          🔔 Notifications
+          <button class="btn-test" onclick="loadNotifications()">Refresh</button>
+        </h2>
+        <div id="notificationsList">
+          <div class="empty-state">
+            <div class="empty-state-icon">📭</div>
+            <p>No notifications yet. Create a task with near deadline!</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logs -->
+      <div class="section">
+        <h2 class="section-title">📋 Socket.IO Logs</h2>
+        <div class="logs-panel" id="logsPanel">
+          <div class="log-entry">
+            <span class="log-time">[--:--:--]</span> Waiting for connection...
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let socket = null;
+    let eventCounter = 0;
+    const API_URL = 'http://localhost:3002';
+
+    function log(message, type = 'info') {
+      const logsPanel = document.getElementById('logsPanel');
+      const time = new Date().toLocaleTimeString();
+      const colorClass = type === 'success' ? 'log-success' : 
+                        type === 'error' ? 'log-error' : 
+                        type === 'event' ? 'log-event' : 'log-info';
+      
+      logsPanel.innerHTML += `
+        <div class="log-entry">
+          <span class="log-time">[${time}]</span> 
+          <span class="${colorClass}">${message}</span>
+        </div>
+      `;
+      logsPanel.scrollTop = logsPanel.scrollHeight;
+    }
+
+    function updateConnectionStatus(connected) {
+      const status = document.getElementById('connectionStatus');
+      if (connected) {
+        status.textContent = 'Connected';
+        status.className = 'status status-connected';
+      } else {
+        status.textContent = 'Disconnected';
+        status.className = 'status status-disconnected';
+      }
+    }
+
+    function updateStats(unread, total) {
+      document.getElementById('unreadCount').textContent = unread;
+      document.getElementById('totalCount').textContent = total;
+    }
+
+    function getNotificationTypeClass(type) {
+      const typeMap = {
+        'deadline_alert': 'type-deadline_alert',
+        'task_reminder': 'type-task_reminder',
+        'chat_message': 'type-chat_message',
+        'ai_suggestion': 'type-ai_suggestion',
+        'system': 'type-ai_suggestion'
+      };
+      return typeMap[type] || 'type-task_reminder';
+    }
+
+    function addNotification(notification, prepend = true) {
+      const list = document.getElementById('notificationsList');
+      
+      // Remove empty state if exists
+      if (list.querySelector('.empty-state')) {
+        list.innerHTML = '';
+      }
+
+      const card = document.createElement('div');
+      card.className = `notification-card ${notification.isRead ? 'read' : ''}`;
+      card.id = `notification-${notification.id}`;
+      card.innerHTML = `
+        <div class="notification-header">
+          <span class="notification-type ${getNotificationTypeClass(notification.type)}">
+            ${notification.type}
+          </span>
+          <small>${new Date(notification.createdAt).toLocaleString()}</small>
+        </div>
+        <div class="notification-title">${notification.title}</div>
+        <div class="notification-content">${notification.content}</div>
+        <div class="notification-meta">
+          <span>
+            ${notification.channels?.email ? '📧 Email' : ''}
+            ${notification.channels?.inApp ? '🔔 In-App' : ''}
+          </span>
+          ${!notification.isRead ? `
+            <button class="btn-mark-read" onclick="markAsRead('${notification.id}')">
+              Mark as Read
+            </button>
+          ` : '<span>✓ Read</span>'}
+        </div>
+      `;
+
+      if (prepend) {
+        list.prepend(card);
+      } else {
+        list.appendChild(card);
+      }
+    }
+
+    function markAsRead(notificationId) {
+      const token = document.getElementById('tokenInput').value;
+      
+      fetch(`${API_URL}/notifications/${notificationId}/read`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.notification) {
+          const card = document.getElementById(`notification-${notificationId}`);
+          if (card) {
+            card.classList.add('read');
+            const meta = card.querySelector('.notification-meta');
+            meta.innerHTML = '<span>✓ Read</span>';
+          }
+          log(`Marked notification ${notificationId} as read`, 'success');
+          loadNotifications();
+        }
+      })
+      .catch(err => {
+        log(`Error marking as read: ${err.message}`, 'error');
+      });
+    }
+
+    function loadNotifications() {
+      const token = document.getElementById('tokenInput').value;
+      if (!token) {
+        log('Please enter JWT token', 'error');
+        return;
+      }
+
+      fetch(`${API_URL}/notifications`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        updateStats(data.unreadCount, data.notifications?.length || 0);
+        
+        const list = document.getElementById('notificationsList');
+        if (data.notifications?.length === 0) {
+          list.innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state-icon">📭</div>
+              <p>No notifications yet. Create a task with near deadline!</p>
+            </div>
+          `;
+        } else {
+          list.innerHTML = '';
+          data.notifications.forEach(n => addNotification(n, false));
+        }
+        
+        log(`Loaded ${data.notifications?.length || 0} notifications`, 'success');
+      })
+      .catch(err => {
+        log(`Error loading notifications: ${err.message}`, 'error');
+      });
+    }
+
+    function connect() {
+      const token = document.getElementById('tokenInput').value;
+      if (!token) {
+        log('Please enter JWT token first!', 'error');
+        return;
+      }
+
+      if (socket) {
+        socket.disconnect();
+      }
+
+      socket = io(API_URL, {
+        auth: { token }
+      });
+
+      socket.on('connect', () => {
+        updateConnectionStatus(true);
+        log('✅ Connected to Socket.IO server', 'success');
+        loadNotifications();
+      });
+
+      socket.on('notification:new', ({ notification }) => {
+        eventCounter++;
+        document.getElementById('eventsCount').textContent = eventCounter;
+        log(`🔔 Received: notification:new - ${notification.title}`, 'event');
+        addNotification(notification, true);
+        
+        // Update unread count
+        const current = parseInt(document.getElementById('unreadCount').textContent);
+        updateStats(current + 1, parseInt(document.getElementById('totalCount').textContent) + 1);
+      });
+
+      socket.on('notification:read', ({ notificationId, isRead }) => {
+        eventCounter++;
+        document.getElementById('eventsCount').textContent = eventCounter;
+        log(`📖 Received: notification:read - ${notificationId}`, 'event');
+        loadNotifications();
+      });
+
+      socket.on('user:online', ({ userId }) => {
+        log(`👤 User online: ${userId}`, 'info');
+      });
+
+      socket.on('user:offline', ({ userId }) => {
+        log(`👤 User offline: ${userId}`, 'info');
+      });
+
+      socket.on('error', (err) => {
+        log(`❌ Error: ${err.message || JSON.stringify(err)}`, 'error');
+      });
+
+      socket.on('disconnect', (reason) => {
+        updateConnectionStatus(false);
+        log(`❌ Disconnected: ${reason}`, 'error');
+      });
+
+      socket.on('connect_error', (err) => {
+        log(`❌ Connection error: ${err.message}`, 'error');
+      });
+    }
+
+    function disconnect() {
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+      }
+      updateConnectionStatus(false);
+      log('Disconnected manually', 'info');
+    }
+
+    // Auto-load if token in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+    if (tokenFromUrl) {
+      document.getElementById('tokenInput').value = tokenFromUrl;
+      connect();
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+notificationsList:
+  get:
+    tags:
+      - Notification
+    summary: Danh sách thông báo
+    description: Lấy danh sách thông báo của user hiện tại với bộ lọc
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: query
+        name: isRead
+        schema:
+          type: boolean
+        description: Lọc theo trạng thái đã đọc/chưa đọc
+      - in: query
+        name: type
+        schema:
+          type: string
+          enum: [task_reminder, deadline_alert, chat_message, ai_suggestion, system]
+        description: Lọc theo loại thông báo
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+        description: Số lượng kết quả trả về
+      - in: query
+        name: offset
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+        description: Số lượng bỏ qua (phân trang)
+    responses:
+      "200":
+        description: Thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notifications:
+                  type: array
+                  items:
+                    $ref: "../openapi.yml#/components/schemas/Notification"
+                unreadCount:
+                  type: integer
+                  description: Số thông báo chưa đọc
+      "401":
+        description: Chưa đăng nhập
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "500":
+        description: Lỗi hệ thống
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+notificationMarkRead:
+  patch:
+    tags:
+      - Notification
+    summary: Đánh dấu thông báo đã đọc
+    description: Đánh dấu một thông báo cụ thể là đã đọc
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+        description: ID của thông báo
+    responses:
+      "200":
+        description: Thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notification:
+                  $ref: "../openapi.yml#/components/schemas/Notification"
+      "401":
+        description: Chưa đăng nhập
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy thông báo
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "500":
+        description: Lỗi hệ thống
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+notificationsMarkAllRead:
+  patch:
+    tags:
+      - Notification
+    summary: Đánh dấu tất cả thông báo đã đọc
+    description: Đánh dấu tất cả thông báo của user hiện tại là đã đọc
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: Thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "All notifications marked as read"
+      "401":
+        description: Chưa đăng nhập
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "500":
+        description: Lỗi hệ thống
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"

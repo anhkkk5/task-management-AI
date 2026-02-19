@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { notificationRepository } from "./notification.repository";
 import { notificationGateway } from "./notification.gateway";
 import { NotificationType, NotificationDoc } from "./notification.model";
+import { notificationQueue } from "./notification.queue";
 
 export type PublicNotification = {
   id: string;
@@ -62,6 +63,32 @@ export const notificationService = {
       notificationGateway.emitToUser(data.userId, publicNotification);
     }
 
+    // Queue email job if email channel enabled
+    if (publicNotification.channels.email) {
+      try {
+        await notificationQueue.add(
+          "send-email",
+          {
+            userId: data.userId,
+            email: data.data?.userEmail || "user@example.com", // TODO: Get from user service
+            subject: data.title,
+            html: generateEmailHtml(data.title, data.content),
+            notificationId: String(notification._id),
+          },
+          {
+            priority: 2,
+            attempts: 5,
+            backoff: {
+              type: "exponential",
+              delay: 5000,
+            },
+          },
+        );
+      } catch (err) {
+        console.error("[NotificationService] Failed to queue email job:", err);
+      }
+    }
+
     return publicNotification;
   },
 
@@ -114,3 +141,35 @@ export const notificationService = {
     await notificationRepository.markAllAsRead(new Types.ObjectId(userId));
   },
 };
+
+// Generate simple HTML email template
+function generateEmailHtml(title: string, content: string): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+    .content { background: #f9f9f9; padding: 20px; border-radius: 5px; }
+    .footer { text-align: center; padding: 20px; font-size: 12px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>${title}</h1>
+    </div>
+    <div class="content">
+      <p>${content}</p>
+    </div>
+    <div class="footer">
+      <p>Email này được gửi tự động từ Task Management System</p>
+    </div>
+  </div>
+</body>
+</html>
+`;
+}

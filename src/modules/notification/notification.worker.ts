@@ -3,6 +3,7 @@ import { getRedisConfig } from "../../services/redis.service";
 import { notificationService } from "./notification.service";
 import { NotificationType } from "./notification.model";
 import { notificationRepository } from "./notification.repository";
+import { emailService } from "./email.service";
 
 const redisConfig = getRedisConfig();
 
@@ -26,15 +27,36 @@ export const notificationWorker = new Worker(
       }
 
       case "send-email": {
-        // Sẽ được triển khai trong Commit 6
-        const { email, notificationId } = job.data as {
+        const { email, subject, html, notificationId } = job.data as {
           email: string;
+          subject: string;
+          html: string;
           notificationId: string;
         };
-        console.log(`[NotificationWorker] Email job queued for ${email}`);
-        // Mark as email sent in DB
-        await notificationRepository.markEmailSent(notificationId);
-        return { success: true, message: "Email queued for sending" };
+
+        console.log(`[NotificationWorker] Sending email to ${email}`);
+
+        // Send actual email
+        const result = await emailService.send({
+          to: email,
+          subject,
+          html,
+        });
+
+        if (result.success) {
+          // Mark as email sent in DB
+          await notificationRepository.markEmailSent(notificationId);
+          console.log(
+            `[NotificationWorker] Email sent successfully: ${result.messageId}`,
+          );
+        } else {
+          console.error(
+            `[NotificationWorker] Failed to send email: ${result.error}`,
+          );
+          throw new Error(result.error || "Failed to send email");
+        }
+
+        return result;
       }
 
       default:

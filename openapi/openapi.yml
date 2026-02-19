@@ -13,6 +13,8 @@ tags:
     description: Quản lý công việc
   - name: AI
     description: AI assistant
+  - name: Notification
+    description: Thông báo & nhắc nhở
 paths:
   /auth/register:
     $ref: "./paths/auth.yml#/authRegister"
@@ -68,6 +70,12 @@ paths:
     $ref: "./paths/ai.yml#/aiPrioritySuggest"
   /ai/schedule-plan:
     $ref: "./paths/ai.yml#/aiSchedulePlan"
+  /notifications:
+    $ref: "./paths/notification.yml#/notificationsList"
+  /notifications/{id}/read:
+    $ref: "./paths/notification.yml#/notificationMarkRead"
+  /notifications/read-all:
+    $ref: "./paths/notification.yml#/notificationsMarkAllRead"
 components:
   securitySchemes:
     bearerAuth:
@@ -77,6 +85,8 @@ components:
   schemas:
     User:
       $ref: "./components/schemas/user.yml"
+    Notification:
+      $ref: "./components/schemas/notification.yml#/Notification"
     RegisterRequest:
       $ref: "./components/schemas/auth.yml#/RegisterRequest"
     LoginRequest:
