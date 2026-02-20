@@ -96,4 +96,28 @@ export const notificationRepository = {
       readAt: { $lt: beforeDate },
     });
   },
+
+  // Find recent notification by task and type (for duplicate prevention)
+  findRecentByTaskAndType: async (
+    taskId: string,
+    userId: string,
+    type: NotificationType,
+    since: Date,
+  ) => {
+    return NotificationModel.findOne({
+      userId: new Types.ObjectId(userId),
+      type,
+      "data.taskId": taskId,
+      createdAt: { $gte: since },
+    }).lean();
+  },
+
+  // Delete notification (only owner can delete)
+  delete: async (id: string | Types.ObjectId, userId: Types.ObjectId) => {
+    const result = await NotificationModel.deleteOne({
+      _id: id,
+      userId,
+    });
+    return result.deletedCount > 0;
+  },
 };

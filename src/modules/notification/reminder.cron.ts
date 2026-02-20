@@ -3,6 +3,8 @@ import { Types } from "mongoose";
 import { Task } from "../task/task.model";
 import { notificationService } from "./notification.service";
 import { NotificationType } from "./notification.model";
+import { notificationRepository } from "./notification.repository";
+import { userRepository } from "../user/user.repository";
 
 let isRunning = false;
 let scheduledTask: ScheduledTask | null = null;
@@ -53,13 +55,25 @@ async function scanAndNotifyDeadlines(): Promise<void> {
 
       // Check đã gửi reminder cho task này chưa (trong 24h qua)
       const alreadyReminded = await hasRecentReminder(taskId, userId);
-      if (alreadyReminded) continue;
+      if (alreadyReminded) {
+        console.log(
+          `[ReminderCron] Skipping duplicate reminder for task: ${task.title}`,
+        );
+        continue;
+      }
+
+      // Lấy thông tin user để có email
+      const user = await userRepository.findById(userId);
+      if (!user) {
+        console.log(`[ReminderCron] User not found: ${userId}`);
+        continue;
+      }
 
       const deadlineStr = task.deadline
         ? new Date(task.deadline).toLocaleString("vi-VN")
         : "sắp tới";
 
-      // Tạo notification
+      // Tạo notification với email từ user
       await notificationService.create({
         userId,
         type: NotificationType.DEADLINE_ALERT,
@@ -68,15 +82,16 @@ async function scanAndNotifyDeadlines(): Promise<void> {
         data: {
           taskId,
           deadline: task.deadline,
+          userEmail: user.email,
         },
         channels: {
           inApp: true,
-          email: true, // sẽ gửi email trong Commit 6
+          email: true,
         },
       });
 
       console.log(
-        `[ReminderCron] Sent deadline alert for task: ${task.title} to user: ${userId}`,
+        `[ReminderCron] Sent deadline alert for task: ${task.title} to user: ${userId} (${user.email})`,
       );
     }
   } catch (err) {
@@ -84,15 +99,22 @@ async function scanAndNotifyDeadlines(): Promise<void> {
   }
 }
 
-// Kiểm tra đã có reminder gần đây cho task chưa
+// Kiểm tra đã có reminder gần đây cho task chưa (trong 24h qua)
 async function hasRecentReminder(
   taskId: string,
   userId: string,
 ): Promise<boolean> {
-  // TODO: Query DB để check xem đã có notification DEADLINE_ALERT
-  // cho task này trong 24h qua chưa
-  // Giờ tạm return false để luôn gửi (cho testing)
-  return false;
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const existingNotification =
+    await notificationRepository.findRecentByTaskAndType(
+      taskId,
+      userId,
+      NotificationType.DEADLINE_ALERT,
+      twentyFourHoursAgo,
+    );
+
+  return !!existingNotification;
 }
 
 // Manual trigger (cho testing)

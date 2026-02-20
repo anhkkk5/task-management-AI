@@ -140,6 +140,14 @@ export const notificationService = {
   markAllAsRead: async (userId: string): Promise<void> => {
     await notificationRepository.markAllAsRead(new Types.ObjectId(userId));
   },
+
+  // Delete notification
+  delete: async (notificationId: string, userId: string): Promise<boolean> => {
+    return notificationRepository.delete(
+      notificationId,
+      new Types.ObjectId(userId),
+    );
+  },
 };
 
 // Generate simple HTML email template

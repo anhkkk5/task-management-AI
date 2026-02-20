@@ -87,4 +87,9 @@ export const notificationQueueService = {
     await notificationQueue.clean(gracePeriodMs, 100, "completed");
     await notificationQueue.clean(gracePeriodMs, 100, "failed");
   },
+
+  // Get failed jobs for retry
+  getFailedJobs: async (limit: number = 50) => {
+    return notificationQueue.getFailed(limit);
+  },
 };

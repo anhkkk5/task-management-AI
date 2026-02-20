@@ -10,6 +10,7 @@ import SwaggerParser from "@apidevtools/swagger-parser";
 import swaggerUi from "swagger-ui-express";
 import { initChatGateway } from "./modules/chat/chat.gateway";
 import { reminderCronService } from "./modules/notification/reminder.cron";
+import "./modules/notification/notification.worker";
 
 const bootstrap = async (): Promise<void> => {
   await connect();
@@ -44,6 +45,7 @@ const bootstrap = async (): Promise<void> => {
     // Start reminder cron job
     reminderCronService.start();
     console.log(`Reminder cron job started for deadline alerts`);
+    console.log(`Notification worker started for queue processing`);
   });
 };
 
