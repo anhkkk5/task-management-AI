@@ -507,4 +507,109 @@ export const authService = {
 
     return toPublicUser(updated);
   },
+
+  // Forgot Password Flow
+  forgotPassword: async (
+    email: string,
+  ): Promise<{ message: string; ttlSeconds: number }> => {
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      throw new Error("INVALID_EMAIL");
+    }
+
+    const user = await authRepository.findByEmail(normalizedEmail);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const otp = otpService.generateOtp();
+    await otpService.saveChangePasswordOtp(normalizedEmail, otp);
+    await emailService.sendChangePasswordOtpEmail(normalizedEmail, otp);
+
+    return {
+      message: "Mã OTP đã được gửi đến email của bạn",
+      ttlSeconds: otpService.getOtpTtlSeconds(),
+    };
+  },
+
+  verifyForgotPasswordOtp: async (
+    email: string,
+    otp: string,
+  ): Promise<{ message: string }> => {
+    const normalizedEmail = email?.trim().toLowerCase();
+    const normalizedOtp = otp?.trim();
+
+    if (!normalizedEmail || !normalizedOtp) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      throw new Error("INVALID_EMAIL");
+    }
+    if (!/^\d{6}$/.test(normalizedOtp)) {
+      throw new Error("INVALID_OTP");
+    }
+
+    const user = await authRepository.findByEmail(normalizedEmail);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const ok = await otpService.verifyChangePasswordOtp(
+      normalizedEmail,
+      normalizedOtp,
+    );
+    if (!ok) {
+      throw new Error("OTP_INVALID_OR_EXPIRED");
+    }
+
+    return { message: "Xác thực OTP thành công" };
+  },
+
+  resetPassword: async (
+    email: string,
+    otp: string,
+    newPassword: string,
+  ): Promise<{ message: string }> => {
+    const normalizedEmail = email?.trim().toLowerCase();
+    const normalizedOtp = otp?.trim();
+
+    if (!normalizedEmail || !normalizedOtp || !newPassword) {
+      throw new Error("INVALID_INPUT");
+    }
+    if (!isValidEmail(normalizedEmail)) {
+      throw new Error("INVALID_EMAIL");
+    }
+    if (!/^\d{6}$/.test(normalizedOtp)) {
+      throw new Error("INVALID_OTP");
+    }
+    if (newPassword.length < 6) {
+      throw new Error("INVALID_PASSWORD");
+    }
+
+    const user = await authRepository.findByEmail(normalizedEmail);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const ok = await otpService.verifyChangePasswordOtp(
+      normalizedEmail,
+      normalizedOtp,
+    );
+    if (!ok) {
+      throw new Error("OTP_INVALID_OR_EXPIRED");
+    }
+
+    const saltRounds = process.env.BCRYPT_SALT_ROUNDS
+      ? Number(process.env.BCRYPT_SALT_ROUNDS)
+      : 10;
+    const hashed = await bcrypt.hash(newPassword, saltRounds);
+
+    await authRepository.updatePassword(String(user._id), hashed);
+    await otpService.deleteChangePasswordOtp(normalizedEmail);
+
+    return { message: "Đặt lại mật khẩu thành công" };
+  },
 };

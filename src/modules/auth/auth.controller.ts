@@ -273,3 +273,71 @@ export const updateProfile = async (
     handleAuthError(err, res, updateProfileErrorMap);
   }
 };
+
+const forgotPasswordErrorMap = {
+  INVALID_INPUT: { status: 400, message: "Thiếu email" },
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  USER_NOT_FOUND: { status: 404, message: "Không tìm thấy người dùng" },
+} as const;
+
+const verifyForgotPasswordOtpErrorMap = {
+  INVALID_INPUT: { status: 400, message: "Thiếu email hoặc OTP" },
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  INVALID_OTP: { status: 400, message: "OTP phải có 6 chữ số" },
+  USER_NOT_FOUND: { status: 404, message: "Không tìm thấy người dùng" },
+  OTP_INVALID_OR_EXPIRED: { status: 400, message: "OTP sai hoặc đã hết hạn" },
+} as const;
+
+const resetPasswordErrorMap = {
+  INVALID_INPUT: { status: 400, message: "Thiếu thông tin" },
+  INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
+  INVALID_OTP: { status: 400, message: "OTP phải có 6 chữ số" },
+  INVALID_PASSWORD: { status: 400, message: "Mật khẩu phải ít nhất 6 ký tự" },
+  USER_NOT_FOUND: { status: 404, message: "Không tìm thấy người dùng" },
+  OTP_INVALID_OR_EXPIRED: { status: 400, message: "OTP sai hoặc đã hết hạn" },
+} as const;
+
+export const forgotPassword = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const result = await authService.forgotPassword(
+      String(_req.body?.email ?? ""),
+    );
+    res.status(200).json(result);
+  } catch (err) {
+    handleAuthError(err, res, forgotPasswordErrorMap);
+  }
+};
+
+export const verifyForgotPasswordOtp = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const result = await authService.verifyForgotPasswordOtp(
+      String(_req.body?.email ?? ""),
+      String(_req.body?.otp ?? ""),
+    );
+    res.status(200).json(result);
+  } catch (err) {
+    handleAuthError(err, res, verifyForgotPasswordOtpErrorMap);
+  }
+};
+
+export const resetPassword = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const result = await authService.resetPassword(
+      String(_req.body?.email ?? ""),
+      String(_req.body?.otp ?? ""),
+      String(_req.body?.newPassword ?? ""),
+    );
+    res.status(200).json(result);
+  } catch (err) {
+    handleAuthError(err, res, resetPasswordErrorMap);
+  }
+};

@@ -48,4 +48,15 @@ export const authRepository = {
       { new: true },
     ).exec();
   },
+
+  updatePassword: async (
+    userId: string | Types.ObjectId,
+    hashedPassword: string,
+  ): Promise<UserDoc | null> => {
+    return User.findByIdAndUpdate(
+      userId,
+      { $set: { password: hashedPassword } },
+      { new: true },
+    ).exec();
+  },
 };

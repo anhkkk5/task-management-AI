@@ -10,6 +10,9 @@ import {
   sendOtp,
   verifyOtp,
   updateProfile,
+  forgotPassword,
+  verifyForgotPasswordOtp,
+  resetPassword,
 } from "./auth.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
 
@@ -25,5 +28,10 @@ authRouter.post("/logout", logout);
 authRouter.post("/logout-all", authMiddleware, logoutAll);
 authRouter.get("/me", authMiddleware, me);
 authRouter.patch("/update-profile", authMiddleware, updateProfile);
+
+// Forgot password routes
+authRouter.post("/forgot-password", forgotPassword);
+authRouter.post("/verify-forgot-password-otp", verifyForgotPasswordOtp);
+authRouter.post("/reset-password", resetPassword);
 
 export default authRouter;
