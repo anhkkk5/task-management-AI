@@ -317,22 +317,45 @@ export const authService = {
 
     await redis.del(rlKey);
 
+    // Clean up old refresh tokens for this user before creating new one
+    const userId = String(user._id);
+    const prefix = getRefreshUserPrefix(userId);
+    const oldKeys: string[] = [];
+    let cursor = "0";
+    do {
+      const [next, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      if (Array.isArray(batch) && batch.length) {
+        oldKeys.push(...batch);
+      }
+    } while (cursor !== "0");
+
+    if (oldKeys.length) {
+      await redis.del(...oldKeys);
+    }
+
     const accessToken = signAccessToken({
-      userId: String(user._id),
+      userId,
       email: user.email,
       role: user.role,
     });
 
     const jti = randomUUID();
     const refreshToken = signRefreshToken({
-      userId: String(user._id),
+      userId,
       email: user.email,
       role: user.role,
       jti,
     });
 
     await redis.set(
-      getRefreshKeyByUser(String(user._id), jti),
+      getRefreshKeyByUser(userId, jti),
       "1",
       "EX",
       getRefreshTtlSeconds(),
