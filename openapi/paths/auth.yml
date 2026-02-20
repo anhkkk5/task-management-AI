@@ -322,3 +322,96 @@ authUpdateProfile:
           application/json:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authForgotPassword:
+  post:
+    tags:
+      - Auth
+    summary: Quên mật khẩu - Gửi OTP
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/ForgotPasswordRequest"
+    responses:
+      "200":
+        description: Đã gửi OTP
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/ForgotPasswordResponse"
+      "400":
+        description: Dữ liệu không hợp lệ
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authVerifyForgotPasswordOtp:
+  post:
+    tags:
+      - Auth
+    summary: Quên mật khẩu - Xác thực OTP
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/VerifyForgotPasswordOtpRequest"
+    responses:
+      "200":
+        description: Xác thực OTP thành công
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/VerifyForgotPasswordOtpResponse"
+      "400":
+        description: OTP sai hoặc đã hết hạn
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
+authResetPassword:
+  post:
+    tags:
+      - Auth
+    summary: Quên mật khẩu - Đặt lại mật khẩu
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "../components/schemas/auth.yml#/ResetPasswordRequest"
+    responses:
+      "200":
+        description: Đặt lại mật khẩu thành công
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/auth.yml#/ResetPasswordResponse"
+      "400":
+        description: Dữ liệu không hợp lệ hoặc OTP đã hết hạn
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "404":
+        description: Không tìm thấy người dùng
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"

@@ -134,3 +134,73 @@ LogoutResponse:
 MeResponse:
   allOf:
     - $ref: "./user.yml"
+
+ForgotPasswordRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+  required:
+    - email
+
+ForgotPasswordResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      example: Mã OTP đã được gửi đến email của bạn
+    ttlSeconds:
+      type: number
+      example: 300
+  required:
+    - message
+    - ttlSeconds
+
+VerifyForgotPasswordOtpRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+    otp:
+      type: string
+      example: "123456"
+  required:
+    - email
+    - otp
+
+VerifyForgotPasswordOtpResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      example: Xác thực OTP thành công
+  required:
+    - message
+
+ResetPasswordRequest:
+  type: object
+  properties:
+    email:
+      type: string
+      example: user@gmail.com
+    otp:
+      type: string
+      example: "123456"
+    newPassword:
+      type: string
+      example: "newpassword123"
+  required:
+    - email
+    - otp
+    - newPassword
+
+ResetPasswordResponse:
+  type: object
+  properties:
+    message:
+      type: string
+      example: Đặt lại mật khẩu thành công
+  required:
+    - message
