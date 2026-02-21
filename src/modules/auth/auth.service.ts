@@ -14,6 +14,7 @@ import { UserRole } from "./auth.model";
 import { otpService } from "./otp.service";
 import { emailService } from "./email.service";
 import { getRedis } from "../../services/redis.service";
+import { cloudinaryService } from "../../services/cloudinary.service";
 
 type PublicUser = {
   id: string;
@@ -506,6 +507,46 @@ export const authService = {
     }
 
     return toPublicUser(updated);
+  },
+
+  uploadAvatar: async (
+    userId: string,
+    file: Express.Multer.File,
+  ): Promise<string> => {
+    if (!file) {
+      throw new Error("INVALID_INPUT");
+    }
+
+    // Validate file type
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new Error("INVALID_FILE_TYPE");
+    }
+
+    // Validate file size (5MB)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      throw new Error("FILE_TOO_LARGE");
+    }
+
+    // Upload to Cloudinary
+    const result = await cloudinaryService.uploadBuffer(file.buffer, {
+      folder: "avatars",
+      public_id: `user_${userId}_${Date.now()}`,
+      transformation: [
+        { width: 400, height: 400, crop: "fill" },
+        { quality: "auto" },
+      ],
+    });
+
+    if (!result?.secure_url) {
+      throw new Error("UPLOAD_FAILED");
+    }
+
+    // Update user avatar in database
+    await authRepository.updateProfile(userId, { avatar: result.secure_url });
+
+    return result.secure_url;
   },
 
   // Forgot Password Flow

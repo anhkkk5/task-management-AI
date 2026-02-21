@@ -1,4 +1,5 @@
 import { Router } from "express";
+import multer from "multer";
 import {
   login,
   logout,
@@ -13,10 +14,17 @@ import {
   forgotPassword,
   verifyForgotPasswordOtp,
   resetPassword,
+  uploadAvatar,
 } from "./auth.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
 
 const authRouter = Router();
+
+// Multer storage config - store in memory for cloudinary upload
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+});
 
 authRouter.post("/register", register);
 authRouter.post("/send-otp", sendOtp);
@@ -28,6 +36,12 @@ authRouter.post("/logout", logout);
 authRouter.post("/logout-all", authMiddleware, logoutAll);
 authRouter.get("/me", authMiddleware, me);
 authRouter.patch("/update-profile", authMiddleware, updateProfile);
+authRouter.post(
+  "/upload-avatar",
+  authMiddleware,
+  upload.single("avatar"),
+  uploadAvatar,
+);
 
 // Forgot password routes
 authRouter.post("/forgot-password", forgotPassword);

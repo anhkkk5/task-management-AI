@@ -323,6 +323,54 @@ authUpdateProfile:
             schema:
               $ref: "../openapi.yml#/components/schemas/ErrorResponse"
 
+authUploadAvatar:
+  post:
+    tags:
+      - Auth
+    summary: Tải lên avatar người dùng
+    security:
+      - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            properties:
+              avatar:
+                type: string
+                format: binary
+                description: File ảnh (jpg, png, webp, gif - max 5MB)
+    responses:
+      "200":
+        description: Tải lên thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  description: URL của ảnh đã upload
+      "400":
+        description: File không hợp lệ hoặc quá lớn
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "401":
+        description: Chưa đăng nhập
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+      "500":
+        description: Lỗi khi upload ảnh
+        content:
+          application/json:
+            schema:
+              $ref: "../openapi.yml#/components/schemas/ErrorResponse"
+
 authForgotPassword:
   post:
     tags:

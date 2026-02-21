@@ -274,6 +274,36 @@ export const updateProfile = async (
   }
 };
 
+const uploadAvatarErrorMap = {
+  INVALID_INPUT: { status: 400, message: "Thiếu file ảnh" },
+  FILE_TOO_LARGE: { status: 400, message: "Ảnh phải nhỏ hơn 5MB" },
+  INVALID_FILE_TYPE: { status: 400, message: "Chỉ chấp nhận file ảnh" },
+  UPLOAD_FAILED: { status: 500, message: "Tải ảnh lên thất bại" },
+} as const;
+
+export const uploadAvatar = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    if (!_req.file) {
+      res.status(400).json({ message: "Thiếu file ảnh" });
+      return;
+    }
+
+    const url = await authService.uploadAvatar(userId, _req.file);
+    res.status(200).json({ url });
+  } catch (err) {
+    handleAuthError(err, res, uploadAvatarErrorMap);
+  }
+};
+
 const forgotPasswordErrorMap = {
   INVALID_INPUT: { status: 400, message: "Thiếu email" },
   INVALID_EMAIL: { status: 400, message: "Email không hợp lệ" },
