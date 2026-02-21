@@ -14,7 +14,7 @@ import { UserRole } from "./auth.model";
 import { otpService } from "./otp.service";
 import { emailService } from "./email.service";
 import { getRedis } from "../../services/redis.service";
-import { cloudinaryService } from "../../services/cloudinary.service";
+import { uploadImageBuffer } from "../../services/cloudinary.service";
 
 type PublicUser = {
   id: string;
@@ -530,23 +530,19 @@ export const authService = {
     }
 
     // Upload to Cloudinary
-    const result = await cloudinaryService.uploadBuffer(file.buffer, {
+    const result = await uploadImageBuffer(file.buffer, {
       folder: "avatars",
-      public_id: `user_${userId}_${Date.now()}`,
-      transformation: [
-        { width: 400, height: 400, crop: "fill" },
-        { quality: "auto" },
-      ],
+      publicId: `user_${userId}_${Date.now()}`,
     });
 
-    if (!result?.secure_url) {
+    if (!result?.url) {
       throw new Error("UPLOAD_FAILED");
     }
 
     // Update user avatar in database
-    await authRepository.updateProfile(userId, { avatar: result.secure_url });
+    await authRepository.updateProfile(userId, { avatar: result.url });
 
-    return result.secure_url;
+    return result.url;
   },
 
   // Forgot Password Flow
