@@ -186,6 +186,7 @@ export const listTasks = async (
 ): Promise<void> => {
   try {
     const userId = _req.user?.userId;
+    console.log("listTasks - userId from token:", userId);
     if (!userId) {
       res.status(401).json({ message: "Chưa đăng nhập" });
       return;

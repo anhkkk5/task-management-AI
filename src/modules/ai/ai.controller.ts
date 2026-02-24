@@ -527,25 +527,36 @@ export const schedulePlan = async (
       return;
     }
 
-    const goal = String((req as any).body?.goal ?? "").trim();
-    const daysRaw = (req as any).body?.days;
-    const days = daysRaw !== undefined ? Number(daysRaw) : undefined;
+    const taskIds = (req as any).body?.taskIds;
+    const startDateRaw = (req as any).body?.startDate;
 
-    if (!goal) {
-      res.status(400).json({ message: "Goal không hợp lệ" });
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      res.status(400).json({ message: "Danh sách taskIds không hợp lệ" });
       return;
     }
-    if (days !== undefined && (!Number.isFinite(days) || days <= 0)) {
-      res.status(400).json({ message: "Days không hợp lệ" });
+    if (taskIds.length > 20) {
+      res
+        .status(400)
+        .json({ message: "Tối đa 20 công việc trong một lịch trình" });
       return;
     }
 
-    const result = await aiService.schedulePlan(userId, { goal, days });
+    const startDate = startDateRaw ? new Date(startDateRaw) : new Date();
+    if (isNaN(startDate.getTime())) {
+      res.status(400).json({ message: "Ngày bắt đầu không hợp lệ" });
+      return;
+    }
+
+    const result = await aiService.schedulePlan(userId, { taskIds, startDate });
     res.status(200).json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
     if (message === "NOT_IMPLEMENTED") {
       res.status(501).json({ message: "Chức năng chưa triển khai" });
+      return;
+    }
+    if (message === "TASK_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy công việc" });
       return;
     }
     res.status(500).json({ message: "Lỗi hệ thống" });

@@ -8,6 +8,7 @@ import {
   toPublicMessage,
 } from "./ai.mapper";
 import { aiCacheService } from "./ai.cache.service";
+import { taskRepository } from "../task/task.repository";
 
 export const aiService = {
   chat: async (
@@ -440,9 +441,149 @@ export const aiService = {
   },
 
   schedulePlan: async (
-    _userId: string,
-    _input: { goal: string; days?: number },
-  ): Promise<{ plan: string }> => {
-    throw new Error("NOT_IMPLEMENTED");
+    userId: string,
+    input: { taskIds: string[]; startDate: Date },
+  ): Promise<{
+    schedule: {
+      day: string;
+      date: string;
+      tasks: {
+        taskId: string;
+        title: string;
+        priority: string;
+        suggestedTime: string;
+        reason: string;
+      }[];
+    }[];
+    totalTasks: number;
+    suggestedOrder: string[];
+  }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+    const userObjectId = new Types.ObjectId(userId);
+
+    // Fetch all tasks by IDs
+    const tasks: any[] = [];
+    for (const taskId of input.taskIds) {
+      if (!Types.ObjectId.isValid(taskId)) {
+        throw new Error("TASK_ID_INVALID");
+      }
+      const task = await taskRepository.findByIdForUser({
+        taskId,
+        userId: userObjectId,
+      });
+      if (!task) {
+        throw new Error("TASK_NOT_FOUND");
+      }
+      tasks.push(task);
+    }
+
+    // Prepare task data for AI
+    const taskData = tasks.map((t) => ({
+      id: String(t._id),
+      title: t.title,
+      description: t.description || "",
+      priority: t.priority,
+      deadline: t.deadline ? t.deadline.toISOString() : null,
+      status: t.status,
+    }));
+
+    const startDateStr = input.startDate.toISOString().split("T")[0];
+
+    const prompt = `Hãy tạo lịch trình làm việc tối ưu cho các công việc sau, bắt đầu từ ngày ${startDateStr}.
+
+Danh sách công việc:
+${JSON.stringify(taskData, null, 2)}
+
+Yêu cầu bắt buộc:
+1. Phân bổ công việc vào các ngày trong tuần (tối đa 7 ngày)
+2. Sắp xếp thứ tự ưu tiên dựa trên: deadline gần nhất, mức độ ưu tiên (urgent > high > medium > low), độ phức tạp công việc
+3. Mỗi ngày không nên quá 4-5 công việc lớn
+4. Đề xuất thời gian làm việc hợp lý (morning/afternoon/evening)
+5. Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích)
+
+Format JSON:
+{
+  "schedule": [
+    {
+      "day": "Thứ Hai",
+      "date": "2024-01-15",
+      "tasks": [
+        {
+          "taskId": "id",
+          "title": "Tên công việc",
+          "priority": "high",
+          "suggestedTime": "09:00 - 11:00",
+          "reason": "Lý do sắp xếp"
+        }
+      ]
+    }
+  ],
+  "suggestedOrder": ["taskId1", "taskId2", "taskId3"]
+}`;
+
+    const result = await aiProvider.chat({
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.3,
+      maxTokens: 1500,
+    });
+
+    const raw = (result.content || "").trim();
+
+    const extractJson = (text: string): string => {
+      const firstBrace = text.indexOf("{");
+      const lastBrace = text.lastIndexOf("}");
+      if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+        return text;
+      }
+      return text.slice(firstBrace, lastBrace + 1);
+    };
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(extractJson(raw));
+    } catch {
+      throw new Error("AI_JSON_INVALID");
+    }
+
+    // Validate response
+    if (
+      !Array.isArray(parsed?.schedule) ||
+      !Array.isArray(parsed?.suggestedOrder)
+    ) {
+      throw new Error("AI_RESPONSE_INVALID");
+    }
+
+    // Normalize dates in schedule
+    const normalizedSchedule = parsed.schedule.map((day: any) => ({
+      day: String(day?.day ?? ""),
+      date: String(day?.date ?? ""),
+      tasks: Array.isArray(day?.tasks)
+        ? day.tasks.map((t: any) => ({
+            taskId: String(t?.taskId ?? ""),
+            title: String(t?.title ?? ""),
+            priority: String(t?.priority ?? "medium"),
+            suggestedTime: String(t?.suggestedTime ?? ""),
+            reason: String(t?.reason ?? ""),
+          }))
+        : [],
+    }));
+
+    return {
+      schedule: normalizedSchedule,
+      totalTasks: tasks.length,
+      suggestedOrder: parsed.suggestedOrder.map((id: any) => String(id)),
+    };
   },
 };
