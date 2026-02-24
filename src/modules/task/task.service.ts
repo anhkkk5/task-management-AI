@@ -8,6 +8,7 @@ import {
 } from "./task.dto";
 import { getRedis } from "../../services/redis.service";
 import { aiService } from "../ai/ai.service";
+import { userHabitRepository } from "../user/user-habit.repository";
 
 export type PublicTask = {
   id: string;
@@ -159,6 +160,21 @@ export const taskService = {
       reminderAt: dto.reminderAt,
     });
 
+    // Auto-breakdown for complex tasks
+    const isComplex =
+      dto.priority === "high" ||
+      dto.priority === "urgent" ||
+      /(phân tích|thiết kế|xây dựng|develop|implement|code|backend|frontend)/i.test(
+        title,
+      );
+
+    if (isComplex) {
+      // Trigger auto-breakdown asynchronously (don't wait)
+      taskService.autoBreakdown(userId, String(doc._id)).catch(() => {
+        // Ignore errors from auto-breakdown
+      });
+    }
+
     await invalidateTasksCache(userId);
 
     return toPublicTask(doc);
@@ -257,6 +273,67 @@ export const taskService = {
 
     await invalidateTasksCache(userId);
     return toPublicTask(updated);
+  },
+
+  autoBreakdown: async (
+    userId: string,
+    taskId: string,
+  ): Promise<{
+    breakdown: { title: string; status: string }[];
+    applied: boolean;
+  }> => {
+    // Check if user has auto-breakdown enabled
+    const userHabits = await userHabitRepository.findByUserId(userId);
+    const autoBreakdownEnabled =
+      userHabits?.aiPreferences?.autoBreakdown ?? true;
+
+    if (!autoBreakdownEnabled) {
+      return { breakdown: [], applied: false };
+    }
+
+    const task = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!task) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    // Only auto-breakdown for complex tasks (high priority or with keywords indicating complexity)
+    const isComplex =
+      task.priority === "high" ||
+      task.priority === "urgent" ||
+      /(phân tích|thiết kế|xây dựng|develop|implement|code|backend|frontend)/i.test(
+        task.title,
+      );
+
+    if (!isComplex) {
+      return { breakdown: [], applied: false };
+    }
+
+    try {
+      const breakdown = await aiService.taskBreakdown(userId, {
+        title: task.title,
+        deadline: task.deadline,
+      });
+
+      await taskRepository.updateByIdForUser(
+        { taskId, userId: new Types.ObjectId(userId) },
+        {
+          aiBreakdown: breakdown.steps.map((s) => ({
+            title: s.title,
+            status: s.status as any,
+          })),
+        },
+      );
+
+      await invalidateTasksCache(userId);
+      return { breakdown: breakdown.steps, applied: true };
+    } catch (error) {
+      // If AI breakdown fails, return empty but don't throw
+      return { breakdown: [], applied: false };
+    }
   },
 
   list: async (

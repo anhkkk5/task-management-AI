@@ -1,0 +1,201 @@
+userHabits:
+  get:
+    summary: Lấy thói quen người dùng
+    description: Lấy thông tin thói quen làm việc và phân tích năng suất của user
+    tags:
+      - User
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: Thói quen người dùng
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                habits:
+                  type: object
+                  properties:
+                    userId:
+                      type: string
+                    productiveHours:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          start:
+                            type: number
+                            description: Giờ bắt đầu (0-23)
+                          end:
+                            type: number
+                            description: Giờ kết thúc (0-23)
+                    preferredBreakDuration:
+                      type: number
+                      description: Thời gian nghỉ giữa task (phút)
+                    maxFocusDuration:
+                      type: number
+                      description: Thời gian tập trung tối đa (phút)
+                    preferredWorkPattern:
+                      type: string
+                      enum: [morning, afternoon, evening, mixed]
+                    aiPreferences:
+                      type: object
+                      properties:
+                        autoBreakdown:
+                          type: boolean
+                        autoSchedule:
+                          type: boolean
+                        prioritizeDeadline:
+                          type: boolean
+                        bufferBetweenTasks:
+                          type: number
+                analysis:
+                  type: object
+                  nullable: true
+                  properties:
+                    mostProductiveHours:
+                      type: array
+                      items:
+                        type: number
+                      description: Các giờ làm việc hiệu quả nhất
+                    completionRate:
+                      type: number
+                      description: Tỷ lệ hoàn thành task (0-1)
+                    pattern:
+                      type: string
+      "401":
+        description: Chưa đăng nhập
+      "500":
+        description: Lỗi hệ thống
+
+  patch:
+    summary: Cập nhật thói quen người dùng
+    description: Cập nhật thói quen làm việc và preferences AI
+    tags:
+      - User
+    security:
+      - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              productiveHours:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    start:
+                      type: number
+                      minimum: 0
+                      maximum: 23
+                    end:
+                      type: number
+                      minimum: 0
+                      maximum: 23
+                example: [{ "start": 9, "end": 11 }, { "start": 14, "end": 16 }]
+              preferredBreakDuration:
+                type: number
+                minimum: 0
+                maximum: 120
+                example: 15
+              maxFocusDuration:
+                type: number
+                minimum: 15
+                maximum: 240
+                example: 90
+              preferredWorkPattern:
+                type: string
+                enum: [morning, afternoon, evening, mixed]
+                example: morning
+              aiPreferences:
+                type: object
+                properties:
+                  autoBreakdown:
+                    type: boolean
+                    example: true
+                  autoSchedule:
+                    type: boolean
+                    example: true
+                  prioritizeDeadline:
+                    type: boolean
+                    example: true
+                  bufferBetweenTasks:
+                    type: number
+                    example: 15
+    responses:
+      "200":
+        description: Đã cập nhật thói quen
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                habits:
+                  type: object
+      "400":
+        description: Dữ liệu không hợp lệ
+      "401":
+        description: Chưa đăng nhập
+      "500":
+        description: Lỗi hệ thống
+
+userHabitsTrack:
+  post:
+    summary: Ghi nhận hoàn thành task
+    description: Theo dõi thời điểm user hoàn thành task để phân tích thói quen
+    tags:
+      - User
+    security:
+      - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - hour
+              - dayOfWeek
+              - completed
+            properties:
+              hour:
+                type: number
+                minimum: 0
+                maximum: 23
+                description: Giờ hoàn thành (0-23)
+                example: 9
+              dayOfWeek:
+                type: number
+                minimum: 0
+                maximum: 6
+                description: Thứ trong tuần (0=Chủ nhật, 6=Thứ bảy)
+                example: 1
+              completed:
+                type: boolean
+                description: Task đã hoàn thành hay chưa
+                example: true
+              duration:
+                type: number
+                description: Thời gian làm task (phút)
+                example: 45
+    responses:
+      "200":
+        description: Đã ghi nhận
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Đã ghi nhận"
+      "400":
+        description: Thiếu thông tin bắt buộc
+      "401":
+        description: Chưa đăng nhập
+      "500":
+        description: Lỗi hệ thống

@@ -550,6 +550,7 @@ export const schedulePlan = async (
     const result = await aiService.schedulePlan(userId, { taskIds, startDate });
     res.status(200).json(result);
   } catch (err) {
+    console.error("schedulePlan error:", err);
     const message = err instanceof Error ? err.message : "UNKNOWN";
     if (message === "NOT_IMPLEMENTED") {
       res.status(501).json({ message: "Chức năng chưa triển khai" });
@@ -559,6 +560,18 @@ export const schedulePlan = async (
       res.status(404).json({ message: "Không tìm thấy công việc" });
       return;
     }
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "User ID không hợp lệ" });
+      return;
+    }
+    if (message === "TASK_ID_INVALID") {
+      res.status(400).json({ message: "Task ID không hợp lệ" });
+      return;
+    }
+    if (message === "AI_JSON_INVALID" || message === "AI_RESPONSE_INVALID") {
+      res.status(502).json({ message: "AI trả về phản hồi không hợp lệ" });
+      return;
+    }
+    res.status(500).json({ message: "Lỗi hệ thống", error: message });
   }
 };

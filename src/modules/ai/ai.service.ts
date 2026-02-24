@@ -9,6 +9,7 @@ import {
 } from "./ai.mapper";
 import { aiCacheService } from "./ai.cache.service";
 import { taskRepository } from "../task/task.repository";
+import { userHabitRepository } from "../user/user-habit.repository";
 
 export const aiService = {
   chat: async (
@@ -457,6 +458,7 @@ export const aiService = {
     }[];
     totalTasks: number;
     suggestedOrder: string[];
+    personalizationNote: string;
   }> => {
     if (!Types.ObjectId.isValid(userId)) {
       throw new Error("USER_ID_INVALID");
@@ -491,17 +493,52 @@ export const aiService = {
 
     const startDateStr = input.startDate.toISOString().split("T")[0];
 
-    const prompt = `Hãy tạo lịch trình làm việc tối ưu cho các công việc sau, bắt đầu từ ngày ${startDateStr}.
+    // Fetch user habits for personalized scheduling
+    const userHabits = await userHabitRepository.findByUserId(userId);
+    const productivityAnalysis =
+      await userHabitRepository.analyzeProductivity(userId);
+
+    // Prepare user preferences text
+    let userPreferencesText = "";
+    if (userHabits) {
+      userPreferencesText += `\n\nThói quen người dùng:\n`;
+      if (userHabits.productiveHours?.length) {
+        userPreferencesText += `- Giờ làm việc hiệu quả: ${userHabits.productiveHours.map((h) => `${h.start}h-${h.end}h`).join(", ")}\n`;
+      }
+      if (
+        userHabits.preferredWorkPattern &&
+        userHabits.preferredWorkPattern !== "mixed"
+      ) {
+        const patternMap: Record<string, string> = {
+          morning: "buổi sáng",
+          afternoon: "buổi chiều",
+          evening: "buổi tối",
+        };
+        userPreferencesText += `- Thích làm việc vào ${patternMap[userHabits.preferredWorkPattern] || userHabits.preferredWorkPattern}\n`;
+      }
+      userPreferencesText += `- Thời gian nghỉ giữa task: ${userHabits.preferredBreakDuration || 15} phút\n`;
+      userPreferencesText += `- Thời gian tập trung tối đa: ${userHabits.maxFocusDuration || 90} phút\n`;
+    }
+
+    if (productivityAnalysis) {
+      userPreferencesText += `- Tỷ lệ hoàn thành task: ${(productivityAnalysis.completionRate * 100).toFixed(0)}%\n`;
+      if (productivityAnalysis.mostProductiveHours.length > 0) {
+        userPreferencesText += `- Giờ hiệu quả nhất: ${productivityAnalysis.mostProductiveHours.slice(0, 3).join("h, ")}h\n`;
+      }
+    }
+
+    const prompt = `Hãy tạo lịch trình làm việc tối ưu và CÁ NHÂN HÓA cho người dùng, bắt đầu từ ngày ${startDateStr}.
 
 Danh sách công việc:
 ${JSON.stringify(taskData, null, 2)}
-
+${userPreferencesText}
 Yêu cầu bắt buộc:
-1. Phân bổ công việc vào các ngày trong tuần (tối đa 7 ngày)
-2. Sắp xếp thứ tự ưu tiên dựa trên: deadline gần nhất, mức độ ưu tiên (urgent > high > medium > low), độ phức tạp công việc
-3. Mỗi ngày không nên quá 4-5 công việc lớn
-4. Đề xuất thời gian làm việc hợp lý (morning/afternoon/evening)
-5. Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích)
+1. Tôn trọng thói quen người dùng - sắp xếp task ưu tiên vào giờ họ làm việc hiệu quả nhất
+2. Phân bổ công việc theo khung giờ làm việc (08:00 - 18:00)
+3. Thêm thời gian nghỉ giữa các task theo thói quen người dùng
+4. Không để task nào kéo dài quá thời gian tập trung tối đa
+5. Sắp xếp ưu tiên: deadline gần > độ ưu tiên cao > task khó vào giờ tỉnh táo
+6. Trả về DUY NHẤT JSON hợp lệ
 
 Format JSON:
 {
@@ -515,12 +552,13 @@ Format JSON:
           "title": "Tên công việc",
           "priority": "high",
           "suggestedTime": "09:00 - 11:00",
-          "reason": "Lý do sắp xếp"
+          "reason": "Lý do cá nhân hóa"
         }
       ]
     }
   ],
-  "suggestedOrder": ["taskId1", "taskId2", "taskId3"]
+  "suggestedOrder": ["taskId1", "taskId2"],
+  "personalizationNote": "Giải thích ngắn tại sao lịch này phù hợp với thói quen người dùng"
 }`;
 
     const result = await aiProvider.chat({
@@ -584,6 +622,7 @@ Format JSON:
       schedule: normalizedSchedule,
       totalTasks: tasks.length,
       suggestedOrder: parsed.suggestedOrder.map((id: any) => String(id)),
+      personalizationNote: String(parsed?.personalizationNote ?? ""),
     };
   },
 };

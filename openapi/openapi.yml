@@ -52,6 +52,10 @@ paths:
     $ref: "./paths/user.yml#/userChangePassword"
   /users/change-password/send-otp:
     $ref: "./paths/user.yml#/userSendChangePasswordOtp"
+  /users/habits:
+    $ref: "./paths/user-habit.yml#/userHabits"
+  /users/habits/track:
+    $ref: "./paths/user-habit.yml#/userHabitsTrack"
   /users/{id}:
     $ref: "./paths/user.yml#/userGetById"
   /tasks:
