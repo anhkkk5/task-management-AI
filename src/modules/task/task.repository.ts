@@ -232,4 +232,33 @@ export const taskRepository = {
 
     return { items, total };
   },
+
+  // Find tasks with overlapping scheduled time
+  findConflictingTasks: async (params: {
+    userId: string | Types.ObjectId;
+    startTime: Date;
+    endTime: Date;
+    excludeTaskId?: string;
+  }): Promise<TaskDoc[]> => {
+    const filter: Record<string, unknown> = {
+      userId: params.userId,
+      "scheduledTime.start": { $exists: true, $ne: null },
+      "scheduledTime.end": { $exists: true, $ne: null },
+      status: { $nin: ["completed", "cancelled"] },
+    };
+
+    // Exclude specific task if provided (for update scenario)
+    if (params.excludeTaskId) {
+      filter._id = { $ne: new Types.ObjectId(params.excludeTaskId) };
+    }
+
+    // Find tasks where scheduled time overlaps with the given time range
+    // Overlap condition: (taskStart < givenEnd) AND (taskEnd > givenStart)
+    filter.$and = [
+      { "scheduledTime.start": { $lt: params.endTime } },
+      { "scheduledTime.end": { $gt: params.startTime } },
+    ];
+
+    return Task.find(filter).exec();
+  },
 };

@@ -561,4 +561,130 @@ export const taskService = {
 
     return { updated: updatedCount };
   },
+
+  checkScheduleConflicts: async (
+    userId: string,
+    schedule: {
+      taskId: string;
+      scheduledTime: {
+        start: Date;
+        end: Date;
+      };
+    }[],
+  ): Promise<{
+    conflicts: {
+      taskId: string;
+      taskTitle: string;
+      conflictingWith: {
+        id: string;
+        title: string;
+        scheduledTime: { start: Date; end: Date };
+      }[];
+    }[];
+    hasConflicts: boolean;
+  }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+
+    const conflicts: {
+      taskId: string;
+      taskTitle: string;
+      conflictingWith: {
+        id: string;
+        title: string;
+        scheduledTime: { start: Date; end: Date };
+      }[];
+    }[] = [];
+
+    for (const item of schedule) {
+      if (!Types.ObjectId.isValid(item.taskId)) {
+        continue;
+      }
+
+      const task = await taskRepository.findByIdForUser({
+        taskId: item.taskId,
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!task) {
+        continue;
+      }
+
+      // Find conflicting tasks
+      const conflictingTasks = await taskRepository.findConflictingTasks({
+        userId: new Types.ObjectId(userId),
+        startTime: item.scheduledTime.start,
+        endTime: item.scheduledTime.end,
+        excludeTaskId: item.taskId,
+      });
+
+      if (conflictingTasks.length > 0) {
+        conflicts.push({
+          taskId: item.taskId,
+          taskTitle: task.title,
+          conflictingWith: conflictingTasks.map((t) => ({
+            id: String(t._id),
+            title: t.title,
+            scheduledTime: {
+              start: t.scheduledTime!.start,
+              end: t.scheduledTime!.end,
+            },
+          })),
+        });
+      }
+    }
+
+    // Also check conflicts within the new schedule itself
+    for (let i = 0; i < schedule.length; i++) {
+      for (let j = i + 1; j < schedule.length; j++) {
+        const taskA = schedule[i];
+        const taskB = schedule[j];
+
+        // Check if taskA and taskB overlap
+        const aStart = taskA.scheduledTime.start.getTime();
+        const aEnd = taskA.scheduledTime.end.getTime();
+        const bStart = taskB.scheduledTime.start.getTime();
+        const bEnd = taskB.scheduledTime.end.getTime();
+
+        if (aStart < bEnd && aEnd > bStart) {
+          // Find if taskA already has conflicts entry
+          let conflictA = conflicts.find((c) => c.taskId === taskA.taskId);
+          if (!conflictA) {
+            const taskAData = await taskRepository.findByIdForUser({
+              taskId: taskA.taskId,
+              userId: new Types.ObjectId(userId),
+            });
+            conflictA = {
+              taskId: taskA.taskId,
+              taskTitle: taskAData?.title || "Unknown",
+              conflictingWith: [],
+            };
+            conflicts.push(conflictA);
+          }
+
+          // Find if taskB already in conflictingWith
+          const alreadyAdded = conflictA.conflictingWith.some(
+            (c) => c.id === taskB.taskId,
+          );
+          if (!alreadyAdded) {
+            const taskBData = await taskRepository.findByIdForUser({
+              taskId: taskB.taskId,
+              userId: new Types.ObjectId(userId),
+            });
+            conflictA.conflictingWith.push({
+              id: taskB.taskId,
+              title: taskBData?.title || "Unknown",
+              scheduledTime: taskB.scheduledTime,
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      conflicts,
+      hasConflicts: conflicts.length > 0,
+    };
+  },
 };
