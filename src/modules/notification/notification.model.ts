@@ -3,6 +3,7 @@ import mongoose, { Schema, Types, Document } from "mongoose";
 export enum NotificationType {
   TASK_REMINDER = "task_reminder",
   DEADLINE_ALERT = "deadline_alert",
+  SCHEDULED_TASK_ALERT = "scheduled_task_alert",
   CHAT_MESSAGE = "chat_message",
   AI_SUGGESTION = "ai_suggestion",
   SYSTEM = "system",

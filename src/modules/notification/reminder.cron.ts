@@ -9,7 +9,7 @@ import { userRepository } from "../user/user.repository";
 let isRunning = false;
 let scheduledTask: ScheduledTask | null = null;
 
-// Cron job chạy mỗi phút để check deadline
+// Cron job chạy mỗi phút để check deadline và scheduled tasks
 export const reminderCronService = {
   start: (): void => {
     if (isRunning) return;
@@ -17,6 +17,7 @@ export const reminderCronService = {
     // Chạy mỗi phút
     scheduledTask = cron.schedule("* * * * *", async () => {
       await scanAndNotifyDeadlines();
+      await scanAndNotifyScheduledTasks(); // Gọi thêm hàm mới
     });
 
     isRunning = true;
@@ -54,7 +55,11 @@ async function scanAndNotifyDeadlines(): Promise<void> {
       const taskId = String(task._id);
 
       // Check đã gửi reminder cho task này chưa (trong 24h qua)
-      const alreadyReminded = await hasRecentReminder(taskId, userId);
+      const alreadyReminded = await hasRecentReminder(
+        taskId,
+        userId,
+        NotificationType.DEADLINE_ALERT,
+      );
       if (alreadyReminded) {
         console.log(
           `[ReminderCron] Skipping duplicate reminder for task: ${task.title}`,
@@ -99,10 +104,87 @@ async function scanAndNotifyDeadlines(): Promise<void> {
   }
 }
 
+// Scan tasks có scheduledTime sắp tới và gửi notification nhắc nhở
+async function scanAndNotifyScheduledTasks(): Promise<void> {
+  try {
+    const now = new Date();
+    const fifteenMinutesFromNow = new Date(now.getTime() + 15 * 60 * 1000); // 15 phút sau
+
+    // Tìm tasks có scheduledTime.start trong vòng 15 phút tới và chưa started/completed/cancelled
+    const tasks = await Task.find({
+      "scheduledTime.start": { $gte: now, $lte: fifteenMinutesFromNow },
+      "scheduledTime.aiPlanned": true,
+      status: { $nin: ["in_progress", "completed", "cancelled"] },
+    }).lean();
+
+    for (const task of tasks) {
+      const userId = String(task.userId);
+      const taskId = String(task._id);
+
+      if (!task.scheduledTime) continue;
+
+      // Check đã gửi reminder cho scheduled task này chưa (trong 24h qua)
+      const alreadyReminded = await hasRecentReminder(
+        taskId,
+        userId,
+        NotificationType.SCHEDULED_TASK_ALERT,
+      );
+      if (alreadyReminded) {
+        console.log(
+          `[ReminderCron] Skipping duplicate scheduled reminder for task: ${task.title}`,
+        );
+        continue;
+      }
+
+      // Lấy thông tin user để có email
+      const user = await userRepository.findById(userId);
+      if (!user) {
+        console.log(`[ReminderCron] User not found: ${userId}`);
+        continue;
+      }
+
+      const startTimeStr = task.scheduledTime.start
+        ? new Date(task.scheduledTime.start).toLocaleString("vi-VN")
+        : "sắp tới";
+
+      const endTimeStr = task.scheduledTime.end
+        ? new Date(task.scheduledTime.end).toLocaleTimeString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })
+        : "";
+
+      // Tạo notification nhắc nhở task sắp bắt đầu
+      await notificationService.create({
+        userId,
+        type: NotificationType.SCHEDULED_TASK_ALERT,
+        title: `⏰ Task sắp bắt đầu: ${task.title}`,
+        content: `Task "${task.title}" sẽ bắt đầu lúc ${startTimeStr}${endTimeStr ? ` - kết thúc ${endTimeStr}` : ""}. ${task.scheduledTime.reason || "Chuẩn bị sẵn sàng!"}`,
+        data: {
+          taskId,
+          scheduledTime: task.scheduledTime,
+          userEmail: user.email,
+        },
+        channels: {
+          inApp: true,
+          email: true,
+        },
+      });
+
+      console.log(
+        `[ReminderCron] Sent scheduled task alert for task: ${task.title} to user: ${userId} (${user.email})`,
+      );
+    }
+  } catch (err) {
+    console.error("[ReminderCron] Error scanning scheduled tasks:", err);
+  }
+}
+
 // Kiểm tra đã có reminder gần đây cho task chưa (trong 24h qua)
 async function hasRecentReminder(
   taskId: string,
   userId: string,
+  type: NotificationType = NotificationType.DEADLINE_ALERT,
 ): Promise<boolean> {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
@@ -110,7 +192,7 @@ async function hasRecentReminder(
     await notificationRepository.findRecentByTaskAndType(
       taskId,
       userId,
-      NotificationType.DEADLINE_ALERT,
+      type,
       twentyFourHoursAgo,
     );
 
@@ -121,5 +203,6 @@ async function hasRecentReminder(
 export const triggerDeadlineScan = async (): Promise<void> => {
   console.log("[ReminderCron] Manual trigger started");
   await scanAndNotifyDeadlines();
+  await scanAndNotifyScheduledTasks();
   console.log("[ReminderCron] Manual trigger completed");
 };
