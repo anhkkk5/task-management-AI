@@ -40,7 +40,18 @@ export const taskRepository = {
       deadline?: Date;
       tags?: string[];
       reminderAt?: Date;
-      aiBreakdown?: { title: string; status?: TaskStatus }[];
+      aiBreakdown?: {
+        title: string;
+        status?: TaskStatus;
+        estimatedDuration?: number;
+      }[];
+      estimatedDuration?: number;
+      scheduledTime?: {
+        start: Date;
+        end: Date;
+        aiPlanned: boolean;
+        reason?: string;
+      };
     },
   ): Promise<TaskDoc | null> => {
     return Task.findByIdAndUpdate(
@@ -65,6 +76,12 @@ export const taskRepository = {
           ...(update.aiBreakdown !== undefined
             ? { aiBreakdown: update.aiBreakdown }
             : {}),
+          ...(update.estimatedDuration !== undefined
+            ? { estimatedDuration: update.estimatedDuration }
+            : {}),
+          ...(update.scheduledTime !== undefined
+            ? { scheduledTime: update.scheduledTime }
+            : {}),
         },
       },
       { new: true },
@@ -84,7 +101,18 @@ export const taskRepository = {
       deadline?: Date;
       tags?: string[];
       reminderAt?: Date;
-      aiBreakdown?: { title: string; status?: TaskStatus }[];
+      aiBreakdown?: {
+        title: string;
+        status?: TaskStatus;
+        estimatedDuration?: number;
+      }[];
+      estimatedDuration?: number;
+      scheduledTime?: {
+        start: Date;
+        end: Date;
+        aiPlanned: boolean;
+        reason?: string;
+      };
     },
   ): Promise<TaskDoc | null> => {
     return Task.findOneAndUpdate(
@@ -108,6 +136,12 @@ export const taskRepository = {
             : {}),
           ...(update.aiBreakdown !== undefined
             ? { aiBreakdown: update.aiBreakdown }
+            : {}),
+          ...(update.estimatedDuration !== undefined
+            ? { estimatedDuration: update.estimatedDuration }
+            : {}),
+          ...(update.scheduledTime !== undefined
+            ? { scheduledTime: update.scheduledTime }
             : {}),
         },
       },

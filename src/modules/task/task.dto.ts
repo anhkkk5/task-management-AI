@@ -19,5 +19,16 @@ export type UpdateTaskDto = {
   deadline?: Date;
   tags?: string[];
   reminderAt?: Date;
-  aiBreakdown?: { title: string; status?: TaskStatus }[];
+  aiBreakdown?: {
+    title: string;
+    status?: TaskStatus;
+    estimatedDuration?: number;
+  }[];
+  estimatedDuration?: number;
+  scheduledTime?: {
+    start: Date;
+    end: Date;
+    aiPlanned: boolean;
+    reason?: string;
+  };
 };

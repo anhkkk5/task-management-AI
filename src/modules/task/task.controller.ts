@@ -366,3 +366,72 @@ export const deleteTask = async (
     res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
+
+export const saveAISchedule = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const schedule = _req.body?.schedule;
+    if (!Array.isArray(schedule)) {
+      res.status(400).json({ message: "Schedule phải là một mảng" });
+      return;
+    }
+
+    // Parse and validate schedule items
+    const parsedSchedule = schedule
+      .filter((item: any) => item.taskId && item.suggestedTime)
+      .map((item: any) => {
+        const timeRange = String(item.suggestedTime).split(" - ");
+        const startStr = timeRange[0] || "";
+        const endStr = timeRange[1] || "";
+
+        // Parse date from item.date (format: YYYY-MM-DD)
+        const dateStr = item.date || new Date().toISOString().split("T")[0];
+        const [year, month, day] = dateStr.split("-").map(Number);
+
+        const [startHour, startMin] = startStr.split(":").map(Number);
+        const [endHour, endMin] = endStr.split(":").map(Number);
+
+        const start = new Date(
+          year,
+          month - 1,
+          day,
+          startHour || 0,
+          startMin || 0,
+        );
+        const end = new Date(year, month - 1, day, endHour || 0, endMin || 0);
+
+        return {
+          taskId: String(item.taskId),
+          scheduledTime: {
+            start,
+            end,
+            aiPlanned: true,
+            reason: String(item.reason || "AI sắp xếp"),
+          },
+        };
+      });
+
+    const result = await taskService.saveAISchedule(userId, parsedSchedule);
+    res.status(200).json({
+      message: `Đã cập nhật lịch cho ${result.updated} công việc`,
+      updated: result.updated,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "User ID không hợp lệ" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};

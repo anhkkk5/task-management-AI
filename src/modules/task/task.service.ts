@@ -19,8 +19,15 @@ export type PublicTask = {
   deadline?: Date;
   tags: string[];
   userId: string;
-  aiBreakdown: { title: string; status: string }[];
+  aiBreakdown: { title: string; status: string; estimatedDuration?: number }[];
+  estimatedDuration?: number;
   reminderAt?: Date;
+  scheduledTime?: {
+    start: Date;
+    end: Date;
+    aiPlanned: boolean;
+    reason?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 };
@@ -38,8 +45,10 @@ const toPublicTask = (t: any): PublicTask => {
     aiBreakdown: (t.aiBreakdown ?? []).map((x: any) => ({
       title: x.title,
       status: x.status,
+      estimatedDuration: x.estimatedDuration,
     })),
-    reminderAt: t.reminderAt,
+    estimatedDuration: t.estimatedDuration,
+    scheduledTime: t.scheduledTime,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
   };
@@ -201,6 +210,16 @@ export const taskService = {
       throw new Error("INVALID_TITLE");
     }
 
+    // Get current task to check status change
+    const currentTask = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!currentTask) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
     const updated = await taskRepository.updateByIdForUser(
       {
         taskId,
@@ -215,11 +234,31 @@ export const taskService = {
         tags: dto.tags,
         reminderAt: dto.reminderAt,
         aiBreakdown: dto.aiBreakdown,
+        estimatedDuration: dto.estimatedDuration,
+        scheduledTime: dto.scheduledTime,
       },
     );
 
     if (!updated) {
       throw new Error("TASK_FORBIDDEN");
+    }
+
+    // Track completion history when task is marked as completed
+    if (dto.status === "completed" && currentTask.status !== "completed") {
+      const completedAt = new Date();
+      const hour = completedAt.getHours();
+      const dayOfWeek = completedAt.getDay();
+      // Estimate duration from creation time (simplified)
+      const duration = Math.floor(
+        (completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60),
+      );
+
+      await userHabitRepository.addCompletionHistory(userId, {
+        hour,
+        dayOfWeek,
+        completed: true,
+        duration,
+      });
     }
 
     await invalidateTasksCache(userId);
@@ -263,7 +302,9 @@ export const taskService = {
         aiBreakdown: breakdown.steps.map((s) => ({
           title: s.title,
           status: s.status as any,
+          estimatedDuration: s.estimatedDuration,
         })),
+        estimatedDuration: breakdown.totalEstimatedDuration,
       },
     );
 
@@ -279,7 +320,7 @@ export const taskService = {
     userId: string,
     taskId: string,
   ): Promise<{
-    breakdown: { title: string; status: string }[];
+    breakdown: { title: string; status: string; estimatedDuration?: number }[];
     applied: boolean;
   }> => {
     // Check if user has auto-breakdown enabled
@@ -324,7 +365,9 @@ export const taskService = {
           aiBreakdown: breakdown.steps.map((s) => ({
             title: s.title,
             status: s.status as any,
+            estimatedDuration: s.estimatedDuration,
           })),
+          estimatedDuration: breakdown.totalEstimatedDuration,
         },
       );
 
@@ -460,5 +503,62 @@ export const taskService = {
     }
 
     return result;
+  },
+
+  saveAISchedule: async (
+    userId: string,
+    schedule: {
+      taskId: string;
+      scheduledTime: {
+        start: Date;
+        end: Date;
+        aiPlanned: boolean;
+        reason: string;
+      };
+    }[],
+  ): Promise<{ updated: number }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+
+    let updatedCount = 0;
+
+    for (const item of schedule) {
+      if (!Types.ObjectId.isValid(item.taskId)) {
+        continue;
+      }
+
+      const task = await taskRepository.findByIdForUser({
+        taskId: item.taskId,
+        userId: new Types.ObjectId(userId),
+      });
+
+      if (!task) {
+        continue;
+      }
+
+      await taskRepository.updateByIdForUser(
+        {
+          taskId: item.taskId,
+          userId: new Types.ObjectId(userId),
+        },
+        {
+          scheduledTime: {
+            start: item.scheduledTime.start,
+            end: item.scheduledTime.end,
+            aiPlanned: item.scheduledTime.aiPlanned,
+            reason: item.scheduledTime.reason,
+          },
+        },
+      );
+
+      updatedCount++;
+    }
+
+    if (updatedCount > 0) {
+      await invalidateTasksCache(userId);
+    }
+
+    return { updated: updatedCount };
   },
 };

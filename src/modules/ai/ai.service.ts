@@ -265,7 +265,10 @@ export const aiService = {
   taskBreakdown: async (
     userId: string,
     input: { title: string; deadline?: Date },
-  ): Promise<{ steps: { title: string; status: string }[] }> => {
+  ): Promise<{
+    steps: { title: string; status: string; estimatedDuration?: number }[];
+    totalEstimatedDuration?: number;
+  }> => {
     if (!Types.ObjectId.isValid(userId)) {
       throw new Error("USER_ID_INVALID");
     }
@@ -284,7 +287,16 @@ export const aiService = {
       ? `Hạn chót: ${input.deadline.toISOString()}`
       : "";
 
-    const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, rõ ràng, có thể thực thi.\nCông việc: ${input.title}\n${deadlineText}\n\nYêu cầu bắt buộc:\n- Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).\n- Format: { "steps": [ { "title": string, "status": "todo" } ] }\n- status luôn là "todo".`;
+    const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, rõ ràng, có thể thực thi. Ước tính thời gian cho từng bước.
+Công việc: ${input.title}
+${deadlineText}
+
+Yêu cầu bắt buộc:
+- Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).
+- Format: { "steps": [ { "title": string, "status": "todo", "estimatedDuration": number (phút) } ], "totalEstimatedDuration": number (phút) }
+- status luôn là "todo".
+- estimatedDuration là thời gian ước tính để hoàn thành bước đó (tính bằng phút).
+- totalEstimatedDuration là tổng thời gian ước tính cho cả công việc.`;
 
     const result = await aiProvider.chat({
       messages: [
@@ -329,6 +341,10 @@ export const aiService = {
       .map((s: any) => ({
         title: String(s?.title ?? "").trim(),
         status: String(s?.status ?? "todo").trim() || "todo",
+        estimatedDuration:
+          typeof s?.estimatedDuration === "number" && s.estimatedDuration > 0
+            ? s.estimatedDuration
+            : undefined,
       }))
       .filter((s: any) => s.title);
 
@@ -346,7 +362,16 @@ export const aiService = {
           s.status === "cancelled"
             ? s.status
             : "todo",
+        estimatedDuration: s.estimatedDuration,
       })),
+      totalEstimatedDuration:
+        typeof parsed?.totalEstimatedDuration === "number" &&
+        parsed.totalEstimatedDuration > 0
+          ? parsed.totalEstimatedDuration
+          : normalized.reduce(
+              (sum: number, s: any) => sum + (s.estimatedDuration || 0),
+              0,
+            ),
     };
 
     // Save to cache
@@ -489,6 +514,7 @@ export const aiService = {
       priority: t.priority,
       deadline: t.deadline ? t.deadline.toISOString() : null,
       status: t.status,
+      estimatedDuration: t.estimatedDuration || null, // Phút dự kiến
     }));
 
     const startDateStr = input.startDate.toISOString().split("T")[0];
@@ -537,8 +563,9 @@ Yêu cầu bắt buộc:
 2. Phân bổ công việc theo khung giờ làm việc (08:00 - 18:00)
 3. Thêm thời gian nghỉ giữa các task theo thói quen người dùng
 4. Không để task nào kéo dài quá thời gian tập trung tối đa
-5. Sắp xếp ưu tiên: deadline gần > độ ưu tiên cao > task khó vào giờ tỉnh táo
-6. Trả về DUY NHẤT JSON hợp lệ
+5. Sử dụng estimatedDuration (nếu có) để tính toán khung giờ chính xác - ví dụ: nếu task có estimatedDuration=120 phút, đặt vào khung 2 giờ liên tục
+6. Sắp xếp ưu tiên: deadline gần > độ ưu tiên cao > task khó vào giờ tỉnh táo
+7. Trả về DUY NHẤT JSON hợp lệ
 
 Format JSON:
 {

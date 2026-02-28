@@ -9,8 +9,19 @@ export type TaskAttrs = {
   deadline?: Date;
   tags?: string[];
   userId: Types.ObjectId;
-  aiBreakdown?: { title: string; status?: TaskStatus }[];
+  aiBreakdown?: {
+    title: string;
+    status?: TaskStatus;
+    estimatedDuration?: number;
+  }[];
+  estimatedDuration?: number; // Phút dự kiến hoàn thành
   reminderAt?: Date;
+  scheduledTime?: {
+    start: Date;
+    end: Date;
+    aiPlanned: boolean;
+    reason?: string;
+  };
 };
 
 export type TaskDoc = mongoose.Document & {
@@ -21,8 +32,19 @@ export type TaskDoc = mongoose.Document & {
   deadline?: Date;
   tags: string[];
   userId: Types.ObjectId;
-  aiBreakdown: { title: string; status: TaskStatus }[];
+  aiBreakdown: {
+    title: string;
+    status: TaskStatus;
+    estimatedDuration?: number;
+  }[];
+  estimatedDuration?: number; // Phút dự kiến hoàn thành
   reminderAt?: Date;
+  scheduledTime?: {
+    start: Date;
+    end: Date;
+    aiPlanned: boolean;
+    reason?: string;
+  };
   createdAt: Date;
   updatedAt: Date;
 };
@@ -57,11 +79,19 @@ const taskSchema = new Schema<TaskDoc>(
             enum: ["todo", "in_progress", "completed", "cancelled"],
             default: "todo",
           },
+          estimatedDuration: { type: Number, min: 0 }, // Phút
         },
       ],
       default: [],
     },
+    estimatedDuration: { type: Number, min: 0 }, // Phút dự kiến
     reminderAt: { type: Date },
+    scheduledTime: {
+      start: { type: Date },
+      end: { type: Date },
+      aiPlanned: { type: Boolean, default: false },
+      reason: { type: String },
+    },
   },
   { timestamps: true },
 );

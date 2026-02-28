@@ -7,6 +7,7 @@ import {
   getTaskById,
   listTasks,
   listOverdueTasks,
+  saveAISchedule,
   updateTask,
 } from "./task.controller";
 
@@ -25,5 +26,7 @@ taskRouter.post("/:id/ai-breakdown", authMiddleware, aiBreakdownTask);
 taskRouter.patch("/:id", authMiddleware, updateTask);
 
 taskRouter.delete("/:id", authMiddleware, deleteTask);
+
+taskRouter.post("/save-ai-schedule", authMiddleware, saveAISchedule);
 
 export default taskRouter;
