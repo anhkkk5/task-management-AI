@@ -17,7 +17,8 @@ export const reminderCronService = {
     // Chạy mỗi phút
     scheduledTask = cron.schedule("* * * * *", async () => {
       await scanAndNotifyDeadlines();
-      await scanAndNotifyScheduledTasks(); // Gọi thêm hàm mới
+      await scanAndNotifyScheduledTasks();
+      await scanAndNotifyMissedTasks(); // Thêm hàm mới
     });
 
     isRunning = true;
@@ -180,10 +181,84 @@ async function scanAndNotifyScheduledTasks(): Promise<void> {
   }
 }
 
+// Scan tasks bị bỏ lỡ (scheduledTime đã qua nhưng chưa started/completed) và gửi notification với gợi ý reschedule
+async function scanAndNotifyMissedTasks(): Promise<void> {
+  try {
+    const now = new Date();
+    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // 30 phút trước
+
+    // Tìm tasks có scheduledTime.start đã qua 30 phút nhưng chưa in_progress/completed/cancelled
+    const tasks = await Task.find({
+      "scheduledTime.start": {
+        $lte: thirtyMinutesAgo,
+        $gte: new Date(now.getTime() - 24 * 60 * 60 * 1000),
+      }, // Trong vòng 24h qua
+      "scheduledTime.aiPlanned": true,
+      status: { $nin: ["in_progress", "completed", "cancelled"] },
+    }).lean();
+
+    for (const task of tasks) {
+      const userId = String(task.userId);
+      const taskId = String(task._id);
+
+      if (!task.scheduledTime) continue;
+
+      // Check đã gửi missed notification cho task này chưa (trong 24h qua)
+      const alreadyNotified = await hasRecentReminder(
+        userId,
+        taskId,
+        NotificationType.SYSTEM,
+      );
+      if (alreadyNotified) {
+        console.log(
+          `[ReminderCron] Skipping duplicate missed task notification for: ${task.title}`,
+        );
+        continue;
+      }
+
+      // Lấy thông tin user để có email
+      const user = await userRepository.findById(userId);
+      if (!user) {
+        console.log(`[ReminderCron] User not found: ${userId}`);
+        continue;
+      }
+
+      const scheduledStartStr = task.scheduledTime.start
+        ? new Date(task.scheduledTime.start).toLocaleString("vi-VN")
+        : "";
+
+      // Tạo notification thông báo task bị bỏ lỡ và gợi ý reschedule
+      await notificationService.create({
+        userId,
+        type: NotificationType.SYSTEM,
+        title: `⚠️ Task bị bỏ lỡ: ${task.title}`,
+        content: `Task "${task.title}" đã được lên lịch bắt đầu lúc ${scheduledStartStr} nhưng chưa được thực hiện. Bạn có muốn AI đề xuất lịch mới?`,
+        data: {
+          taskId,
+          scheduledTime: task.scheduledTime,
+          userEmail: user.email,
+          action: "smart_reschedule", // Để FE biết hiển thị nút reschedule
+          reason: "missed",
+        },
+        channels: {
+          inApp: true,
+          email: true,
+        },
+      });
+
+      console.log(
+        `[ReminderCron] Sent missed task alert for task: ${task.title} to user: ${userId}`,
+      );
+    }
+  } catch (err) {
+    console.error("[ReminderCron] Error scanning missed tasks:", err);
+  }
+}
+
 // Kiểm tra đã có reminder gần đây cho task chưa (trong 24h qua)
 async function hasRecentReminder(
-  taskId: string,
   userId: string,
+  taskId: string,
   type: NotificationType = NotificationType.DEADLINE_ALERT,
 ): Promise<boolean> {
   const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -204,5 +279,6 @@ export const triggerDeadlineScan = async (): Promise<void> => {
   console.log("[ReminderCron] Manual trigger started");
   await scanAndNotifyDeadlines();
   await scanAndNotifyScheduledTasks();
+  await scanAndNotifyMissedTasks();
   console.log("[ReminderCron] Manual trigger completed");
 };

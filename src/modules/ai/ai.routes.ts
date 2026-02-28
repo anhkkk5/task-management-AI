@@ -7,6 +7,7 @@ import {
   listConversations,
   prioritySuggest,
   schedulePlan,
+  smartReschedule,
   taskBreakdown,
 } from "./ai.controller";
 
@@ -25,5 +26,7 @@ aiRouter.post("/task-breakdown", authMiddleware, taskBreakdown);
 aiRouter.post("/priority-suggest", authMiddleware, prioritySuggest);
 
 aiRouter.post("/schedule-plan", authMiddleware, schedulePlan);
+
+aiRouter.post("/smart-reschedule", authMiddleware, smartReschedule);
 
 export default aiRouter;
