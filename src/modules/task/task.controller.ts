@@ -412,22 +412,57 @@ export const updateTask = async (
         : undefined;
     const parentTaskId = parentTaskIdRaw ? parentTaskIdRaw.trim() : undefined;
 
-    const aiBreakdown =
-      _req.body?.aiBreakdown !== undefined
-        ? Array.isArray(_req.body.aiBreakdown)
-          ? (_req.body.aiBreakdown as any[]).map((x) => ({
-              title: String(x?.title ?? ""),
-              status: x?.status !== undefined ? String(x.status) : undefined,
-              estimatedDuration:
-                x?.estimatedDuration !== undefined
-                  ? Number(x.estimatedDuration)
-                  : undefined,
-            }))
-          : undefined
-        : undefined;
-    if (_req.body?.aiBreakdown !== undefined && aiBreakdown === undefined) {
-      res.status(400).json({ message: "AiBreakdown không hợp lệ" });
-      return;
+    let aiBreakdown:
+      | {
+          title: string;
+          status?: TaskStatus;
+          estimatedDuration?: number;
+        }[]
+      | undefined;
+    if (_req.body?.aiBreakdown !== undefined) {
+      if (!Array.isArray(_req.body.aiBreakdown)) {
+        res.status(400).json({ message: "AiBreakdown không hợp lệ" });
+        return;
+      }
+
+      aiBreakdown = [];
+      for (const x of _req.body.aiBreakdown as any[]) {
+        const title = String(x?.title ?? "");
+
+        const statusRaw = x?.status;
+        const status =
+          statusRaw !== undefined ? parseStatus(statusRaw) : undefined;
+        if (statusRaw !== undefined && status === undefined) {
+          res
+            .status(400)
+            .json({ message: "AiBreakdown có status không hợp lệ" });
+          return;
+        }
+
+        const estRaw =
+          x?.estimatedDuration !== undefined
+            ? Number(x.estimatedDuration)
+            : undefined;
+        const estimatedDuration =
+          estRaw !== undefined && Number.isFinite(estRaw)
+            ? Math.max(0, Math.floor(estRaw))
+            : undefined;
+        if (
+          x?.estimatedDuration !== undefined &&
+          (estRaw === undefined || !Number.isFinite(estRaw))
+        ) {
+          res
+            .status(400)
+            .json({ message: "AiBreakdown có estimatedDuration không hợp lệ" });
+          return;
+        }
+
+        aiBreakdown.push({
+          title,
+          status,
+          estimatedDuration,
+        });
+      }
     }
 
     const task = await taskService.update(userId, String(_req.params.id), {
@@ -515,44 +550,94 @@ export const saveAISchedule = async (
       return;
     }
 
-    // Parse and validate schedule items
-    const parsedSchedule = schedule
-      .filter((item: any) => item.taskId && item.suggestedTime)
-      .map((item: any) => {
-        const timeRange = String(item.suggestedTime).split(" - ");
-        const startStr = timeRange[0] || "";
-        const endStr = timeRange[1] || "";
+    const parseTimeRange = (
+      suggestedTime: string,
+    ): {
+      start: { h: number; m: number };
+      end: { h: number; m: number };
+    } | null => {
+      const match = suggestedTime.match(
+        /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+      );
+      if (!match) return null;
+      const sh = Number(match[1]);
+      const sm = Number(match[2]);
+      const eh = Number(match[3]);
+      const em = Number(match[4]);
+      if (![sh, sm, eh, em].every((x) => Number.isFinite(x))) return null;
+      return { start: { h: sh, m: sm }, end: { h: eh, m: em } };
+    };
 
-        // Parse date from item.date (format: YYYY-MM-DD)
-        const dateStr = item.date || new Date().toISOString().split("T")[0];
-        const [year, month, day] = dateStr.split("-").map(Number);
+    const nowDateStr = new Date().toISOString().split("T")[0];
+    const parsedSchedule: {
+      sessionId?: string;
+      taskId: string;
+      title?: string;
+      createSubtask?: boolean;
+      scheduledTime: {
+        start: Date;
+        end: Date;
+        aiPlanned: boolean;
+        reason: string;
+      };
+    }[] = [];
 
-        const [startHour, startMin] = startStr.split(":").map(Number);
-        const [endHour, endMin] = endStr.split(":").map(Number);
+    for (const dayItem of schedule) {
+      const dateStr = String(dayItem?.date ?? nowDateStr);
+      const parts = dateStr.split("-").map(Number);
+      if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) {
+        continue;
+      }
+      const [year, month, day] = parts;
+
+      const tasks = Array.isArray(dayItem?.tasks) ? dayItem.tasks : [];
+      for (const t of tasks) {
+        const taskId = String(t?.taskId ?? "");
+        const suggestedTime = String(t?.suggestedTime ?? "");
+        if (!taskId || !suggestedTime) continue;
+
+        const range = parseTimeRange(suggestedTime);
+        if (!range) continue;
 
         const start = new Date(
           year,
           month - 1,
           day,
-          startHour || 0,
-          startMin || 0,
+          range.start.h,
+          range.start.m,
         );
-        const end = new Date(year, month - 1, day, endHour || 0, endMin || 0);
+        const end = new Date(year, month - 1, day, range.end.h, range.end.m);
 
-        return {
-          taskId: String(item.taskId),
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+          continue;
+        }
+        if (end.getTime() <= start.getTime()) continue;
+
+        parsedSchedule.push({
+          sessionId:
+            t?.sessionId !== undefined && t?.sessionId !== null
+              ? String(t.sessionId)
+              : undefined,
+          taskId,
+          title: t?.title !== undefined ? String(t.title) : undefined,
+          createSubtask:
+            t?.createSubtask !== undefined
+              ? Boolean(t.createSubtask)
+              : undefined,
           scheduledTime: {
             start,
             end,
             aiPlanned: true,
-            reason: String(item.reason || "AI sắp xếp"),
+            reason: String(t?.reason || "AI sắp xếp"),
           },
-        };
-      });
+        });
+      }
+    }
 
     const result = await taskService.saveAISchedule(userId, parsedSchedule);
     res.status(200).json({
-      message: `Đã cập nhật lịch cho ${result.updated} công việc`,
+      message: `Đã tạo ${result.created} phiên và cập nhật ${result.updated} công việc`,
+      created: result.created,
       updated: result.updated,
     });
   } catch (err) {

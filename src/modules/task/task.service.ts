@@ -515,7 +515,10 @@ export const taskService = {
   saveAISchedule: async (
     userId: string,
     schedule: {
+      sessionId?: string;
       taskId: string;
+      title?: string;
+      createSubtask?: boolean;
       scheduledTime: {
         start: Date;
         end: Date;
@@ -523,12 +526,13 @@ export const taskService = {
         reason: string;
       };
     }[],
-  ): Promise<{ updated: number }> => {
+  ): Promise<{ updated: number; created: number }> => {
     if (!Types.ObjectId.isValid(userId)) {
       throw new Error("USER_ID_INVALID");
     }
 
     let updatedCount = 0;
+    let createdCount = 0;
 
     for (const item of schedule) {
       if (!Types.ObjectId.isValid(item.taskId)) {
@@ -541,6 +545,44 @@ export const taskService = {
       });
 
       if (!task) {
+        continue;
+      }
+
+      const durationMinutes = Math.max(
+        0,
+        Math.floor(
+          (item.scheduledTime.end.getTime() -
+            item.scheduledTime.start.getTime()) /
+            (1000 * 60),
+        ),
+      );
+
+      if (item.createSubtask) {
+        const subtaskTitle =
+          `${String(task.title)} - ${String(item.title ?? "")}`
+            .trim()
+            .replace(/\s+-\s*$/, "");
+
+        await taskRepository.create({
+          title: subtaskTitle,
+          description: undefined,
+          status: "todo",
+          priority: task.priority,
+          deadline: task.deadline,
+          tags: task.tags ?? [],
+          userId: new Types.ObjectId(userId),
+          parentTaskId: task._id,
+          estimatedDuration: durationMinutes || task.estimatedDuration,
+          reminderAt: undefined,
+          scheduledTime: {
+            start: item.scheduledTime.start,
+            end: item.scheduledTime.end,
+            aiPlanned: true,
+            reason: item.scheduledTime.reason,
+          },
+        });
+
+        createdCount++;
         continue;
       }
 
@@ -562,11 +604,11 @@ export const taskService = {
       updatedCount++;
     }
 
-    if (updatedCount > 0) {
+    if (updatedCount > 0 || createdCount > 0) {
       await invalidateTasksCache(userId);
     }
 
-    return { updated: updatedCount };
+    return { updated: updatedCount, created: createdCount };
   },
 
   checkScheduleConflicts: async (

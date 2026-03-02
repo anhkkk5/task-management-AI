@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../../middleware/auth.middleware");
+const ai_controller_1 = require("./ai.controller");
+const aiRouter = (0, express_1.Router)();
+aiRouter.post("/chat", auth_middleware_1.authMiddleware, ai_controller_1.chat);
+aiRouter.post("/chat/stream", auth_middleware_1.authMiddleware, ai_controller_1.chatStream);
+aiRouter.get("/conversations", auth_middleware_1.authMiddleware, ai_controller_1.listConversations);
+aiRouter.get("/conversations/:id", auth_middleware_1.authMiddleware, ai_controller_1.getConversationById);
+aiRouter.post("/task-breakdown", auth_middleware_1.authMiddleware, ai_controller_1.taskBreakdown);
+aiRouter.post("/priority-suggest", auth_middleware_1.authMiddleware, ai_controller_1.prioritySuggest);
+aiRouter.post("/schedule-plan", auth_middleware_1.authMiddleware, ai_controller_1.schedulePlan);
+aiRouter.post("/smart-reschedule", auth_middleware_1.authMiddleware, ai_controller_1.smartReschedule);
+exports.default = aiRouter;
