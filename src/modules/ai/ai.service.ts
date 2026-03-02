@@ -519,6 +519,32 @@ Yêu cầu bắt buộc:
 
     const startDateStr = input.startDate.toISOString().split("T")[0];
 
+    // Calculate the number of days needed based on furthest deadline
+    const deadlines = tasks
+      .filter((t) => t.deadline)
+      .map((t) => new Date(t.deadline!).getTime());
+    const furthestDeadline =
+      deadlines.length > 0 ? Math.max(...deadlines) : null;
+    const startTime = input.startDate.getTime();
+    const daysNeeded = furthestDeadline
+      ? Math.max(
+          1,
+          Math.ceil((furthestDeadline - startTime) / (1000 * 60 * 60 * 24)) + 1,
+        )
+      : 7; // Default 7 days if no deadlines
+
+    // Limit to reasonable range (1 to 365 days)
+    const totalDays = Math.min(Math.max(daysNeeded, 1), 365);
+    const endDate = new Date(input.startDate);
+    endDate.setDate(endDate.getDate() + totalDays - 1);
+    const endDateStr = endDate.toISOString().split("T")[0];
+
+    // Get current time for constraint
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentDateStr = now.toISOString().split("T")[0];
+    const isStartDateToday = startDateStr === currentDateStr;
+
     // Fetch user habits for personalized scheduling
     const userHabits = await userHabitRepository.findByUserId(userId);
     const productivityAnalysis =
@@ -553,40 +579,103 @@ Yêu cầu bắt buộc:
       }
     }
 
-    const prompt = `Hãy tạo lịch trình làm việc tối ưu và CÁ NHÂN HÓA cho người dùng, bắt đầu từ ngày ${startDateStr}.
+    // Add current time context and constraint
+    const timeConstraintText = isStartDateToday
+      ? `\nTHÔNG TIN QUAN TRỌNG:\n- Hôm nay là ngày ${currentDateStr}, hiện tại là ${currentHour}:00\n- BẮT BUỘC: Không được đề xuất thời gian trước ${currentHour + 1}:00 hôm nay (vì đã qua rồi)\n- Chỉ đề xuất khung giờ từ ${Math.max(currentHour + 1, 8)}:00 trở đi hôm nay, hoặc ngày mai\n`
+      : "";
 
-Danh sách công việc:
+    const prompt = `Bạn là một AI chuyên gia lập kế hoạch và tối ưu lịch làm việc cá nhân. Hãy tạo lịch trình làm việc tối ưu và CÁ NHÂN HÓA.
+
+============================
+THÔNG TIN CỐ ĐỊNH:
+
+Giờ làm việc mỗi ngày: 08:00 – 17:00
+Nghỉ trưa: 12:00 – 13:00
+Thời gian lập lịch: Từ ${startDateStr} đến ${endDateStr} (${totalDays} ngày)
+${isStartDateToday ? `Thời gian hiện tại: ${currentHour}:00 (KHÔNG được đề xuất giờ trước ${Math.max(currentHour + 1, 8)}:00 hôm nay)` : ""}
+
+============================
+DANH SÁCH CÔNG VIỆC:
 ${JSON.stringify(taskData, null, 2)}
-${userPreferencesText}
-Yêu cầu bắt buộc:
-1. Tôn trọng thói quen người dùng - sắp xếp task ưu tiên vào giờ họ làm việc hiệu quả nhất
-2. Phân bổ công việc theo khung giờ làm việc (08:00 - 18:00)
-3. Thêm thời gian nghỉ giữa các task theo thói quen người dùng
-4. Không để task nào kéo dài quá thời gian tập trung tối đa
-5. Sử dụng estimatedDuration (nếu có) để tính toán khung giờ chính xác - ví dụ: nếu task có estimatedDuration=120 phút, đặt vào khung 2 giờ liên tục
-6. Sắp xếp ưu tiên: deadline gần > độ ưu tiên cao > task khó vào giờ tỉnh táo
-7. Trả về DUY NHẤT JSON hợp lệ
 
-Format JSON:
+============================
+THÓI QUEN NGƯỜI DÙNG:
+${userPreferencesText}
+
+============================
+YÊU CẦU PHÂN TÍCH (phải thực hiện đầy đủ 5 bước):
+
+BƯỚC 1 - Phân tích từng công việc:
+- Phân tích công việc gồm những phần nhỏ nào
+- Sử dụng estimatedDuration (nếu có) hoặc ước tính hợp lý
+- Giải thích vì sao ước tính như vậy
+
+BƯỚC 2 - Chia nhỏ công việc đa ngày:
+- Nếu deadline nhiều ngày → chia đều hoặc chia thông minh theo độ khó
+- Không chia đều máy móc, tối ưu theo workload từng ngày
+- Giải thích logic chia
+
+BƯỚC 3 - Phân tích slot trống cho ${totalDays} ngày:
+- Xem từng ngày trong khoảng ${startDateStr} đến ${endDateStr} có những công việc gì
+- Tính tổng thời gian đã chiếm dụng mỗi ngày
+- Tìm slot trống hợp lý (tránh 12:00-13:00)
+
+BƯỚC 4 - Tạo lịch cụ thể cho TẤT CẢ ${totalDays} ngày:
+- Đặt công việc vào khung giờ làm việc
+- Đảm bảo KHÔNG có công việc nào trùng thời gian
+- Format thời gian: "HH:MM - HH:MM"
+- PHẢI trả về đủ ${totalDays} ngày, mỗi ngày trong mảng schedule
+
+BƯỚC 5 - Kiểm tra và tối ưu:
+- Kiểm tra lại xem có trùng giờ không
+- Nếu trùng phải điều chỉnh
+- Đảm bảo tất cả công việc được sắp xếp trong ${totalDays} ngày
+
+============================
+NGUYÊN TẮC TỐI ƯU (bắt buộc tuân theo):
+
+1. Công việc khó/ưu tiên cao → ưu tiên buổi sáng (08:00-12:00)
+2. Công việc dài (>2 giờ) → chia nhỏ hoặc đặt vào slot rảnh dài
+3. Không xếp sát giờ tan làm (16:30-17:00 chỉ cho task ngắn)
+4. Thêm buffer 15 phút giữa các task
+5. Mức năng lượng buổi sáng cao hơn buổi chiều 30%
+6. Không xếp 2 công việc nặng liên tiếp
+7. Sử dụng estimatedDuration để tính toán chính xác
+8. Nếu tổng thời gian vượt quá khả năng → cảnh báo trong note
+
+============================
+FORMAT JSON OUTPUT:
+
 {
   "schedule": [
     {
       "day": "Thứ Hai",
-      "date": "2024-01-15",
+      "date": "YYYY-MM-DD",
       "tasks": [
         {
           "taskId": "id",
           "title": "Tên công việc",
-          "priority": "high",
-          "suggestedTime": "09:00 - 11:00",
-          "reason": "Lý do cá nhân hóa"
+          "priority": "high|medium|low",
+          "suggestedTime": "08:00 - 10:00",
+          "reason": "Giải thích chi tiết lý do chọn khung giờ này - bắt buộc phải có"
         }
       ]
     }
   ],
   "suggestedOrder": ["taskId1", "taskId2"],
-  "personalizationNote": "Giải thích ngắn tại sao lịch này phù hợp với thói quen người dùng"
-}`;
+  "personalizationNote": "Giải thích tổng quan tại sao lịch này phù hợp",
+  "totalEstimatedTime": "Tổng thời gian ước tính",
+  "splitStrategy": "Logic chia nhỏ công việc",
+  "confidenceScore": 0.92
+}
+
+QUAN TRỌNG:
+- Trả về DUY NHẤT JSON hợp lệ, không thêm text khác
+- Mỗi task PHẢI có reason giải thích rõ ràng
+- Không để trùng thời gian giữa các task trong cùng ngày
+- PHẢI trả về đúng ${totalDays} ngày trong mảng schedule (từ ${startDateStr} đến ${endDateStr})
+- Mỗi ngày phải có đầy đủ: day, date, tasks
+- ${isStartDateToday ? `TUYỆT ĐỐI KHÔNG đề xuất giờ trước ${Math.max(currentHour + 1, 8)}:00 hôm nay` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
 
     const result = await aiProvider.chat({
       messages: [
@@ -601,7 +690,7 @@ Format JSON:
         },
       ],
       temperature: 0.3,
-      maxTokens: 1500,
+      maxTokens: 4000, // Tăng lên để có thể trả về nhiều ngày (tối đa 365 ngày)
     });
 
     const raw = (result.content || "").trim();
@@ -630,23 +719,76 @@ Format JSON:
       throw new Error("AI_RESPONSE_INVALID");
     }
 
-    // Normalize dates in schedule
-    const normalizedSchedule = parsed.schedule.map((day: any) => ({
-      day: String(day?.day ?? ""),
-      date: String(day?.date ?? ""),
-      tasks: Array.isArray(day?.tasks)
-        ? day.tasks.map((t: any) => ({
-            taskId: String(t?.taskId ?? ""),
-            title: String(t?.title ?? ""),
-            priority: String(t?.priority ?? "medium"),
-            suggestedTime: String(t?.suggestedTime ?? ""),
-            reason: String(t?.reason ?? ""),
-          }))
-        : [],
-    }));
+    // Normalize dates in schedule and filter out past time slots
+    const validateNow = new Date();
+    const validateDateStr = validateNow.toISOString().split("T")[0];
+    const validateHour = validateNow.getHours();
+    const validateMinute = validateNow.getMinutes();
+
+    const normalizedSchedule = parsed.schedule.map((day: any) => {
+      const dayDate = String(day?.date ?? "");
+      const isToday = dayDate === validateDateStr;
+
+      // Filter tasks that are in the past
+      const validTasks = Array.isArray(day?.tasks)
+        ? day.tasks.filter((t: any) => {
+            const suggestedTime = String(t?.suggestedTime ?? "");
+            if (!isToday) return true; // Future dates are always valid
+
+            // Parse time range (format: "HH:MM - HH:MM")
+            const timeMatch = suggestedTime.match(
+              /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+            );
+            if (!timeMatch) return true;
+
+            const startHour = parseInt(timeMatch[1], 10);
+            const startMinute = parseInt(timeMatch[2], 10);
+
+            // Check if start time is in the past (with 5 minute buffer)
+            const startTimeMinutes = startHour * 60 + startMinute;
+            const currentTimeMinutes = validateHour * 60 + validateMinute;
+
+            return startTimeMinutes > currentTimeMinutes + 5; // Keep only future slots
+          })
+        : [];
+
+      return {
+        day: String(day?.day ?? ""),
+        date: dayDate,
+        tasks: validTasks.map((t: any) => ({
+          taskId: String(t?.taskId ?? ""),
+          title: String(t?.title ?? ""),
+          priority: String(t?.priority ?? "medium"),
+          suggestedTime: String(t?.suggestedTime ?? ""),
+          reason: String(t?.reason ?? ""),
+        })),
+      };
+    });
+
+    // If today has no valid slots left, move remaining tasks to tomorrow
+    const tomorrow = new Date(validateNow);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split("T")[0];
+
+    const finalSchedule = normalizedSchedule.map((day: any, index: number) => {
+      if (
+        day.date === validateDateStr &&
+        day.tasks.length === 0 &&
+        index === 0
+      ) {
+        // First day is today but no valid slots - add a note
+        return {
+          ...day,
+          tasks: [],
+          note: "Hôm nay đã hết giờ làm việc, các công việc được chuyển sang ngày mai",
+        };
+      }
+      return day;
+    });
+    // Không filter bỏ ngày nào - giữ lại tất cả các ngày để hiển thị đầy đủ lịch
 
     return {
-      schedule: normalizedSchedule,
+      schedule: finalSchedule,
       totalTasks: tasks.length,
       suggestedOrder: parsed.suggestedOrder.map((id: any) => String(id)),
       personalizationNote: String(parsed?.personalizationNote ?? ""),

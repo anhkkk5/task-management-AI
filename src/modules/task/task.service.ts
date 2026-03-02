@@ -169,20 +169,11 @@ export const taskService = {
       reminderAt: dto.reminderAt,
     });
 
-    // Auto-breakdown for complex tasks
-    const isComplex =
-      dto.priority === "high" ||
-      dto.priority === "urgent" ||
-      /(phân tích|thiết kế|xây dựng|develop|implement|code|backend|frontend)/i.test(
-        title,
-      );
-
-    if (isComplex) {
-      // Trigger auto-breakdown asynchronously (don't wait)
-      taskService.autoBreakdown(userId, String(doc._id)).catch(() => {
-        // Ignore errors from auto-breakdown
-      });
-    }
+    // Auto-breakdown for all tasks (with AI analysis)
+    // Trigger auto-breakdown asynchronously (don't wait)
+    taskService.autoBreakdown(userId, String(doc._id)).catch((error) => {
+      console.error("[AutoBreakdown] Failed for task:", doc._id, error.message);
+    });
 
     await invalidateTasksCache(userId);
 
