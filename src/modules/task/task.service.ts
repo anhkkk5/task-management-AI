@@ -19,6 +19,7 @@ export type PublicTask = {
   deadline?: Date;
   tags: string[];
   userId: string;
+  parentTaskId?: string;
   aiBreakdown: { title: string; status: string; estimatedDuration?: number }[];
   estimatedDuration?: number;
   reminderAt?: Date;
@@ -42,6 +43,7 @@ const toPublicTask = (t: any): PublicTask => {
     deadline: t.deadline,
     tags: t.tags ?? [],
     userId: String(t.userId),
+    parentTaskId: t.parentTaskId ? String(t.parentTaskId) : undefined,
     aiBreakdown: (t.aiBreakdown ?? []).map((x: any) => ({
       title: x.title,
       status: x.status,
@@ -159,6 +161,10 @@ export const taskService = {
       throw new Error("INVALID_TITLE");
     }
 
+    const parentTaskId = dto.parentTaskId
+      ? new Types.ObjectId(dto.parentTaskId)
+      : undefined;
+
     const doc = await taskRepository.create({
       title,
       description: dto.description,
@@ -167,6 +173,16 @@ export const taskService = {
       tags: dto.tags,
       userId: new Types.ObjectId(userId),
       reminderAt: dto.reminderAt,
+      estimatedDuration: dto.estimatedDuration,
+      parentTaskId,
+      scheduledTime: dto.scheduledTime
+        ? {
+            start: dto.scheduledTime.start,
+            end: dto.scheduledTime.end,
+            aiPlanned: dto.scheduledTime.aiPlanned ?? false,
+            reason: dto.scheduledTime.reason,
+          }
+        : undefined,
     });
 
     // Auto-breakdown for all tasks (with AI analysis)

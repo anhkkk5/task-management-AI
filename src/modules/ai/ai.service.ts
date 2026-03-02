@@ -474,11 +474,13 @@ Yêu cầu bắt buộc:
       day: string;
       date: string;
       tasks: {
-        taskId: string;
-        title: string;
+        sessionId?: string;
+        taskId: string; // task cha
+        title: string; // tên phiên / nội dung phiên
         priority: string;
         suggestedTime: string;
         reason: string;
+        createSubtask?: boolean; // nếu true thì khi áp dụng sẽ tạo task con/session
       }[];
     }[];
     totalTasks: number;
@@ -516,6 +518,14 @@ Yêu cầu bắt buộc:
       status: t.status,
       estimatedDuration: t.estimatedDuration || null, // Phút dự kiến
     }));
+
+    const taskDeadlineById = new Map<string, string | null>();
+    for (const t of taskData) {
+      taskDeadlineById.set(
+        String(t.id),
+        t.deadline ? String(t.deadline).split("T")[0] : null,
+      );
+    }
 
     const startDateStr = input.startDate.toISOString().split("T")[0];
 
@@ -653,11 +663,13 @@ FORMAT JSON OUTPUT:
       "date": "YYYY-MM-DD",
       "tasks": [
         {
+          "sessionId": "string-unique",
           "taskId": "id",
-          "title": "Tên công việc",
+          "title": "Tên phiên (ví dụ: Thì 1 - Present Simple)",
           "priority": "high|medium|low",
           "suggestedTime": "08:00 - 10:00",
-          "reason": "Giải thích chi tiết lý do chọn khung giờ này - bắt buộc phải có"
+          "reason": "Giải thích chi tiết lý do chọn khung giờ này - bắt buộc phải có",
+          "createSubtask": true
         }
       ]
     }
@@ -673,6 +685,10 @@ QUAN TRỌNG:
 - Trả về DUY NHẤT JSON hợp lệ, không thêm text khác
 - Mỗi task PHẢI có reason giải thích rõ ràng
 - Không để trùng thời gian giữa các task trong cùng ngày
+- Mỗi taskId (task cha) ĐƯỢC PHÉP xuất hiện lặp lại qua nhiều ngày cho tới deadline của nó (để thể hiện "mỗi ngày làm một phần").
+- Nếu 1 task kéo dài nhiều ngày, hãy tạo nhiều "phiên" cho task đó và đặt createSubtask=true cho từng phiên.
+- Mỗi phiên PHẢI có sessionId duy nhất trong toàn bộ schedule.
+- Tuyệt đối không được xếp task sau deadline của chính task đó. Nếu task có deadline "YYYY-MM-DD" thì date phải <= deadline.
 - PHẢI trả về đúng ${totalDays} ngày trong mảng schedule (từ ${startDateStr} đến ${endDateStr})
 - Mỗi ngày phải có đầy đủ: day, date, tasks
 - ${isStartDateToday ? `TUYỆT ĐỐI KHÔNG đề xuất giờ trước ${Math.max(currentHour + 1, 8)}:00 hôm nay` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
@@ -756,21 +772,75 @@ QUAN TRỌNG:
         day: String(day?.day ?? ""),
         date: dayDate,
         tasks: validTasks.map((t: any) => ({
+          sessionId:
+            t?.sessionId !== undefined && t?.sessionId !== null
+              ? String(t.sessionId)
+              : undefined,
           taskId: String(t?.taskId ?? ""),
           title: String(t?.title ?? ""),
           priority: String(t?.priority ?? "medium"),
           suggestedTime: String(t?.suggestedTime ?? ""),
           reason: String(t?.reason ?? ""),
+          createSubtask:
+            t?.createSubtask !== undefined
+              ? Boolean(t.createSubtask)
+              : undefined,
         })),
       };
     });
+
+    // Enforce constraints:
+    // - One sessionId only once across entire schedule
+    // - Task must not be scheduled after its own deadline
+    const seenSessionIds = new Set<string>();
+    const constrainedSchedule = normalizedSchedule
+      .slice()
+      .sort((a: any, b: any) => String(a.date).localeCompare(String(b.date)))
+      .map((day: any) => {
+        const filteredTasks = Array.isArray(day?.tasks)
+          ? day.tasks.filter((t: any) => {
+              const id = String(t?.taskId ?? "");
+              if (!id) return false;
+
+              const deadlineStr = taskDeadlineById.get(id) ?? null;
+              if (deadlineStr && String(day.date) > deadlineStr) {
+                return false;
+              }
+
+              const sessionId = String(
+                t?.sessionId ??
+                  `${id}:${String(day.date)}:${String(t?.suggestedTime ?? "")}`,
+              );
+              if (!sessionId) return false;
+
+              if (seenSessionIds.has(sessionId)) {
+                return false;
+              }
+              seenSessionIds.add(sessionId);
+              return true;
+            })
+          : [];
+
+        return {
+          ...day,
+          tasks: filteredTasks.map((t: any) => ({
+            ...t,
+            sessionId:
+              t?.sessionId !== undefined && t?.sessionId !== null
+                ? String(t.sessionId)
+                : String(
+                    `${String(t?.taskId ?? "")}:${String(day.date)}:${String(t?.suggestedTime ?? "")}`,
+                  ),
+          })),
+        };
+      });
 
     // If today has no valid slots left, move remaining tasks to tomorrow
     const tomorrow = new Date(validateNow);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
-    const finalSchedule = normalizedSchedule.map((day: any, index: number) => {
+    const finalSchedule = constrainedSchedule.map((day: any, index: number) => {
       if (
         day.date === validateDateStr &&
         day.tasks.length === 0 &&
@@ -790,7 +860,17 @@ QUAN TRỌNG:
     return {
       schedule: finalSchedule,
       totalTasks: tasks.length,
-      suggestedOrder: parsed.suggestedOrder.map((id: any) => String(id)),
+      suggestedOrder: (() => {
+        const uniq = new Set<string>();
+        const result: string[] = [];
+        for (const id of parsed.suggestedOrder || []) {
+          const s = String(id);
+          if (!s || uniq.has(s)) continue;
+          uniq.add(s);
+          result.push(s);
+        }
+        return result;
+      })(),
       personalizationNote: String(parsed?.personalizationNote ?? ""),
     };
   },

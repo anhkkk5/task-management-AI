@@ -9,6 +9,7 @@ export type TaskAttrs = {
   deadline?: Date;
   tags?: string[];
   userId: Types.ObjectId;
+  parentTaskId?: Types.ObjectId;
   aiBreakdown?: {
     title: string;
     status?: TaskStatus;
@@ -32,6 +33,7 @@ export type TaskDoc = mongoose.Document & {
   deadline?: Date;
   tags: string[];
   userId: Types.ObjectId;
+  parentTaskId?: Types.ObjectId;
   aiBreakdown: {
     title: string;
     status: TaskStatus;
@@ -70,6 +72,7 @@ const taskSchema = new Schema<TaskDoc>(
     deadline: { type: Date, index: true },
     tags: { type: [String], default: [] },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
+    parentTaskId: { type: Schema.Types.ObjectId, index: true },
     aiBreakdown: {
       type: [
         {

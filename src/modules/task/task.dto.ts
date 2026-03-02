@@ -9,6 +9,14 @@ export type CreateTaskDto = {
   priority?: TaskPriority;
   tags?: string[];
   reminderAt?: Date;
+  estimatedDuration?: number;
+  parentTaskId?: string;
+  scheduledTime?: {
+    start: Date;
+    end: Date;
+    aiPlanned?: boolean;
+    reason?: string;
+  };
 };
 
 export type UpdateTaskDto = {
@@ -25,6 +33,7 @@ export type UpdateTaskDto = {
     estimatedDuration?: number;
   }[];
   estimatedDuration?: number;
+  parentTaskId?: string;
   scheduledTime?: {
     start: Date;
     end: Date;

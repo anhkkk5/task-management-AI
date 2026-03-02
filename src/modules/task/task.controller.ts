@@ -86,6 +86,39 @@ const parsePositiveInt = (value: unknown, defaultValue: number): number => {
   return x;
 };
 
+const parseScheduledTime = (
+  value: unknown,
+):
+  | {
+      start: Date;
+      end: Date;
+      aiPlanned?: boolean;
+      reason?: string;
+    }
+  | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "object") return undefined;
+  const obj = value as any;
+
+  const startRaw = obj?.start !== undefined ? String(obj.start) : undefined;
+  const endRaw = obj?.end !== undefined ? String(obj.end) : undefined;
+  if (!startRaw || !endRaw) return undefined;
+
+  const start = new Date(startRaw);
+  const end = new Date(endRaw);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()))
+    return undefined;
+  if (end.getTime() <= start.getTime()) return undefined;
+
+  return {
+    start,
+    end,
+    aiPlanned:
+      obj?.aiPlanned !== undefined ? Boolean(obj.aiPlanned) : undefined,
+    reason: obj?.reason !== undefined ? String(obj.reason) : undefined,
+  };
+};
+
 const getTodayRange = (): { from: Date; to: Date } => {
   const now = new Date();
   const from = new Date(now);
@@ -126,6 +159,39 @@ export const createTask = async (
       return;
     }
 
+    const scheduledTime =
+      _req.body?.scheduledTime !== undefined
+        ? parseScheduledTime(_req.body.scheduledTime)
+        : undefined;
+    if (_req.body?.scheduledTime !== undefined && scheduledTime === undefined) {
+      res.status(400).json({ message: "ScheduledTime không hợp lệ" });
+      return;
+    }
+
+    const estimatedDurationRaw =
+      _req.body?.estimatedDuration !== undefined
+        ? Number(_req.body.estimatedDuration)
+        : undefined;
+    const estimatedDuration =
+      estimatedDurationRaw !== undefined &&
+      Number.isFinite(estimatedDurationRaw)
+        ? Math.max(0, Math.floor(estimatedDurationRaw))
+        : undefined;
+    if (
+      _req.body?.estimatedDuration !== undefined &&
+      estimatedDurationRaw !== undefined &&
+      !Number.isFinite(estimatedDurationRaw)
+    ) {
+      res.status(400).json({ message: "EstimatedDuration không hợp lệ" });
+      return;
+    }
+
+    const parentTaskIdRaw =
+      _req.body?.parentTaskId !== undefined
+        ? String(_req.body.parentTaskId)
+        : undefined;
+    const parentTaskId = parentTaskIdRaw ? parentTaskIdRaw.trim() : undefined;
+
     const tags = Array.isArray(_req.body?.tags)
       ? (_req.body.tags as unknown[]).map((x) => String(x))
       : undefined;
@@ -140,6 +206,9 @@ export const createTask = async (
       priority: parsePriority(_req.body?.priority),
       tags,
       reminderAt,
+      estimatedDuration,
+      parentTaskId,
+      scheduledTime,
     });
 
     res.status(201).json({ task });
@@ -310,6 +379,57 @@ export const updateTask = async (
       return;
     }
 
+    const scheduledTime =
+      _req.body?.scheduledTime !== undefined
+        ? parseScheduledTime(_req.body.scheduledTime)
+        : undefined;
+    if (_req.body?.scheduledTime !== undefined && scheduledTime === undefined) {
+      res.status(400).json({ message: "ScheduledTime không hợp lệ" });
+      return;
+    }
+
+    const estimatedDurationRaw =
+      _req.body?.estimatedDuration !== undefined
+        ? Number(_req.body.estimatedDuration)
+        : undefined;
+    const estimatedDuration =
+      estimatedDurationRaw !== undefined &&
+      Number.isFinite(estimatedDurationRaw)
+        ? Math.max(0, Math.floor(estimatedDurationRaw))
+        : undefined;
+    if (
+      _req.body?.estimatedDuration !== undefined &&
+      estimatedDurationRaw !== undefined &&
+      !Number.isFinite(estimatedDurationRaw)
+    ) {
+      res.status(400).json({ message: "EstimatedDuration không hợp lệ" });
+      return;
+    }
+
+    const parentTaskIdRaw =
+      _req.body?.parentTaskId !== undefined
+        ? String(_req.body.parentTaskId)
+        : undefined;
+    const parentTaskId = parentTaskIdRaw ? parentTaskIdRaw.trim() : undefined;
+
+    const aiBreakdown =
+      _req.body?.aiBreakdown !== undefined
+        ? Array.isArray(_req.body.aiBreakdown)
+          ? (_req.body.aiBreakdown as any[]).map((x) => ({
+              title: String(x?.title ?? ""),
+              status: x?.status !== undefined ? String(x.status) : undefined,
+              estimatedDuration:
+                x?.estimatedDuration !== undefined
+                  ? Number(x.estimatedDuration)
+                  : undefined,
+            }))
+          : undefined
+        : undefined;
+    if (_req.body?.aiBreakdown !== undefined && aiBreakdown === undefined) {
+      res.status(400).json({ message: "AiBreakdown không hợp lệ" });
+      return;
+    }
+
     const task = await taskService.update(userId, String(_req.params.id), {
       title:
         _req.body?.title !== undefined ? String(_req.body.title) : undefined,
@@ -322,6 +442,17 @@ export const updateTask = async (
       deadline,
       tags,
       reminderAt,
+      scheduledTime: scheduledTime
+        ? {
+            start: scheduledTime.start,
+            end: scheduledTime.end,
+            aiPlanned: scheduledTime.aiPlanned ?? false,
+            reason: scheduledTime.reason,
+          }
+        : undefined,
+      estimatedDuration,
+      parentTaskId,
+      aiBreakdown,
     });
 
     res.status(200).json({ task });

@@ -12,8 +12,11 @@ export const taskRepository = {
       deadline: attrs.deadline,
       tags: attrs.tags ?? [],
       userId: attrs.userId,
+      parentTaskId: attrs.parentTaskId,
       aiBreakdown: attrs.aiBreakdown ?? [],
+      estimatedDuration: attrs.estimatedDuration,
       reminderAt: attrs.reminderAt,
+      scheduledTime: attrs.scheduledTime,
     });
   },
 
