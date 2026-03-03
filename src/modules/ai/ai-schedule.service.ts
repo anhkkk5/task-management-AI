@@ -168,40 +168,19 @@ BƯỚC 3 - Xếp nhiều task cùng ngày:
 - Xen kẽ các task trong ngày, buffer 15 phút giữa các phiên
 - Tổng thời gian mỗi ngày không vượt quá 8 tiếng làm việc
 
-BƯỚC 4 - Phân tích loại task và tạo tiêu đề phiên phù hợp:
+BƯỚC 4 - TẠO TIÊU ĐỀ PHIÊN:
 
-A. NHẬN DIỆN TASK HỌC TẬP:
-- Nếu task có từ khóa: "học", "ngữ pháp", "tiếng Anh", "khóa học", "bài học", "chủ đề", "grammar", "lesson", "course", "12 ngày", "15 ngày", "trong X ngày"...
-→ Đây là TASK HỌC TẬP CÓ LỘ TRÌNH
+QUY TẮC ĐƠN GIẢN:
+- Tất cả task đều dùng title gốc từ input, KHÔNG thêm bất kỳ gì đằng sau
+- Không có "Phiên X/Y", không có "Chủ đề gì", không có "..." gì cả
+- Chỉ cần giữ nguyên title đã cho
 
-B. CÁCH TẠO TIÊU ĐỀ PHIÊN:
+VÍ DỤ:
+- Task: "Code web 3 ngày" → title: "Code web 3 ngày"
+- Task: "Học ngữ pháp tiếng anh" → title: "Học ngữ pháp tiếng anh"
+- Task: "Làm báo cáo" → title: "Làm báo cáo"
 
-Với TASK THƯỜNG (code, làm đồ án, viết báo cáo...):
-- title format: "Tên task - Phiên X/Y"
-- Ví dụ: "Làm đồ án web - Phiên 1/4"
-
-Với TASK HỌC TẬP (ngữ pháp, khóa học...):
-- Tạo lộ trình học cụ thể dựa trên số ngày
-- Mỗi ngày là 1 chủ đề/bài học cụ thể
-- title format: "Tên task - [Chủ đề cụ thể]"
-- KHÔNG dùng "Phiên X/Y" cho task học tập
-
-VÍ DỤ TASK HỌC TẬP:
-Task: "Học ngữ pháp tiếng Anh trong 12 ngày" (deadline 12 ngày)
-→ Tạo lộ trình: Ngày 1: Present Simple, Ngày 2: Present Continuous, Ngày 3: Past Simple...
-
-Ngày 03/03:
-- 08:00-09:30: Học ngữ pháp tiếng Anh - Present Simple (Thì hiện tại đơn)
-- 10:00-11:30: Làm đồ án web - Phiên 1/4
-
-Ngày 04/03:
-- 08:00-09:30: Học ngữ pháp tiếng Anh - Present Continuous (Thì hiện tại tiếp diễn)
-- 10:00-11:30: Làm đồ án web - Phiên 2/4
-
-LƯU Ý QUAN TRỌNG:
-- Task thường: dùng "Phiên X/Y", số phiên = estimatedDuration/120
-- Task học tập: mỗi ngày là 1 chủ đề mới, KHÔNG đánh số phiên
-- createSubtask: true cho mọi phiên
+LƯU Ý: createSubtask vẫn = true cho tất cả
 
 ============================
 VÍ DỤ MINH HỌA (2 task):
@@ -212,14 +191,14 @@ Task B: Làm code, 240 phút, từ 03/03 đến 04/03 (2 ngày)
 → Task B cần 2 phiên, chia vào 2 ngày = mỗi ngày 1 phiên 120 phút
 
 Ngày 03/03:
-- 08:00-10:00: Code - Phiên 1/2 (120 phút, deadline gần ưu tiên)
-- 10:15-11:35: Tiếng Anh - Phiên 1/4 (80 phút)
+- 08:00-10:00: Code web 3 ngày (120 phút, deadline gần ưu tiên)
+- 10:15-11:35: Học ngữ pháp tiếng anh (80 phút)
 
 Ngày 04/03:
-- 08:00-10:00: Code - Phiên 2/2 (120 phút, deadline hôm nay)
-- 10:15-11:35: Tiếng Anh - Phiên 2/4 (80 phút)
+- 08:00-10:00: Code web 3 ngày (120 phút, deadline hôm nay)
+- 10:15-11:35: Học ngữ pháp tiếng anh (80 phút)
 
-Ngày 05-08/03: Chỉ có Tiếng Anh mỗi ngày 1 phiên 80 phút
+Ngày 05-08/03: Chỉ có Học ngữ pháp tiếng anh mỗi ngày 1 phiên 80 phút
 
 ============================
 NGUYÊN TẮC TỐI ƯU (bắt buộc tuân theo):
@@ -238,13 +217,13 @@ FORMAT JSON OUTPUT:
 {
   "schedule": [
     {
-      "day": "Thứ Hai",
+      "day": "Thứ Ba",
       "date": "YYYY-MM-DD",
       "tasks": [
         {
           "sessionId": "string-unique",
           "taskId": "id",
-          "title": "Tên task - Chủ đề cụ thể (với task học tập) HOẶC Tên task - Phiên X/Y (với task thường)",
+          "title": "Giữ nguyên title gốc, không thêm gì",
           "priority": "high|medium|low",
           "suggestedTime": "08:00 - 10:00",
           "reason": "Lý do ngắn gọn (tối đa 15 từ)",
@@ -265,15 +244,14 @@ QUAN TRỌNG:
 - Mỗi task PHẢI có reason giải thích rõ ràng
 - Không để trùng thời gian giữa các task trong cùng ngày
 - Mỗi taskId ĐƯỢC PHÉP xuất hiện lặp lại qua nhiều ngày cho tới deadline
-- Nếu 1 task kéo dài nhiều ngày:
-  + Task thường: tạo nhiều "phiên", đặt createSubtask=true, title "Tên task - Phiên X/Y"
-  + Task học tập: mỗi ngày là chủ đề khác nhau, title "Tên task - [Chủ đề ngày đó]", createSubtask=true
+- Title giữ nguyên từ input, KHÔNG thêm "Phiên X/Y" hay gì cả
+- Nếu 1 task kéo dài nhiều ngày: createSubtask=true cho mọi phiên
 - Mỗi phiên PHẢI có sessionId duy nhất trong toàn bộ schedule
 - **BẮT BUỘC KIỂM TRA**: Sau khi tạo schedule, hãy kiểm tra lại xem mỗi task có xuất hiện trong MỌI NGÀY từ startDate đến deadline của nó không. Nếu thiếu ngày nào, phải thêm vào ngay.
 - Tuyệt đối không được xếp task sau deadline của chính task đó. Nếu task có deadline "YYYY-MM-DD" thì date phải <= deadline.
 - PHẢI trả về đúng ${totalDays} ngày trong mảng schedule (từ ${startDateStr} đến ${endDateStr})
 - Mỗi ngày phải có đầy đủ: day, date, tasks
-- ${isStartDateToday ? `TUYỆT ĐỐI KHÔNG đề xuất giờ bắt đầu trước ${Math.max(currentHour + 1, 8)}:00 hôm nay` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
+${isStartDateToday ? `TUYỆT ĐỐI KHÔNG đề xuất giờ bắt đầu trước ${Math.max(currentHour + 1, 8)}:00 hôm nay` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
 
     const result = await aiProvider.chat({
       messages: [
@@ -317,6 +295,28 @@ QUAN TRỌNG:
     const validateHour = validateNow.getHours();
     const validateMinute = validateNow.getMinutes();
 
+    const getDayOfWeek = (dateStr: string): string => {
+      const days = [
+        "Chủ Nhật",
+        "Thứ Hai",
+        "Thứ Ba",
+        "Thứ Tư",
+        "Thứ Năm",
+        "Thứ Sáu",
+        "Thứ Bảy",
+      ];
+      const date = new Date(dateStr);
+      return days[date.getDay()];
+    };
+
+    // Tạo map từ taskId sang title gốc để ép title đúng
+    const originalTitlesById = new Map<string, string>();
+    for (const t of tasks) {
+      if (t.id) {
+        originalTitlesById.set(String(t.id), String(t.title || ""));
+      }
+    }
+
     const normalizedSchedule = parsed.schedule.map((day: any) => {
       const dayDate = String(day?.date ?? "");
       const isToday = dayDate === validateDateStr;
@@ -340,24 +340,34 @@ QUAN TRỌNG:
           })
         : [];
 
+      // Tính lại thứ trong tuần từ date thay vì tin tưởng AI
+      const correctDay = dayDate
+        ? getDayOfWeek(dayDate)
+        : String(day?.day ?? "");
+
       return {
-        day: String(day?.day ?? ""),
+        day: correctDay,
         date: dayDate,
-        tasks: validTasks.map((t: any) => ({
-          sessionId:
-            t?.sessionId !== undefined && t?.sessionId !== null
-              ? String(t.sessionId)
-              : undefined,
-          taskId: String(t?.taskId ?? ""),
-          title: String(t?.title ?? ""),
-          priority: String(t?.priority ?? "medium"),
-          suggestedTime: String(t?.suggestedTime ?? ""),
-          reason: String(t?.reason ?? ""),
-          createSubtask:
-            t?.createSubtask !== undefined
-              ? Boolean(t.createSubtask)
-              : undefined,
-        })),
+        tasks: validTasks.map((t: any) => {
+          const taskId = String(t?.taskId ?? "");
+          // Dùng title gốc từ input, không dùng title AI trả về
+          const originalTitle = originalTitlesById.get(taskId);
+          return {
+            sessionId:
+              t?.sessionId !== undefined && t?.sessionId !== null
+                ? String(t.sessionId)
+                : undefined,
+            taskId: taskId,
+            title: originalTitle || String(t?.title ?? ""),
+            priority: String(t?.priority ?? "medium"),
+            suggestedTime: String(t?.suggestedTime ?? ""),
+            reason: String(t?.reason ?? ""),
+            createSubtask:
+              t?.createSubtask !== undefined
+                ? Boolean(t.createSubtask)
+                : undefined,
+          };
+        }),
       };
     });
 
