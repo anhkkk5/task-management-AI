@@ -39,6 +39,13 @@ router.patch(
   aiScheduleController.updateSessionStatus.bind(aiScheduleController),
 );
 
+// Update session time (drag-drop)
+router.patch(
+  "/:scheduleId/sessions/time",
+  authMiddleware,
+  aiScheduleController.updateSessionTime.bind(aiScheduleController),
+);
+
 // Delete schedule
 router.delete(
   "/:scheduleId",

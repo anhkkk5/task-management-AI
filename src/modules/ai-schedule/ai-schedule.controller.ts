@@ -121,6 +121,45 @@ export class AIScheduleController {
     }
   }
 
+  async updateSessionTime(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      const scheduleId = req.params.scheduleId as string;
+      const { sessionId, suggestedTime } = req.body;
+
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      if (!sessionId || !suggestedTime) {
+        res
+          .status(400)
+          .json({ message: "sessionId and suggestedTime are required" });
+        return;
+      }
+
+      const updated = await aiScheduleService.updateSessionTime(
+        scheduleId,
+        userId,
+        sessionId,
+        suggestedTime,
+      );
+
+      if (!updated) {
+        res.status(404).json({ message: "Schedule or session not found" });
+        return;
+      }
+
+      res.json({ success: true, data: updated });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message || "Failed to update session time",
+      });
+    }
+  }
+
   async deleteSchedule(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.userId;

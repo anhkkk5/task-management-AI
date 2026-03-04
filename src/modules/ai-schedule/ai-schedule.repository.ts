@@ -1,4 +1,8 @@
-import { AISchedule, AIScheduleDoc, AIScheduleAttrs } from "./ai-schedule.model";
+import {
+  AISchedule,
+  AIScheduleDoc,
+  AIScheduleAttrs,
+} from "./ai-schedule.model";
 import { Types } from "mongoose";
 
 export class AIScheduleRepository {
@@ -23,7 +27,7 @@ export class AIScheduleRepository {
 
   async findByIdAndUserId(
     id: string,
-    userId: string
+    userId: string,
   ): Promise<AIScheduleDoc | null> {
     return AISchedule.findOne({
       _id: new Types.ObjectId(id),
@@ -31,10 +35,7 @@ export class AIScheduleRepository {
     }).exec();
   }
 
-  async create(
-    userId: string,
-    data: AIScheduleAttrs
-  ): Promise<AIScheduleDoc> {
+  async create(userId: string, data: AIScheduleAttrs): Promise<AIScheduleDoc> {
     const schedule = new AISchedule({
       ...data,
       userId: new Types.ObjectId(userId),
@@ -45,12 +46,12 @@ export class AIScheduleRepository {
   async update(
     id: string,
     userId: string,
-    data: Partial<AIScheduleAttrs>
+    data: Partial<AIScheduleAttrs>,
   ): Promise<AIScheduleDoc | null> {
     return AISchedule.findOneAndUpdate(
       { _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) },
       { $set: data },
-      { new: true }
+      { new: true },
     ).exec();
   }
 
@@ -58,7 +59,7 @@ export class AIScheduleRepository {
     scheduleId: string,
     userId: string,
     sessionId: string,
-    status: string
+    status: string,
   ): Promise<AIScheduleDoc | null> {
     return AISchedule.findOneAndUpdate(
       {
@@ -72,14 +73,36 @@ export class AIScheduleRepository {
       {
         new: true,
         arrayFilters: [{ "task.sessionId": sessionId }],
-      }
+      },
+    ).exec();
+  }
+
+  async updateSessionTime(
+    scheduleId: string,
+    userId: string,
+    sessionId: string,
+    suggestedTime: string,
+  ): Promise<AIScheduleDoc | null> {
+    return AISchedule.findOneAndUpdate(
+      {
+        _id: new Types.ObjectId(scheduleId),
+        userId: new Types.ObjectId(userId),
+        "schedule.tasks.sessionId": sessionId,
+      },
+      {
+        $set: { "schedule.$[].tasks.$[task].suggestedTime": suggestedTime },
+      },
+      {
+        new: true,
+        arrayFilters: [{ "task.sessionId": sessionId }],
+      },
     ).exec();
   }
 
   async deactivateAllForUser(userId: string): Promise<void> {
     await AISchedule.updateMany(
       { userId: new Types.ObjectId(userId), isActive: true },
-      { $set: { isActive: false } }
+      { $set: { isActive: false } },
     );
   }
 

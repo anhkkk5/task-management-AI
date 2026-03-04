@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { taskService } from "./task.service";
+import { aiScheduleService } from "../ai-schedule/ai-schedule.service";
 import { TaskPriority, TaskStatus } from "./task.dto";
 import searchHelper from "../../common/utils/search-helper";
 import paginationHelper from "../../common/utils/pagination-helper";
@@ -544,101 +545,62 @@ export const saveAISchedule = async (
       return;
     }
 
-    const schedule = _req.body?.schedule;
+    const {
+      schedule,
+      suggestedOrder,
+      personalizationNote,
+      totalEstimatedTime,
+      splitStrategy,
+      confidenceScore,
+      sourceTasks,
+    } = _req.body;
+
     if (!Array.isArray(schedule)) {
       res.status(400).json({ message: "Schedule phải là một mảng" });
       return;
     }
 
-    const parseTimeRange = (
-      suggestedTime: string,
-    ): {
-      start: { h: number; m: number };
-      end: { h: number; m: number };
-    } | null => {
-      const match = suggestedTime.match(
-        /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
-      );
-      if (!match) return null;
-      const sh = Number(match[1]);
-      const sm = Number(match[2]);
-      const eh = Number(match[3]);
-      const em = Number(match[4]);
-      if (![sh, sm, eh, em].every((x) => Number.isFinite(x))) return null;
-      return { start: { h: sh, m: sm }, end: { h: eh, m: em } };
-    };
+    // Transform schedule data để match với AISchedule format
+    const transformedSchedule = schedule.map((dayItem: any) => ({
+      day: String(dayItem?.day ?? ""),
+      date: String(dayItem?.date ?? ""),
+      tasks: Array.isArray(dayItem?.tasks)
+        ? dayItem.tasks.map((t: any) => ({
+            sessionId: String(t?.sessionId ?? `${t?.taskId}_${dayItem.date}`),
+            taskId: String(t?.taskId ?? ""),
+            title: String(t?.title ?? ""),
+            priority: String(t?.priority ?? "medium"),
+            suggestedTime: String(t?.suggestedTime ?? ""),
+            reason: String(t?.reason ?? ""),
+            status: "pending",
+            createSubtask: Boolean(t?.createSubtask),
+          }))
+        : [],
+      note: dayItem?.note ? String(dayItem.note) : undefined,
+    }));
 
-    const nowDateStr = new Date().toISOString().split("T")[0];
-    const parsedSchedule: {
-      sessionId?: string;
-      taskId: string;
-      title?: string;
-      createSubtask?: boolean;
-      scheduledTime: {
-        start: Date;
-        end: Date;
-        aiPlanned: boolean;
-        reason: string;
-      };
-    }[] = [];
+    const result = await aiScheduleService.createSchedule(userId, {
+      name: "AI Schedule Plan",
+      description: personalizationNote,
+      schedule: transformedSchedule,
+      suggestedOrder: Array.isArray(suggestedOrder) ? suggestedOrder : [],
+      personalizationNote,
+      totalEstimatedTime,
+      splitStrategy,
+      confidenceScore,
+      sourceTasks: Array.isArray(sourceTasks) ? sourceTasks : [],
+    });
 
-    for (const dayItem of schedule) {
-      const dateStr = String(dayItem?.date ?? nowDateStr);
-      const parts = dateStr.split("-").map(Number);
-      if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) {
-        continue;
-      }
-      const [year, month, day] = parts;
+    const totalSessions = transformedSchedule.reduce(
+      (sum: number, day: any) => sum + (day.tasks?.length || 0),
+      0,
+    );
 
-      const tasks = Array.isArray(dayItem?.tasks) ? dayItem.tasks : [];
-      for (const t of tasks) {
-        const taskId = String(t?.taskId ?? "");
-        const suggestedTime = String(t?.suggestedTime ?? "");
-        if (!taskId || !suggestedTime) continue;
-
-        const range = parseTimeRange(suggestedTime);
-        if (!range) continue;
-
-        const start = new Date(
-          year,
-          month - 1,
-          day,
-          range.start.h,
-          range.start.m,
-        );
-        const end = new Date(year, month - 1, day, range.end.h, range.end.m);
-
-        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-          continue;
-        }
-        if (end.getTime() <= start.getTime()) continue;
-
-        parsedSchedule.push({
-          sessionId:
-            t?.sessionId !== undefined && t?.sessionId !== null
-              ? String(t.sessionId)
-              : undefined,
-          taskId,
-          title: t?.title !== undefined ? String(t.title) : undefined,
-          createSubtask:
-            t?.createSubtask !== undefined
-              ? Boolean(t.createSubtask)
-              : undefined,
-          scheduledTime: {
-            start,
-            end,
-            aiPlanned: true,
-            reason: String(t?.reason || "AI sắp xếp"),
-          },
-        });
-      }
-    }
-
-    const result = await taskService.saveAISchedule(userId, parsedSchedule);
     res.status(200).json({
-      message: `Đã tạo ${result.created} phiên và cập nhật ${result.updated} công việc`,
-      created: result.created,
-      updated: result.updated,
+      message: `Đã lưu lịch trình với ${totalSessions} phiên làm việc`,
+      scheduleId: result.id,
+      totalSessions,
+      totalDays: transformedSchedule.length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";
@@ -648,6 +610,6 @@ export const saveAISchedule = async (
       return;
     }
 
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    res.status(500).json({ message: "Lỗi hệ thống", error: message });
   }
 };

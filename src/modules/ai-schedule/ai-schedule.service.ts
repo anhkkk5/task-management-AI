@@ -20,18 +20,18 @@ export class AIScheduleService {
 
   async getScheduleById(
     scheduleId: string,
-    userId: string
+    userId: string,
   ): Promise<ScheduleResponse | null> {
     const schedule = await aiScheduleRepository.findByIdAndUserId(
       scheduleId,
-      userId
+      userId,
     );
     return schedule ? this.toResponse(schedule) : null;
   }
 
   async createSchedule(
     userId: string,
-    input: CreateScheduleInput
+    input: CreateScheduleInput,
   ): Promise<ScheduleResponse> {
     // Deactivate all existing schedules for this user
     await aiScheduleRepository.deactivateAllForUser(userId);
@@ -48,13 +48,28 @@ export class AIScheduleService {
   async updateSessionStatus(
     scheduleId: string,
     userId: string,
-    input: UpdateSessionStatusInput
+    input: UpdateSessionStatusInput,
   ): Promise<ScheduleResponse | null> {
     const updated = await aiScheduleRepository.updateSessionStatus(
       scheduleId,
       userId,
       input.sessionId,
-      input.status
+      input.status,
+    );
+    return updated ? this.toResponse(updated) : null;
+  }
+
+  async updateSessionTime(
+    scheduleId: string,
+    userId: string,
+    sessionId: string,
+    suggestedTime: string,
+  ): Promise<ScheduleResponse | null> {
+    const updated = await aiScheduleRepository.updateSessionTime(
+      scheduleId,
+      userId,
+      sessionId,
+      suggestedTime,
     );
     return updated ? this.toResponse(updated) : null;
   }
