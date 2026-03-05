@@ -174,8 +174,35 @@ Format JSON:
     let currentDate = new Date(startDate);
     let sessionCounter = 0;
 
-    // Track busy slots theo ngày
+    // Track busy slots và daily scheduled time theo ngày
     const busySlotsByDate = new Map<string, TimeInterval[]>();
+    const dailyScheduledMinutes = new Map<string, number>(); // Theo dõi phút đã scheduled/ngày
+
+    // Lấy các task đã scheduled trước đó (preserve existing)
+    const existingScheduledTasks = allUserTasks.items.filter(
+      (task: any) => task.scheduledTime?.start && task.scheduledTime?.end,
+    );
+
+    // Khởi tạo daily scheduled time từ existing tasks
+    existingScheduledTasks.forEach((task: any) => {
+      const dateStr = new Date(task.scheduledTime.start)
+        .toISOString()
+        .split("T")[0];
+      const duration = task.estimatedDuration || 60;
+      dailyScheduledMinutes.set(
+        dateStr,
+        (dailyScheduledMinutes.get(dateStr) || 0) + duration,
+      );
+
+      // Add vào busy slots
+      const existingBusy = busySlotsByDate.get(dateStr) || [];
+      existingBusy.push({
+        start: new Date(task.scheduledTime.start),
+        end: new Date(task.scheduledTime.end),
+        taskId: String(task._id),
+      });
+      busySlotsByDate.set(dateStr, existingBusy);
+    });
 
     while (currentDate <= endDate) {
       const dateStr = currentDate.toISOString().split("T")[0];
@@ -205,12 +232,28 @@ Format JSON:
         }
 
         const duration = task.estimatedDuration || 120;
+        const dailyTarget = task.dailyTargetDuration || duration; // Mặc định = duration nếu không set
         const difficulty = aiAnalysis.difficultyAnalysis?.[taskId] || "medium";
         const requiresFocus = difficulty === "hard";
 
-        // Tìm slot tối ưu bằng algorithm
+        // Tính đã scheduled bao nhiêu phút trong ngày này
+        const alreadyScheduledMinutes = dailyScheduledMinutes.get(dateStr) || 0;
+        const remainingMinutesForDay = Math.max(
+          0,
+          dailyTarget - alreadyScheduledMinutes,
+        );
+
+        // Nếu đã đủ target cho ngày này, skip sang ngày khác
+        if (remainingMinutesForDay <= 0) {
+          continue;
+        }
+
+        // Chỉ schedule phần còn lại của target, không vượt quá
+        const actualDuration = Math.min(duration, remainingMinutesForDay);
+
+        // Tìm slot tối ưu bằng algorithm (với duration đã điều chỉnh)
         const optimalSlot = slotFinder.findOptimalSlot({
-          taskDuration: duration,
+          taskDuration: actualDuration,
           preferredTimeOfDay: requiresFocus ? "morning" : undefined,
           productivityScores,
           busySlots: existingBusySlots,
@@ -286,6 +329,22 @@ Format JSON:
         });
 
         busySlotsByDate.set(dateStr, existingBusySlots);
+
+        // Update daily scheduled minutes
+        const scheduledMinutes =
+          (finalSlot.end.getTime() - finalSlot.start.getTime()) / (1000 * 60);
+        dailyScheduledMinutes.set(
+          dateStr,
+          (dailyScheduledMinutes.get(dateStr) || 0) + scheduledMinutes,
+        );
+
+        // Nếu task chưa được schedule hết (actualDuration < duration),
+        // sẽ được xử lý ở ngày tiếp theo trong vòng lặp while
+        const remainingTaskDuration = duration - actualDuration;
+        if (remainingTaskDuration > 0 && !task.deadline) {
+          // Có thể schedule tiếp phần còn lại vào ngày khác
+          // (Logic này có thể mở rộng để track remaining duration per task)
+        }
 
         // Chỉ schedule 1 phiên/task/ngày để tránh overload
         break; // Chuyển sang task tiếp theo

@@ -33,8 +33,8 @@ export class AIScheduleService {
     userId: string,
     input: CreateScheduleInput,
   ): Promise<ScheduleResponse> {
-    // Deactivate all existing schedules for this user
-    await aiScheduleRepository.deactivateAllForUser(userId);
+    // KHÔNG deactivate existing schedules - preserve tất cả tasks đã scheduled
+    // Mỗi schedule mới sẽ được merge với existing schedules
 
     const schedule = await aiScheduleRepository.create(userId, {
       ...input,

@@ -39,6 +39,7 @@ export type TaskDoc = mongoose.Document & {
     status: TaskStatus;
     estimatedDuration?: number;
   }[];
+  dailyTargetDuration?: number; // Mục tiêu phút/ngày
   estimatedDuration?: number; // Phút dự kiến hoàn thành
   reminderAt?: Date;
   scheduledTime?: {
@@ -87,6 +88,7 @@ const taskSchema = new Schema<TaskDoc>(
       ],
       default: [],
     },
+    dailyTargetDuration: { type: Number, min: 0 }, // Mục tiêu phút/ngày
     estimatedDuration: { type: Number, min: 0 }, // Phút dự kiến
     reminderAt: { type: Date },
     scheduledTime: {

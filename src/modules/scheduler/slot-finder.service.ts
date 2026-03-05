@@ -1,5 +1,6 @@
-import { TimeInterval, FreeSlot, ProductivityScore } from './types';
-import { intervalScheduler } from './scheduler.service';
+import { TimeInterval, FreeSlot, ProductivityScore } from "./types";
+import { intervalScheduler } from "./scheduler.service";
+import { slotCache, cacheKeys } from "./cache.service";
 
 export interface SlotFinderInput {
   busySlots: TimeInterval[];
@@ -10,7 +11,7 @@ export interface SlotFinderInput {
 
 export interface OptimalSlotInput {
   taskDuration: number; // minutes
-  preferredTimeOfDay?: 'morning' | 'afternoon' | 'evening';
+  preferredTimeOfDay?: "morning" | "afternoon" | "evening";
   productivityScores?: Map<number, ProductivityScore>;
   busySlots: TimeInterval[];
   date: Date;
@@ -18,6 +19,22 @@ export interface OptimalSlotInput {
 }
 
 export class SlotFinder {
+  /**
+   * Tìm free slots có caching
+   */
+  findFreeSlotsWithCache(userId: string, input: SlotFinderInput): FreeSlot[] {
+    const dateStr = input.date.toISOString().split("T")[0];
+    const cacheKey = cacheKeys.freeSlots(userId, dateStr);
+
+    const cached = slotCache.get<FreeSlot[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
+    const slots = this.findFreeSlots(input);
+    slotCache.set(cacheKey, slots, 5); // Cache 5 phút
+    return slots;
+  }
   /**
    * Tìm tất cả free slots trong ngày
    * O(n log n) vì cần merge intervals trước
@@ -41,12 +58,14 @@ export class SlotFinder {
     if (mergedBusy.length === 0) {
       const duration = (dayEnd.getTime() - dayStart.getTime()) / (1000 * 60);
       if (duration >= minDuration) {
-        return [{
-          start: dayStart,
-          end: dayEnd,
-          duration,
-          productivityScore: 0.5 // default
-        }];
+        return [
+          {
+            start: dayStart,
+            end: dayEnd,
+            duration,
+            productivityScore: 0.5, // default
+          },
+        ];
       }
       return [];
     }
@@ -54,13 +73,14 @@ export class SlotFinder {
     // Tìm gap trước slot đầu tiên
     const firstBusy = mergedBusy[0];
     if (firstBusy.start > dayStart) {
-      const gap = (firstBusy.start.getTime() - dayStart.getTime()) / (1000 * 60);
+      const gap =
+        (firstBusy.start.getTime() - dayStart.getTime()) / (1000 * 60);
       if (gap >= minDuration) {
         freeSlots.push({
           start: dayStart,
           end: firstBusy.start,
           duration: gap,
-          productivityScore: this.estimateProductivity(dayStart.getHours())
+          productivityScore: this.estimateProductivity(dayStart.getHours()),
         });
       }
     }
@@ -71,13 +91,13 @@ export class SlotFinder {
       const nextStart = mergedBusy[i + 1].start;
 
       const gap = (nextStart.getTime() - currentEnd.getTime()) / (1000 * 60);
-      
+
       if (gap >= minDuration) {
         freeSlots.push({
           start: currentEnd,
           end: nextStart,
           duration: gap,
-          productivityScore: this.estimateProductivity(currentEnd.getHours())
+          productivityScore: this.estimateProductivity(currentEnd.getHours()),
         });
       }
     }
@@ -91,7 +111,7 @@ export class SlotFinder {
           start: lastBusy.end,
           end: dayEnd,
           duration: gap,
-          productivityScore: this.estimateProductivity(lastBusy.end.getHours())
+          productivityScore: this.estimateProductivity(lastBusy.end.getHours()),
         });
       }
     }
@@ -111,7 +131,7 @@ export class SlotFinder {
       productivityScores,
       busySlots,
       date,
-      workHours = { start: 8, end: 18 }
+      workHours = { start: 8, end: 18 },
     } = input;
 
     // Tìm tất cả slots đủ dài
@@ -119,7 +139,7 @@ export class SlotFinder {
       busySlots,
       date,
       minDuration: taskDuration,
-      workHours
+      workHours,
     });
 
     if (freeSlots.length === 0) {
@@ -127,7 +147,7 @@ export class SlotFinder {
     }
 
     // Score mỗi slot
-    const scoredSlots = freeSlots.map(slot => {
+    const scoredSlots = freeSlots.map((slot) => {
       let score = slot.productivityScore;
 
       // Bonus nếu slot vừa khít với task duration (không quá dư)
@@ -142,9 +162,9 @@ export class SlotFinder {
         const ranges = {
           morning: [6, 7, 8, 9, 10, 11],
           afternoon: [12, 13, 14, 15, 16, 17],
-          evening: [18, 19, 20, 21]
+          evening: [18, 19, 20, 21],
         };
-        
+
         if (ranges[preferredTimeOfDay]?.includes(hour)) {
           score += 0.2;
         }
@@ -174,13 +194,13 @@ export class SlotFinder {
     busySlots: TimeInterval[],
     duration: number,
     date: Date,
-    workHours: { start: number; end: number } = { start: 8, end: 18 }
+    workHours: { start: number; end: number } = { start: 8, end: 18 },
   ): boolean {
     const slots = this.findFreeSlots({
       busySlots,
       date,
       minDuration: duration,
-      workHours
+      workHours,
     });
     return slots.length > 0;
   }
@@ -193,24 +213,24 @@ export class SlotFinder {
     startDate: Date,
     endDate: Date,
     minDuration: number,
-    workHours: { start: number; end: number } = { start: 8, end: 18 }
+    workHours: { start: number; end: number } = { start: 8, end: 18 },
   ): Map<string, FreeSlot[]> {
     const result = new Map<string, FreeSlot[]>();
-    
+
     const current = new Date(startDate);
     while (current <= endDate) {
-      const dateStr = current.toISOString().split('T')[0];
-      
+      const dateStr = current.toISOString().split("T")[0];
+
       // Filter busy slots cho ngày này
-      const dayBusy = busySlots.filter(slot => 
-        slot.start.toDateString() === current.toDateString()
+      const dayBusy = busySlots.filter(
+        (slot) => slot.start.toDateString() === current.toDateString(),
       );
 
       const slots = this.findFreeSlots({
         busySlots: dayBusy,
         date: new Date(current),
         minDuration,
-        workHours
+        workHours,
       });
 
       result.set(dateStr, slots);
@@ -227,14 +247,14 @@ export class SlotFinder {
     busySlots: TimeInterval[],
     duration: number,
     fromTime: Date,
-    workHours: { start: number; end: number } = { start: 8, end: 18 }
+    workHours: { start: number; end: number } = { start: 8, end: 18 },
   ): FreeSlot | null {
     // Bắt đầu từ fromTime, tìm trong 7 ngày tới
     const endSearch = new Date(fromTime);
     endSearch.setDate(endSearch.getDate() + 7);
 
     const current = new Date(fromTime);
-    
+
     while (current <= endSearch) {
       // Nếu là ngày hiện tại và đã qua giờ bắt đầu, bắt đầu từ giờ tiếp theo
       let searchStart = new Date(current);
@@ -248,16 +268,17 @@ export class SlotFinder {
       }
 
       // Tạo busy slots cho ngày này từ searchStart
-      const dayBusy = busySlots.filter(slot => 
-        slot.start.toDateString() === current.toDateString() &&
-        slot.end > searchStart
+      const dayBusy = busySlots.filter(
+        (slot) =>
+          slot.start.toDateString() === current.toDateString() &&
+          slot.end > searchStart,
       );
 
       // Thêm "busy" từ đầu ngày đến searchStart
       if (searchStart.getHours() > workHours.start) {
         dayBusy.unshift({
           start: new Date(current.setHours(workHours.start, 0, 0, 0)),
-          end: searchStart
+          end: searchStart,
         });
       }
 
@@ -265,7 +286,7 @@ export class SlotFinder {
         busySlots: dayBusy,
         date: new Date(current),
         minDuration: duration,
-        workHours
+        workHours,
       });
 
       if (slots.length > 0) {
