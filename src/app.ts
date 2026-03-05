@@ -10,6 +10,7 @@ import notificationRouter from "./modules/notification/notification.routes";
 import adminRouter from "./modules/admin/admin.routes";
 import scheduleTemplateRouter from "./modules/schedule-template/schedule-template.routes";
 import aiScheduleRouter from "./modules/ai-schedule/ai-schedule.routes";
+import schedulerRouter from "./modules/scheduler/scheduler.routes";
 
 export const createApp = (): Express => {
   const app: Express = express();
@@ -45,6 +46,7 @@ export const createApp = (): Express => {
   app.use("/admin", adminRouter);
   app.use("/schedule-templates", scheduleTemplateRouter);
   app.use("/ai-schedules", aiScheduleRouter);
+  app.use("/scheduler", schedulerRouter);
 
   return app;
 };
