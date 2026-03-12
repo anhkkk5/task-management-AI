@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.aiCacheService = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const redis_service_1 = require("../../services/redis.service");
+const cache_version_1 = require("../../config/cache-version");
 const AI_CACHE_TTL_SECONDS = 300; // 5 minutes default for AI responses
 exports.aiCacheService = {
     buildPromptHash: (prompt) => {
@@ -13,11 +14,13 @@ exports.aiCacheService = {
     },
     getCachedPrompt: async (promptHash) => {
         const redis = (0, redis_service_1.getRedis)();
-        return redis.get(`ai:prompt:${promptHash}`);
+        const key = (0, cache_version_1.versionedKey)(cache_version_1.CACHE_VERSION.AI, `ai:prompt:${promptHash}`);
+        return redis.get(key);
     },
     setCachedPrompt: async (promptHash, value, ttlSeconds) => {
         const redis = (0, redis_service_1.getRedis)();
-        await redis.set(`ai:prompt:${promptHash}`, value, "EX", ttlSeconds);
+        const key = (0, cache_version_1.versionedKey)(cache_version_1.CACHE_VERSION.AI, `ai:prompt:${promptHash}`);
+        await redis.set(key, value, "EX", ttlSeconds);
     },
     // Task Breakdown cache methods
     getTaskBreakdown: async (params) => {
@@ -32,7 +35,8 @@ exports.aiCacheService = {
                 .update(params.title)
                 .digest("hex")
                 .slice(0, 16);
-            const key = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const key = (0, cache_version_1.versionedKey)(cache_version_1.CACHE_VERSION.AI, baseKey);
             const cached = await redis.get(key);
             if (!cached)
                 return null;
@@ -54,7 +58,8 @@ exports.aiCacheService = {
                 .update(params.title)
                 .digest("hex")
                 .slice(0, 16);
-            const key = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const key = (0, cache_version_1.versionedKey)(cache_version_1.CACHE_VERSION.AI, baseKey);
             await redis.setex(key, ttlSeconds, JSON.stringify(value));
         }
         catch {
@@ -74,7 +79,8 @@ exports.aiCacheService = {
                 .update(params.title)
                 .digest("hex")
                 .slice(0, 16);
-            const key = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const baseKey = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const key = (0, cache_version_1.versionedKey)(cache_version_1.CACHE_VERSION.AI, baseKey);
             const cached = await redis.get(key);
             if (!cached)
                 return null;
@@ -96,7 +102,8 @@ exports.aiCacheService = {
                 .update(params.title)
                 .digest("hex")
                 .slice(0, 16);
-            const key = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const baseKey = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+            const key = (0, cache_version_1.versionedKey)(cache_version_1.CACHE_VERSION.AI, baseKey);
             await redis.setex(key, ttlSeconds, JSON.stringify(value));
         }
         catch {

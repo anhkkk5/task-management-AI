@@ -46,6 +46,13 @@ router.patch(
   aiScheduleController.updateSessionTime.bind(aiScheduleController),
 );
 
+// Delete one session from a schedule
+router.delete(
+  "/:scheduleId/sessions/:sessionId",
+  authMiddleware,
+  aiScheduleController.deleteSession.bind(aiScheduleController),
+);
+
 // Delete schedule
 router.delete(
   "/:scheduleId",

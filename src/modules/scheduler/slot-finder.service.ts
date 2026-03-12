@@ -1,12 +1,28 @@
 import { TimeInterval, FreeSlot, ProductivityScore } from "./types";
 import { intervalScheduler } from "./scheduler.service";
 import { slotCache, cacheKeys } from "./cache.service";
+import { CACHE_VERSION, versionedKey } from "../../config/cache-version";
+import { AdaptiveBufferCalculator } from "./adaptive-buffer";
+
+// Helper function for local date string
+function toLocalDateStr(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 export interface SlotFinderInput {
   busySlots: TimeInterval[];
   date: Date;
   minDuration: number; // minutes
-  workHours: { start: number; end: number };
+  workHours: {
+    start: number;
+    end: number;
+    breaks?: { start: number; end: number }[]; // Giờ nghỉ
+  };
+  bufferMinutes?: number; // Thời gian nghỉ giữa các task (mặc định 15 phút)
+  currentTime?: Date; // ⭐ NEW: Giờ hiện tại để skip past slots
 }
 
 export interface OptimalSlotInput {
@@ -15,7 +31,13 @@ export interface OptimalSlotInput {
   productivityScores?: Map<number, ProductivityScore>;
   busySlots: TimeInterval[];
   date: Date;
-  workHours?: { start: number; end: number };
+  workHours?: {
+    start: number;
+    end: number;
+    breaks?: { start: number; end: number }[];
+  };
+  bufferMinutes?: number;
+  currentTime?: Date; // ⭐ NEW: Giờ hiện tại để skip past slots
 }
 
 export class SlotFinder {
@@ -24,7 +46,10 @@ export class SlotFinder {
    */
   findFreeSlotsWithCache(userId: string, input: SlotFinderInput): FreeSlot[] {
     const dateStr = input.date.toISOString().split("T")[0];
-    const cacheKey = cacheKeys.freeSlots(userId, dateStr);
+    const cacheKey = versionedKey(
+      CACHE_VERSION.SLOT_FINDER,
+      cacheKeys.freeSlots(userId, dateStr),
+    );
 
     const cached = slotCache.get<FreeSlot[]>(cacheKey);
     if (cached) {
@@ -40,10 +65,62 @@ export class SlotFinder {
    * O(n log n) vì cần merge intervals trước
    */
   findFreeSlots(input: SlotFinderInput): FreeSlot[] {
-    const { busySlots, date, minDuration, workHours } = input;
+    const {
+      busySlots,
+      date,
+      minDuration,
+      workHours,
+      bufferMinutes = 15,
+      currentTime,
+    } = input;
+
+    // Thêm breaks vào busy slots
+    const allBusySlots = [...busySlots];
+
+    if (workHours.breaks) {
+      workHours.breaks.forEach((breakTime) => {
+        const breakStart = new Date(date);
+        const startHour = Math.floor(breakTime.start);
+        const startMinute = (breakTime.start % 1) * 60;
+        breakStart.setHours(startHour, startMinute, 0, 0);
+
+        const breakEnd = new Date(date);
+        const endHour = Math.floor(breakTime.end);
+        const endMinute = (breakTime.end % 1) * 60;
+        breakEnd.setHours(endHour, endMinute, 0, 0);
+
+        allBusySlots.push({
+          start: breakStart,
+          end: breakEnd,
+          taskId: "BREAK",
+        });
+      });
+    }
+
+    // ⭐ NEW: Nếu là hôm nay, thêm busy slot cho thời gian đã qua
+    if (currentTime) {
+      const dateStr = toLocalDateStr(date);
+      const currentDateStr = toLocalDateStr(currentTime);
+
+      if (dateStr === currentDateStr) {
+        // Thêm buffer 30 phút để tránh schedule quá gần
+        const minStartTime = new Date(currentTime.getTime() + 30 * 60 * 1000);
+
+        const dayStart = new Date(date);
+        dayStart.setHours(workHours.start, 0, 0, 0);
+
+        if (minStartTime > dayStart) {
+          allBusySlots.push({
+            start: dayStart,
+            end: minStartTime,
+            taskId: "PAST_TIME",
+          });
+        }
+      }
+    }
 
     // Merge busy slots để có danh sách gọn gàng
-    const mergedBusy = intervalScheduler.mergeIntervals(busySlots);
+    const mergedBusy = intervalScheduler.mergeIntervals(allBusySlots);
 
     const freeSlots: FreeSlot[] = [];
 
@@ -54,7 +131,7 @@ export class SlotFinder {
     const dayEnd = new Date(date);
     dayEnd.setHours(workHours.end, 0, 0, 0);
 
-    // Nếu không có busy slots → cả ngày đều rảnh
+    // Nếu không có busy slots → cả ngày đều rảnh (trừ breaks)
     if (mergedBusy.length === 0) {
       const duration = (dayEnd.getTime() - dayStart.getTime()) / (1000 * 60);
       if (duration >= minDuration) {
@@ -75,19 +152,32 @@ export class SlotFinder {
     if (firstBusy.start > dayStart) {
       const gap =
         (firstBusy.start.getTime() - dayStart.getTime()) / (1000 * 60);
-      if (gap >= minDuration) {
+      if (gap >= minDuration + bufferMinutes) {
         freeSlots.push({
           start: dayStart,
-          end: firstBusy.start,
-          duration: gap,
+          end: new Date(firstBusy.start.getTime() - bufferMinutes * 60 * 1000), // Trừ buffer
+          duration: gap - bufferMinutes,
           productivityScore: this.estimateProductivity(dayStart.getHours()),
         });
       }
     }
 
-    // Tìm gaps giữa các busy slots
+    // Tìm gaps giữa các busy slots (thêm buffer linh hoạt)
     for (let i = 0; i < mergedBusy.length - 1; i++) {
-      const currentEnd = mergedBusy[i].end;
+      // Tính duration của task vừa kết thúc
+      const previousTaskDuration =
+        (mergedBusy[i].end.getTime() - mergedBusy[i].start.getTime()) /
+        (1000 * 60);
+
+      // Tính buffer linh hoạt: < 40 phút → 10 phút, ≥ 40 phút → 15 phút
+      const adaptiveBuffer = AdaptiveBufferCalculator.calculateBuffer(
+        previousTaskDuration,
+        bufferMinutes,
+      );
+
+      const currentEnd = new Date(
+        mergedBusy[i].end.getTime() + adaptiveBuffer * 60 * 1000,
+      ); // Thêm buffer linh hoạt
       const nextStart = mergedBusy[i + 1].start;
 
       const gap = (nextStart.getTime() - currentEnd.getTime()) / (1000 * 60);
@@ -102,16 +192,23 @@ export class SlotFinder {
       }
     }
 
-    // Tìm gap sau slot cuối cùng
+    // Tìm gap sau slot cuối cùng (cũng dùng adaptive buffer)
     const lastBusy = mergedBusy[mergedBusy.length - 1];
-    if (lastBusy.end < dayEnd) {
-      const gap = (dayEnd.getTime() - lastBusy.end.getTime()) / (1000 * 60);
+    const lastTaskDuration =
+      (lastBusy.end.getTime() - lastBusy.start.getTime()) / (1000 * 60);
+    const lastBuffer = AdaptiveBufferCalculator.calculateBuffer(
+      lastTaskDuration,
+      bufferMinutes,
+    );
+    const lastEnd = new Date(lastBusy.end.getTime() + lastBuffer * 60 * 1000); // Thêm buffer linh hoạt
+    if (lastEnd < dayEnd) {
+      const gap = (dayEnd.getTime() - lastEnd.getTime()) / (1000 * 60);
       if (gap >= minDuration) {
         freeSlots.push({
-          start: lastBusy.end,
+          start: lastEnd,
           end: dayEnd,
           duration: gap,
-          productivityScore: this.estimateProductivity(lastBusy.end.getHours()),
+          productivityScore: this.estimateProductivity(lastEnd.getHours()),
         });
       }
     }
@@ -131,7 +228,16 @@ export class SlotFinder {
       productivityScores,
       busySlots,
       date,
-      workHours = { start: 8, end: 18 },
+      workHours = {
+        start: 8,
+        end: 23,
+        breaks: [
+          { start: 11.5, end: 14 },
+          { start: 17.5, end: 19.5 },
+        ],
+      },
+      bufferMinutes = 15,
+      currentTime,
     } = input;
 
     // Tìm tất cả slots đủ dài
@@ -140,6 +246,8 @@ export class SlotFinder {
       date,
       minDuration: taskDuration,
       workHours,
+      bufferMinutes,
+      currentTime, // ⭐ Pass currentTime to findFreeSlots
     });
 
     if (freeSlots.length === 0) {
@@ -160,9 +268,9 @@ export class SlotFinder {
       if (preferredTimeOfDay) {
         const hour = slot.start.getHours();
         const ranges = {
-          morning: [6, 7, 8, 9, 10, 11],
-          afternoon: [12, 13, 14, 15, 16, 17],
-          evening: [18, 19, 20, 21],
+          morning: [8, 9, 10, 11],
+          afternoon: [14, 15, 16, 17],
+          evening: [19, 20, 21, 22],
         };
 
         if (ranges[preferredTimeOfDay]?.includes(hour)) {
@@ -301,13 +409,20 @@ export class SlotFinder {
 
   /**
    * Helper: estimate productivity score dựa trên giờ (fallback)
+   * Khung giờ: Sáng 8-11:30, Chiều 14-17:30, Tối 19:30-23
    */
   private estimateProductivity(hour: number): number {
-    // Giờ làm việc thông thường có score cao hơn
-    if (hour >= 8 && hour <= 11) return 0.85; // Morning
-    if (hour >= 13 && hour <= 16) return 0.75; // Afternoon
-    if (hour >= 17 && hour <= 19) return 0.65; // Evening
-    return 0.5; // Early morning / late evening
+    // Sáng (8-11:30): Năng suất cao nhất
+    if (hour >= 8 && hour < 12) return 0.9;
+
+    // Chiều (14-17:30): Năng suất trung bình cao
+    if (hour >= 14 && hour < 18) return 0.8;
+
+    // Tối (19:30-23): Năng suất trung bình
+    if (hour >= 19 && hour < 23) return 0.7;
+
+    // Ngoài giờ làm việc
+    return 0.3;
   }
 }
 

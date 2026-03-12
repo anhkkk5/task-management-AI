@@ -15,6 +15,8 @@ export const taskRepository = {
       parentTaskId: attrs.parentTaskId,
       aiBreakdown: attrs.aiBreakdown ?? [],
       estimatedDuration: attrs.estimatedDuration,
+      dailyTargetDuration: attrs.dailyTargetDuration,
+      dailyTargetMin: attrs.dailyTargetMin,
       reminderAt: attrs.reminderAt,
       scheduledTime: attrs.scheduledTime,
     });
@@ -49,6 +51,8 @@ export const taskRepository = {
         estimatedDuration?: number;
       }[];
       estimatedDuration?: number;
+      dailyTargetDuration?: number;
+      dailyTargetMin?: number;
       scheduledTime?: {
         start: Date;
         end: Date;
@@ -82,6 +86,12 @@ export const taskRepository = {
           ...(update.estimatedDuration !== undefined
             ? { estimatedDuration: update.estimatedDuration }
             : {}),
+          ...(update.dailyTargetDuration !== undefined
+            ? { dailyTargetDuration: update.dailyTargetDuration }
+            : {}),
+          ...(update.dailyTargetMin !== undefined
+            ? { dailyTargetMin: update.dailyTargetMin }
+            : {}),
           ...(update.scheduledTime !== undefined
             ? { scheduledTime: update.scheduledTime }
             : {}),
@@ -110,12 +120,14 @@ export const taskRepository = {
         estimatedDuration?: number;
       }[];
       estimatedDuration?: number;
+      dailyTargetDuration?: number;
+      dailyTargetMin?: number;
       scheduledTime?: {
         start: Date;
         end: Date;
         aiPlanned: boolean;
         reason?: string;
-      };
+      } | null;
     },
   ): Promise<TaskDoc | null> => {
     return Task.findOneAndUpdate(
@@ -142,6 +154,12 @@ export const taskRepository = {
             : {}),
           ...(update.estimatedDuration !== undefined
             ? { estimatedDuration: update.estimatedDuration }
+            : {}),
+          ...(update.dailyTargetDuration !== undefined
+            ? { dailyTargetDuration: update.dailyTargetDuration }
+            : {}),
+          ...(update.dailyTargetMin !== undefined
+            ? { dailyTargetMin: update.dailyTargetMin }
             : {}),
           ...(update.scheduledTime !== undefined
             ? { scheduledTime: update.scheduledTime }
@@ -263,5 +281,35 @@ export const taskRepository = {
     ];
 
     return Task.find(filter).exec();
+  },
+
+  // Get scheduled tasks for conflict detection
+  getScheduledTasks: async (params: {
+    userId: string | Types.ObjectId;
+    startDate: Date;
+    endDate: Date;
+    excludeTaskIds?: string[];
+  }): Promise<TaskDoc[]> => {
+    const filter: any = {
+      userId: params.userId,
+      status: { $in: ["scheduled", "in_progress"] },
+      "scheduledTime.start": { $exists: true, $ne: null },
+      "scheduledTime.end": { $exists: true, $ne: null },
+      // Task phải overlap với range [startDate, endDate]
+      // Overlap condition: taskStart < endDate AND taskEnd > startDate
+      $and: [
+        { "scheduledTime.start": { $lt: params.endDate } },
+        { "scheduledTime.end": { $gt: params.startDate } },
+      ],
+    };
+
+    // Exclude specific tasks (e.g., tasks being scheduled)
+    if (params.excludeTaskIds && params.excludeTaskIds.length > 0) {
+      filter._id = {
+        $nin: params.excludeTaskIds.map((id) => new Types.ObjectId(id)),
+      };
+    }
+
+    return Task.find(filter).sort({ "scheduledTime.start": 1 }).exec();
   },
 };

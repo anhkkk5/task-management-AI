@@ -70,6 +70,7 @@ const parseStatus = (value: unknown): TaskStatus | undefined => {
   const v = String(value);
   if (
     v === "todo" ||
+    v === "scheduled" ||
     v === "in_progress" ||
     v === "completed" ||
     v === "cancelled"
@@ -161,10 +162,14 @@ export const createTask = async (
     }
 
     const scheduledTime =
-      _req.body?.scheduledTime !== undefined
+      _req.body?.scheduledTime !== undefined && _req.body.scheduledTime !== null
         ? parseScheduledTime(_req.body.scheduledTime)
         : undefined;
-    if (_req.body?.scheduledTime !== undefined && scheduledTime === undefined) {
+    if (
+      _req.body?.scheduledTime !== undefined &&
+      _req.body.scheduledTime !== null &&
+      scheduledTime === undefined
+    ) {
       res.status(400).json({ message: "ScheduledTime không hợp lệ" });
       return;
     }
@@ -187,6 +192,27 @@ export const createTask = async (
       return;
     }
 
+    // Parse daily target duration (max)
+    const dailyTargetDurationRaw =
+      _req.body?.dailyTargetDuration !== undefined
+        ? Number(_req.body.dailyTargetDuration)
+        : undefined;
+    const dailyTargetDuration =
+      dailyTargetDurationRaw !== undefined &&
+      Number.isFinite(dailyTargetDurationRaw)
+        ? Math.max(0, Math.floor(dailyTargetDurationRaw))
+        : undefined;
+
+    // Parse daily target min
+    const dailyTargetMinRaw =
+      _req.body?.dailyTargetMin !== undefined
+        ? Number(_req.body.dailyTargetMin)
+        : undefined;
+    const dailyTargetMin =
+      dailyTargetMinRaw !== undefined && Number.isFinite(dailyTargetMinRaw)
+        ? Math.max(0, Math.floor(dailyTargetMinRaw))
+        : undefined;
+
     const parentTaskIdRaw =
       _req.body?.parentTaskId !== undefined
         ? String(_req.body.parentTaskId)
@@ -208,6 +234,8 @@ export const createTask = async (
       tags,
       reminderAt,
       estimatedDuration,
+      dailyTargetDuration,
+      dailyTargetMin,
       parentTaskId,
       scheduledTime,
     });
@@ -407,6 +435,27 @@ export const updateTask = async (
       return;
     }
 
+    // Parse daily target duration (max)
+    const dailyTargetDurationRaw =
+      _req.body?.dailyTargetDuration !== undefined
+        ? Number(_req.body.dailyTargetDuration)
+        : undefined;
+    const dailyTargetDuration =
+      dailyTargetDurationRaw !== undefined &&
+      Number.isFinite(dailyTargetDurationRaw)
+        ? Math.max(0, Math.floor(dailyTargetDurationRaw))
+        : undefined;
+
+    // Parse daily target min
+    const dailyTargetMinRaw =
+      _req.body?.dailyTargetMin !== undefined
+        ? Number(_req.body.dailyTargetMin)
+        : undefined;
+    const dailyTargetMin =
+      dailyTargetMinRaw !== undefined && Number.isFinite(dailyTargetMinRaw)
+        ? Math.max(0, Math.floor(dailyTargetMinRaw))
+        : undefined;
+
     const parentTaskIdRaw =
       _req.body?.parentTaskId !== undefined
         ? String(_req.body.parentTaskId)
@@ -478,15 +527,20 @@ export const updateTask = async (
       deadline,
       tags,
       reminderAt,
-      scheduledTime: scheduledTime
-        ? {
-            start: scheduledTime.start,
-            end: scheduledTime.end,
-            aiPlanned: scheduledTime.aiPlanned ?? false,
-            reason: scheduledTime.reason,
-          }
-        : undefined,
+      scheduledTime:
+        scheduledTime === null
+          ? null
+          : scheduledTime
+            ? {
+                start: scheduledTime.start,
+                end: scheduledTime.end,
+                aiPlanned: scheduledTime.aiPlanned ?? false,
+                reason: scheduledTime.reason,
+              }
+            : undefined,
       estimatedDuration,
+      dailyTargetDuration,
+      dailyTargetMin,
       parentTaskId,
       aiBreakdown,
     });
@@ -527,6 +581,59 @@ export const deleteTask = async (
 
     if (message === "TASK_FORBIDDEN") {
       res.status(403).json({ message: "Không có quyền xóa task này" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+/**
+ * Quick update task status (for status dropdown)
+ * PATCH /tasks/:id/status
+ */
+export const updateTaskStatus = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const taskId = String(_req.params.id ?? "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Task ID không hợp lệ" });
+      return;
+    }
+
+    const statusRaw = _req.body?.status;
+    const status = parseStatus(statusRaw);
+    if (!status) {
+      res.status(400).json({
+        message:
+          "Status không hợp lệ. Phải là: todo, scheduled, in_progress, completed, cancelled",
+      });
+      return;
+    }
+
+    const task = await taskService.updateStatus(userId, taskId, status);
+    res.status(200).json({
+      task,
+      message: `Đã cập nhật trạng thái thành ${status}`,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền cập nhật task này" });
+      return;
+    }
+
+    if (message === "INVALID_ID") {
+      res.status(400).json({ message: "ID không hợp lệ" });
       return;
     }
 
@@ -579,6 +686,7 @@ export const saveAISchedule = async (
       note: dayItem?.note ? String(dayItem.note) : undefined,
     }));
 
+    // 1. Save to AISchedule collection (for history)
     const result = await aiScheduleService.createSchedule(userId, {
       name: "AI Schedule Plan",
       description: personalizationNote,
@@ -591,6 +699,82 @@ export const saveAISchedule = async (
       sourceTasks: Array.isArray(sourceTasks) ? sourceTasks : [],
     });
 
+    // 2. Update tasks with scheduled time and status ⭐ IMPORTANT
+    const tasksToUpdate: {
+      sessionId?: string;
+      taskId: string;
+      title?: string;
+      createSubtask?: boolean;
+      scheduledTime: {
+        start: Date;
+        end: Date;
+        aiPlanned: boolean;
+        reason: string;
+      };
+    }[] = [];
+
+    for (const dayItem of transformedSchedule) {
+      for (const task of dayItem.tasks) {
+        // Parse suggestedTime (e.g., "08:00 - 09:00")
+        const timeMatch = task.suggestedTime.match(
+          /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+        );
+        if (!timeMatch) continue;
+
+        const [, startHour, startMinute, endHour, endMinute] = timeMatch;
+
+        // Parse date (e.g., "2026-03-08")
+        const dateMatch = dayItem.date.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (!dateMatch) continue;
+
+        const [, year, month, day] = dateMatch;
+
+        // Create Date objects (UTC)
+        const startDate = new Date(
+          Date.UTC(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            parseInt(startHour),
+            parseInt(startMinute),
+          ),
+        );
+
+        const endDate = new Date(
+          Date.UTC(
+            parseInt(year),
+            parseInt(month) - 1,
+            parseInt(day),
+            parseInt(endHour),
+            parseInt(endMinute),
+          ),
+        );
+
+        tasksToUpdate.push({
+          sessionId: task.sessionId,
+          taskId: task.taskId,
+          title: task.title,
+          createSubtask: task.createSubtask,
+          scheduledTime: {
+            start: startDate,
+            end: endDate,
+            aiPlanned: true,
+            reason: task.reason,
+          },
+        });
+      }
+    }
+
+    // Update tasks in database
+    const updateResult = await taskService.saveAISchedule(
+      userId,
+      tasksToUpdate,
+    );
+
+    console.log(
+      `[Save Schedule] Updated ${updateResult.updated} tasks, created ${updateResult.created} subtasks`,
+    );
+
     const totalSessions = transformedSchedule.reduce(
       (sum: number, day: any) => sum + (day.tasks?.length || 0),
       0,
@@ -601,6 +785,79 @@ export const saveAISchedule = async (
       scheduleId: result.id,
       totalSessions,
       totalDays: transformedSchedule.length,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "User ID không hợp lệ" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống", error: message });
+  }
+};
+
+/**
+ * Clear scheduled time from specific tasks
+ * DELETE /tasks/schedule/clear
+ */
+export const clearScheduledTime = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const { taskIds } = _req.body;
+
+    if (!Array.isArray(taskIds)) {
+      res.status(400).json({ message: "taskIds phải là một mảng" });
+      return;
+    }
+
+    const result = await taskService.clearScheduledTime(userId, taskIds);
+
+    res.status(200).json({
+      message: `Đã xóa lịch trình của ${result.updated} tasks`,
+      updated: result.updated,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "User ID không hợp lệ" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống", error: message });
+  }
+};
+
+/**
+ * Clear all scheduled times for user (emergency cleanup)
+ * DELETE /tasks/schedule/clear-all
+ */
+export const clearAllScheduledTimes = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const result = await taskService.clearAllScheduledTimes(userId);
+
+    res.status(200).json({
+      message: `Đã xóa tất cả lịch trình (${result.updated} tasks)`,
+      updated: result.updated,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "UNKNOWN";

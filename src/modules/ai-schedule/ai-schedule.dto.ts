@@ -58,6 +58,7 @@ export interface ScheduleDayResponse {
 }
 
 export interface ScheduleSessionResponse {
+  scheduleId?: string;
   sessionId: string;
   taskId: string;
   title: string;

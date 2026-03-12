@@ -1,0 +1,213 @@
+### Test Conflict Detection API
+### Sử dụng REST Client extension trong VS Code
+
+### 1. Login để lấy token
+POST http://localhost:3002/auth/login
+Content-Type: application/json
+
+{
+  "email": "your-email@example.com",
+  "password": "your-password"
+}
+
+### Save token từ response vào biến
+@token = YOUR_TOKEN_HERE
+
+### 2. Tạo Task A
+POST http://localhost:3002/tasks
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Test Task A - học tiếng anh",
+  "description": "Task để test conflict detection",
+  "estimatedDuration": 120,
+  "dailyTargetDuration": 60,
+  "dailyTargetMin": 60,
+  "deadline": "2026-03-11T00:00:00.000Z",
+  "priority": "high"
+}
+
+### Save taskId từ response
+@taskAId = TASK_A_ID_HERE
+
+### 3. Tạo Task B
+POST http://localhost:3002/tasks
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Test Task B - học code",
+  "description": "Task để test conflict detection",
+  "estimatedDuration": 120,
+  "dailyTargetDuration": 60,
+  "dailyTargetMin": 60,
+  "deadline": "2026-03-11T00:00:00.000Z",
+  "priority": "high"
+}
+
+### Save taskId từ response
+@taskBId = TASK_B_ID_HERE
+
+### 4. AI Schedule Task A (lần đầu - không có conflict)
+POST http://localhost:3002/ai/schedule
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "taskIds": ["{{taskAId}}"],
+  "startDate": "2026-03-07T00:00:00.000Z"
+}
+
+### Expected Response:
+### - schedule với Task A có suggestedTime
+### - Console log: [Conflict Detection] Found 0 scheduled tasks
+
+### 5. Áp dụng lịch Task A
+POST http://localhost:3002/ai/schedule/apply
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "schedule": [
+    {
+      "taskId": "{{taskAId}}",
+      "scheduledTime": {
+        "start": "2026-03-07T01:00:00.000Z",
+        "end": "2026-03-07T02:00:00.000Z",
+        "aiPlanned": true,
+        "reason": "Giờ làm việc hiệu quả"
+      }
+    }
+  ]
+}
+
+### Expected Response:
+### - updated: 1
+### - Task A status = "scheduled"
+
+### 6. Verify Task A status
+GET http://localhost:3002/tasks/{{taskAId}}
+Authorization: Bearer {{token}}
+
+### Expected Response:
+### - status: "scheduled"
+### - scheduledTime.start: "2026-03-07T01:00:00.000Z"
+### - scheduledTime.end: "2026-03-07T02:00:00.000Z"
+
+### 7. AI Schedule Task B (có conflict với Task A)
+POST http://localhost:3002/ai/schedule
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "taskIds": ["{{taskBId}}"],
+  "startDate": "2026-03-07T00:00:00.000Z"
+}
+
+### ⭐ QUAN TRỌNG - Check Backend Console:
+### Expected Console Logs:
+### [Conflict Detection] Found 1 scheduled tasks
+### [Scheduler] Date 2026-03-07: 1 busy slots
+### [Scheduler] Task B scheduled at 09:15-10:15 (avoiding Task A)
+
+### Expected Response:
+### - Task B có suggestedTime KHÁC với Task A
+### - Task B start time > Task A end time + buffer (15 phút)
+
+### 8. Get all scheduled tasks
+GET http://localhost:3002/tasks?status=scheduled
+Authorization: Bearer {{token}}
+
+### Expected Response:
+### - items array có Task A (và Task B nếu đã apply)
+### - Mỗi task có scheduledTime
+
+### 9. Update Task A status manually
+PATCH http://localhost:3002/tasks/{{taskAId}}/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "in_progress"
+}
+
+### Expected Response:
+### - status: "in_progress"
+### - Success message
+
+### 10. Update Task A status back to scheduled
+PATCH http://localhost:3002/tasks/{{taskAId}}/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "scheduled"
+}
+
+### Expected Response:
+### - status: "scheduled"
+
+### 11. Tạo Task C để test multiple conflicts
+POST http://localhost:3002/tasks
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Test Task C - tiếng hàn",
+  "description": "Task để test multiple conflicts",
+  "estimatedDuration": 60,
+  "dailyTargetDuration": 60,
+  "dailyTargetMin": 60,
+  "deadline": "2026-03-11T00:00:00.000Z",
+  "priority": "medium"
+}
+
+### Save taskId từ response
+@taskCId = TASK_C_ID_HERE
+
+### 12. AI Schedule Task C (có conflict với Task A và B)
+POST http://localhost:3002/ai/schedule
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "taskIds": ["{{taskCId}}"],
+  "startDate": "2026-03-07T00:00:00.000Z"
+}
+
+### ⭐ Check Backend Console:
+### Expected Console Logs:
+### [Conflict Detection] Found 2 scheduled tasks
+### [Scheduler] Date 2026-03-07: 2 busy slots
+### [Scheduler] Task C scheduled at 10:30-11:30 (avoiding Task A & B)
+
+### 13. Schedule multiple tasks at once
+POST http://localhost:3002/ai/schedule
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "taskIds": ["{{taskAId}}", "{{taskBId}}", "{{taskCId}}"],
+  "startDate": "2026-03-07T00:00:00.000Z"
+}
+
+### Expected Response:
+### - All tasks scheduled without conflicts
+### - Each task has different time slots
+### - Buffer time between tasks
+
+### 14. Delete test tasks (cleanup)
+DELETE http://localhost:3002/tasks/{{taskAId}}
+Authorization: Bearer {{token}}
+
+###
+DELETE http://localhost:3002/tasks/{{taskBId}}
+Authorization: Bearer {{token}}
+
+###
+DELETE http://localhost:3002/tasks/{{taskCId}}
+Authorization: Bearer {{token}}
+
+### ✅ Test Complete!
+### Nếu tất cả requests pass → Conflict Detection hoạt động hoàn hảo!

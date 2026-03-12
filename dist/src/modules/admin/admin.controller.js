@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.adminController = void 0;
 const admin_service_1 = require("./admin.service");
@@ -190,6 +223,33 @@ exports.adminController = {
         catch (err) {
             console.error("[AdminController] retryFailedJobs error:", err);
             res.status(500).json({ message: "Failed to retry jobs" });
+        }
+    },
+    // Cache management
+    getCacheStats: async (req, res) => {
+        try {
+            const { cacheCleanupService } = await Promise.resolve().then(() => __importStar(require("../../services/cache-cleanup.service")));
+            const stats = await cacheCleanupService.getStats();
+            res.status(200).json({ stats });
+        }
+        catch (err) {
+            console.error("[AdminController] getCacheStats error:", err);
+            res.status(500).json({ message: "Failed to get cache stats" });
+        }
+    },
+    cleanupOldCache: async (req, res) => {
+        try {
+            const { cacheCleanupService } = await Promise.resolve().then(() => __importStar(require("../../services/cache-cleanup.service")));
+            await cacheCleanupService.cleanup();
+            const stats = await cacheCleanupService.getStats();
+            res.status(200).json({
+                message: "Cache cleanup completed",
+                stats,
+            });
+        }
+        catch (err) {
+            console.error("[AdminController] cleanupOldCache error:", err);
+            res.status(500).json({ message: "Failed to cleanup cache" });
         }
     },
 };

@@ -54,11 +54,12 @@ export const aiService = {
 
   schedulePlan: async (
     ...args: Parameters<
-      typeof import("./ai-schedule.service").aiScheduleService.schedulePlan
+      typeof import("../scheduler/hybrid-schedule.service").hybridScheduleService.schedulePlan
     >
   ) => {
-    const { aiScheduleService } = await import("./ai-schedule.service");
-    return aiScheduleService.schedulePlan(...args);
+    const { hybridScheduleService } =
+      await import("../scheduler/hybrid-schedule.service");
+    return hybridScheduleService.schedulePlan(...args);
   },
 
   smartReschedule: async (

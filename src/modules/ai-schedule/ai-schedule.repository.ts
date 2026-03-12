@@ -12,6 +12,15 @@ export class AIScheduleRepository {
       .exec();
   }
 
+  async findAllActiveByUserId(userId: string): Promise<AIScheduleDoc[]> {
+    return AISchedule.find({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+    })
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
   async findActiveByUserId(userId: string): Promise<AIScheduleDoc | null> {
     return AISchedule.findOne({
       userId: new Types.ObjectId(userId),
@@ -55,24 +64,47 @@ export class AIScheduleRepository {
     ).exec();
   }
 
+  async deleteSession(
+    scheduleId: string,
+    userId: string,
+    sessionId: string,
+  ): Promise<AIScheduleDoc | null> {
+    return AISchedule.findOneAndUpdate(
+      {
+        _id: new Types.ObjectId(scheduleId),
+        userId: new Types.ObjectId(userId),
+      },
+      {
+        $pull: { "schedule.$[day].tasks": { sessionId } },
+      },
+      {
+        new: true,
+        arrayFilters: [{ "day.tasks": { $elemMatch: { sessionId } } }],
+      },
+    ).exec();
+  }
+
   async updateSessionStatus(
     scheduleId: string,
     userId: string,
     sessionId: string,
     status: string,
   ): Promise<AIScheduleDoc | null> {
+    // ✅ FIX: Query nested array đúng cách với 2 cấp arrayFilters
     return AISchedule.findOneAndUpdate(
       {
         _id: new Types.ObjectId(scheduleId),
         userId: new Types.ObjectId(userId),
-        "schedule.tasks.sessionId": sessionId,
       },
       {
-        $set: { "schedule.$[].tasks.$[task].status": status },
+        $set: { "schedule.$[day].tasks.$[task].status": status },
       },
       {
         new: true,
-        arrayFilters: [{ "task.sessionId": sessionId }],
+        arrayFilters: [
+          { "day.tasks": { $elemMatch: { sessionId } } }, // Filter day chứa session
+          { "task.sessionId": sessionId }, // Filter đúng task
+        ],
       },
     ).exec();
   }
@@ -83,18 +115,21 @@ export class AIScheduleRepository {
     sessionId: string,
     suggestedTime: string,
   ): Promise<AIScheduleDoc | null> {
+    // ✅ FIX: Query nested array đúng cách với 2 cấp arrayFilters
     return AISchedule.findOneAndUpdate(
       {
         _id: new Types.ObjectId(scheduleId),
         userId: new Types.ObjectId(userId),
-        "schedule.tasks.sessionId": sessionId,
       },
       {
-        $set: { "schedule.$[].tasks.$[task].suggestedTime": suggestedTime },
+        $set: { "schedule.$[day].tasks.$[task].suggestedTime": suggestedTime },
       },
       {
         new: true,
-        arrayFilters: [{ "task.sessionId": sessionId }],
+        arrayFilters: [
+          { "day.tasks": { $elemMatch: { sessionId } } }, // Filter day chứa session
+          { "task.sessionId": sessionId }, // Filter đúng task
+        ],
       },
     ).exec();
   }

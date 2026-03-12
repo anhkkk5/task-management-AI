@@ -3,8 +3,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveAISchedule = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.aiBreakdownTask = void 0;
+exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.aiBreakdownTask = void 0;
 const task_service_1 = require("./task.service");
+const ai_schedule_service_1 = require("../ai-schedule/ai-schedule.service");
 const search_helper_1 = __importDefault(require("../../common/utils/search-helper"));
 const pagination_helper_1 = __importDefault(require("../../common/utils/pagination-helper"));
 const parsePriority = (value) => {
@@ -68,6 +69,7 @@ const parseStatus = (value) => {
         return undefined;
     const v = String(value);
     if (v === "todo" ||
+        v === "scheduled" ||
         v === "in_progress" ||
         v === "completed" ||
         v === "cancelled")
@@ -159,6 +161,21 @@ const createTask = async (_req, res) => {
             res.status(400).json({ message: "EstimatedDuration không hợp lệ" });
             return;
         }
+        // Parse daily target duration (max)
+        const dailyTargetDurationRaw = _req.body?.dailyTargetDuration !== undefined
+            ? Number(_req.body.dailyTargetDuration)
+            : undefined;
+        const dailyTargetDuration = dailyTargetDurationRaw !== undefined &&
+            Number.isFinite(dailyTargetDurationRaw)
+            ? Math.max(0, Math.floor(dailyTargetDurationRaw))
+            : undefined;
+        // Parse daily target min
+        const dailyTargetMinRaw = _req.body?.dailyTargetMin !== undefined
+            ? Number(_req.body.dailyTargetMin)
+            : undefined;
+        const dailyTargetMin = dailyTargetMinRaw !== undefined && Number.isFinite(dailyTargetMinRaw)
+            ? Math.max(0, Math.floor(dailyTargetMinRaw))
+            : undefined;
         const parentTaskIdRaw = _req.body?.parentTaskId !== undefined
             ? String(_req.body.parentTaskId)
             : undefined;
@@ -176,6 +193,8 @@ const createTask = async (_req, res) => {
             tags,
             reminderAt,
             estimatedDuration,
+            dailyTargetDuration,
+            dailyTargetMin,
             parentTaskId,
             scheduledTime,
         });
@@ -331,6 +350,21 @@ const updateTask = async (_req, res) => {
             res.status(400).json({ message: "EstimatedDuration không hợp lệ" });
             return;
         }
+        // Parse daily target duration (max)
+        const dailyTargetDurationRaw = _req.body?.dailyTargetDuration !== undefined
+            ? Number(_req.body.dailyTargetDuration)
+            : undefined;
+        const dailyTargetDuration = dailyTargetDurationRaw !== undefined &&
+            Number.isFinite(dailyTargetDurationRaw)
+            ? Math.max(0, Math.floor(dailyTargetDurationRaw))
+            : undefined;
+        // Parse daily target min
+        const dailyTargetMinRaw = _req.body?.dailyTargetMin !== undefined
+            ? Number(_req.body.dailyTargetMin)
+            : undefined;
+        const dailyTargetMin = dailyTargetMinRaw !== undefined && Number.isFinite(dailyTargetMinRaw)
+            ? Math.max(0, Math.floor(dailyTargetMinRaw))
+            : undefined;
         const parentTaskIdRaw = _req.body?.parentTaskId !== undefined
             ? String(_req.body.parentTaskId)
             : undefined;
@@ -391,6 +425,8 @@ const updateTask = async (_req, res) => {
                 }
                 : undefined,
             estimatedDuration,
+            dailyTargetDuration,
+            dailyTargetMin,
             parentTaskId,
             aiBreakdown,
         });
@@ -430,6 +466,50 @@ const deleteTask = async (_req, res) => {
     }
 };
 exports.deleteTask = deleteTask;
+/**
+ * Quick update task status (for status dropdown)
+ * PATCH /tasks/:id/status
+ */
+const updateTaskStatus = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const taskId = String(_req.params.id ?? "").trim();
+        if (!taskId) {
+            res.status(400).json({ message: "Task ID không hợp lệ" });
+            return;
+        }
+        const statusRaw = _req.body?.status;
+        const status = parseStatus(statusRaw);
+        if (!status) {
+            res.status(400).json({
+                message: "Status không hợp lệ. Phải là: todo, scheduled, in_progress, completed, cancelled",
+            });
+            return;
+        }
+        const task = await task_service_1.taskService.updateStatus(userId, taskId, status);
+        res.status(200).json({
+            task,
+            message: `Đã cập nhật trạng thái thành ${status}`,
+        });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "TASK_FORBIDDEN") {
+            res.status(403).json({ message: "Không có quyền cập nhật task này" });
+            return;
+        }
+        if (message === "INVALID_ID") {
+            res.status(400).json({ message: "ID không hợp lệ" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi hệ thống" });
+    }
+};
+exports.updateTaskStatus = updateTaskStatus;
 const saveAISchedule = async (_req, res) => {
     try {
         const userId = _req.user?.userId;
@@ -437,71 +517,46 @@ const saveAISchedule = async (_req, res) => {
             res.status(401).json({ message: "Chưa đăng nhập" });
             return;
         }
-        const schedule = _req.body?.schedule;
+        const { schedule, suggestedOrder, personalizationNote, totalEstimatedTime, splitStrategy, confidenceScore, sourceTasks, } = _req.body;
         if (!Array.isArray(schedule)) {
             res.status(400).json({ message: "Schedule phải là một mảng" });
             return;
         }
-        const parseTimeRange = (suggestedTime) => {
-            const match = suggestedTime.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
-            if (!match)
-                return null;
-            const sh = Number(match[1]);
-            const sm = Number(match[2]);
-            const eh = Number(match[3]);
-            const em = Number(match[4]);
-            if (![sh, sm, eh, em].every((x) => Number.isFinite(x)))
-                return null;
-            return { start: { h: sh, m: sm }, end: { h: eh, m: em } };
-        };
-        const nowDateStr = new Date().toISOString().split("T")[0];
-        const parsedSchedule = [];
-        for (const dayItem of schedule) {
-            const dateStr = String(dayItem?.date ?? nowDateStr);
-            const parts = dateStr.split("-").map(Number);
-            if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) {
-                continue;
-            }
-            const [year, month, day] = parts;
-            const tasks = Array.isArray(dayItem?.tasks) ? dayItem.tasks : [];
-            for (const t of tasks) {
-                const taskId = String(t?.taskId ?? "");
-                const suggestedTime = String(t?.suggestedTime ?? "");
-                if (!taskId || !suggestedTime)
-                    continue;
-                const range = parseTimeRange(suggestedTime);
-                if (!range)
-                    continue;
-                const start = new Date(year, month - 1, day, range.start.h, range.start.m);
-                const end = new Date(year, month - 1, day, range.end.h, range.end.m);
-                if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-                    continue;
-                }
-                if (end.getTime() <= start.getTime())
-                    continue;
-                parsedSchedule.push({
-                    sessionId: t?.sessionId !== undefined && t?.sessionId !== null
-                        ? String(t.sessionId)
-                        : undefined,
-                    taskId,
-                    title: t?.title !== undefined ? String(t.title) : undefined,
-                    createSubtask: t?.createSubtask !== undefined
-                        ? Boolean(t.createSubtask)
-                        : undefined,
-                    scheduledTime: {
-                        start,
-                        end,
-                        aiPlanned: true,
-                        reason: String(t?.reason || "AI sắp xếp"),
-                    },
-                });
-            }
-        }
-        const result = await task_service_1.taskService.saveAISchedule(userId, parsedSchedule);
+        // Transform schedule data để match với AISchedule format
+        const transformedSchedule = schedule.map((dayItem) => ({
+            day: String(dayItem?.day ?? ""),
+            date: String(dayItem?.date ?? ""),
+            tasks: Array.isArray(dayItem?.tasks)
+                ? dayItem.tasks.map((t) => ({
+                    sessionId: String(t?.sessionId ?? `${t?.taskId}_${dayItem.date}`),
+                    taskId: String(t?.taskId ?? ""),
+                    title: String(t?.title ?? ""),
+                    priority: String(t?.priority ?? "medium"),
+                    suggestedTime: String(t?.suggestedTime ?? ""),
+                    reason: String(t?.reason ?? ""),
+                    status: "pending",
+                    createSubtask: Boolean(t?.createSubtask),
+                }))
+                : [],
+            note: dayItem?.note ? String(dayItem.note) : undefined,
+        }));
+        const result = await ai_schedule_service_1.aiScheduleService.createSchedule(userId, {
+            name: "AI Schedule Plan",
+            description: personalizationNote,
+            schedule: transformedSchedule,
+            suggestedOrder: Array.isArray(suggestedOrder) ? suggestedOrder : [],
+            personalizationNote,
+            totalEstimatedTime,
+            splitStrategy,
+            confidenceScore,
+            sourceTasks: Array.isArray(sourceTasks) ? sourceTasks : [],
+        });
+        const totalSessions = transformedSchedule.reduce((sum, day) => sum + (day.tasks?.length || 0), 0);
         res.status(200).json({
-            message: `Đã tạo ${result.created} phiên và cập nhật ${result.updated} công việc`,
-            created: result.created,
-            updated: result.updated,
+            message: `Đã lưu lịch trình với ${totalSessions} phiên làm việc`,
+            scheduleId: result.id,
+            totalSessions,
+            totalDays: transformedSchedule.length,
         });
     }
     catch (err) {
@@ -510,7 +565,7 @@ const saveAISchedule = async (_req, res) => {
             res.status(400).json({ message: "User ID không hợp lệ" });
             return;
         }
-        res.status(500).json({ message: "Lỗi hệ thống" });
+        res.status(500).json({ message: "Lỗi hệ thống", error: message });
     }
 };
 exports.saveAISchedule = saveAISchedule;

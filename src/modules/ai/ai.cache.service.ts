@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getRedis } from "../../services/redis.service";
+import { CACHE_VERSION, versionedKey } from "../../config/cache-version";
 
 const AI_CACHE_TTL_SECONDS = 300; // 5 minutes default for AI responses
 
@@ -10,7 +11,8 @@ export const aiCacheService = {
 
   getCachedPrompt: async (promptHash: string): Promise<string | null> => {
     const redis = getRedis();
-    return redis.get(`ai:prompt:${promptHash}`);
+    const key = versionedKey(CACHE_VERSION.AI, `ai:prompt:${promptHash}`);
+    return redis.get(key);
   },
 
   setCachedPrompt: async (
@@ -19,7 +21,8 @@ export const aiCacheService = {
     ttlSeconds: number,
   ): Promise<void> => {
     const redis = getRedis();
-    await redis.set(`ai:prompt:${promptHash}`, value, "EX", ttlSeconds);
+    const key = versionedKey(CACHE_VERSION.AI, `ai:prompt:${promptHash}`);
+    await redis.set(key, value, "EX", ttlSeconds);
   },
 
   // Task Breakdown cache methods
@@ -40,7 +43,8 @@ export const aiCacheService = {
         .update(params.title)
         .digest("hex")
         .slice(0, 16);
-      const key = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const key = versionedKey(CACHE_VERSION.AI, baseKey);
       const cached = await redis.get(key);
       if (!cached) return null;
       return JSON.parse(cached) as {
@@ -72,7 +76,8 @@ export const aiCacheService = {
         .update(params.title)
         .digest("hex")
         .slice(0, 16);
-      const key = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const key = versionedKey(CACHE_VERSION.AI, baseKey);
       await redis.setex(key, ttlSeconds, JSON.stringify(value));
     } catch {
       // Silently fail - cache is best-effort
@@ -97,7 +102,8 @@ export const aiCacheService = {
         .update(params.title)
         .digest("hex")
         .slice(0, 16);
-      const key = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const baseKey = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const key = versionedKey(CACHE_VERSION.AI, baseKey);
       const cached = await redis.get(key);
       if (!cached) return null;
       return JSON.parse(cached) as { priority: string; reason?: string };
@@ -127,7 +133,8 @@ export const aiCacheService = {
         .update(params.title)
         .digest("hex")
         .slice(0, 16);
-      const key = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const baseKey = `ai:priority-suggest:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
+      const key = versionedKey(CACHE_VERSION.AI, baseKey);
       await redis.setex(key, ttlSeconds, JSON.stringify(value));
     } catch {
       // Silently fail - cache is best-effort

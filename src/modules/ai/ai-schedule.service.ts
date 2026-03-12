@@ -129,6 +129,19 @@ THÔNG TIN THỜI GIAN HIỆN TẠI:
 `
       : "";
 
+    // Thêm thông tin dailyTarget vào taskData
+    const taskDataWithTargets = tasks.map((t) => ({
+      id: String(t._id),
+      title: t.title,
+      description: t.description || "",
+      priority: t.priority,
+      deadline: t.deadline ? t.deadline.toISOString().split("T")[0] : null,
+      status: t.status,
+      estimatedDuration: t.estimatedDuration || null,
+      dailyTargetMin: t.dailyTargetMin || 60, // Mặc định 1h/ngày
+      dailyTargetMax: t.dailyTargetDuration || 180, // Mặc định 3h/ngày
+    }));
+
     const prompt = `Bạn là một AI chuyên gia lập kế hoạch và tối ưu lịch làm việc cá nhân. Hãy tạo lịch trình làm việc tối ưu và CÁ NHÂN HÓA.
 
 ============================
@@ -137,79 +150,144 @@ THÔNG TIN CỐ ĐỊNH:
 Giờ làm việc mỗi ngày: 08:00 – 17:00
 Nghỉ trưa: 12:00 – 13:00
 Thời gian lập lịch: Từ ${startDateStr} đến ${endDateStr} (${totalDays} ngày)
-${isStartDateToday ? `Thời gian hiện tại: ${currentHour}:00 (KHÔNG được đề xuất giờ trước ${Math.max(currentHour + 1, 8)}:00 hôm nay)` : ""}
+${isStartDateToday ? `Thời gian hiện tại: ${currentHour}:00 (BẮT BUỘC: Chỉ được đề xuất giờ từ ${Math.max(currentHour + 1, 8)}:00 trở đi cho hôm nay ${currentDateStr})` : ""}
 ${timeConstraintText}
 
 ============================
 DANH SÁCH CÔNG VIỆC:
-${JSON.stringify(taskData, null, 2)}
+${JSON.stringify(taskDataWithTargets, null, 2)}
 
 ============================
 THÓI QUEN NGƯỜI DÙNG:
 ${userPreferencesText}
 
 ============================
-YÊU CẦU PHÂN TÍCH (thực hiện theo thứ tự):
+YÊU CẦU PHÂN TÍCH (BẮT BUỘC TUÂN THỦ):
 
-BƯỚC 1 - Tính số phiên cho mỗi task:
-- estimatedDuration (phút) ÷ 120 phút = số phiên cần thiết (làm tròn lên)
-- Mỗi phiên tối đa 2 tiếng (120 phút), KHÔNG được vượt quá
-- Ví dụ: 480 phút → 4 phiên × 120 phút. 240 phút → 2 phiên × 120 phút
+**QUAN TRỌNG NHẤT - QUY TẮC THỜI GIAN:**
 
-BƯỚC 2 - Phân bổ phiên vào các ngày:
-- Task PHẢI xuất hiện trong MỌI NGÀY từ startDate đến deadline
-- Chia đều các phiên vào các ngày trong khoảng thời gian đó
-- Mỗi ngày có thể có 1-2 phiên của cùng 1 task (tùy số ngày)
-- Ví dụ: Task 480 phút, deadline 6 ngày → mỗi ngày 1 phiên 80 phút (KHÔNG phải 120 phút)
+1. **Mỗi task có 3 thông số:**
+   - estimatedDuration: Tổng thời gian cần hoàn thành (VD: 420 phút = 7h)
+   - dailyTargetMin: Thời gian tối thiểu mỗi ngày (VD: 60 phút = 1h)
+   - dailyTargetMax: Thời gian tối đa mỗi ngày (VD: 180 phút = 3h)
 
-BƯỚC 3 - Xếp nhiều task cùng ngày:
-- Mỗi ngày PHẢI có thể có NHIỀU task khác nhau
-- Task deadline gần ưu tiên xếp trước (buổi sáng)
-- Xen kẽ các task trong ngày, buffer 15 phút giữa các phiên
-- Tổng thời gian mỗi ngày không vượt quá 8 tiếng làm việc
+2. **TÍNH SỐ NGÀY CẦN THIẾT:**
+   - Số ngày tối thiểu = estimatedDuration ÷ dailyTargetMax (làm tròn lên)
+   - VD: 420 phút ÷ 180 phút/ngày = 2.33 → 3 ngày
+   - VD: 780 phút ÷ 150 phút/ngày = 5.2 → 6 ngày
+   
+3. **PHÂN BỔ THỜI GIAN MỖI NGÀY (QUAN TRỌNG):**
+   - Task PHẢI xuất hiện LIÊN TỤC từ ngày bắt đầu cho đến khi đủ estimatedDuration
+   - **MỖI PHIÊN TRONG NGÀY PHẢI NẰM TRONG KHOẢNG [dailyTargetMin, dailyTargetMax]**
+   - **TUYỆT ĐỐI KHÔNG được vượt quá dailyTargetMax**
+   - **TỔNG THỜI GIAN TẤT CẢ CÁC PHIÊN = estimatedDuration (SAI SỐ ±5 phút)**
+   - Ưu tiên xếp gần dailyTargetMax để hoàn thành sớm hơn deadline
+   
+4. **VÍ DỤ CỤ THỂ 1:**
+   Task: "học tiếng anh", estimatedDuration=420 phút, dailyMin=60, dailyMax=180, deadline=11/3/2026
+   
+   Cách tính:
+   - Số ngày cần: 420 ÷ 180 = 2.33 → 3 ngày
+   - Phân bổ: Ngày 1: 180 phút, Ngày 2: 180 phút, Ngày 3: 60 phút
+   - Kiểm tra: Mỗi phiên ≤ 180 (dailyMax) ✓
+   - Tổng: 180 + 180 + 60 = 420 phút ✓ ĐÚNG
+   
+   Lịch trình:
+   - ${isStartDateToday ? currentDateStr : startDateStr}: 08:00-11:00 (180 phút) ✓
+   - Ngày tiếp theo: 08:00-11:00 (180 phút) ✓
+   - Ngày tiếp theo: 08:00-09:00 (60 phút) ✓
 
-BƯỚC 4 - TẠO TIÊU ĐỀ PHIÊN:
+5. **VÍ DỤ CỤ THỂ 2:**
+   Task: "hoc code", estimatedDuration=780 phút (13h), dailyMin=60, dailyMax=150, deadline=14/3/2026
+   
+   Cách tính:
+   - Số ngày cần: 780 ÷ 150 = 5.2 → 6 ngày
+   - Phân bổ: 5 ngày × 150 phút + 1 ngày × 30 phút = 780 phút
+   - Kiểm tra: Mỗi phiên ≤ 150 (dailyMax) ✓
+   - Tổng: 150+150+150+150+150+30 = 780 phút ✓ ĐÚNG
+   
+   Lịch trình:
+   - Ngày 1: 13:00-15:30 (150 phút) ✓ KHÔNG được 180 phút
+   - Ngày 2: 13:00-15:30 (150 phút) ✓
+   - Ngày 3: 13:00-15:30 (150 phút) ✓
+   - Ngày 4: 13:00-15:30 (150 phút) ✓
+   - Ngày 5: 13:00-15:30 (150 phút) ✓
+   - Ngày 6: 13:00-13:30 (30 phút) ✓
 
-QUY TẮC ĐƠN GIẢN:
-- Tất cả task đều dùng title gốc từ input, KHÔNG thêm bất kỳ gì đằng sau
-- Không có "Phiên X/Y", không có "Chủ đề gì", không có "..." gì cả
-- Chỉ cần giữ nguyên title đã cho
+6. **VÍ DỤ SAI (KHÔNG LÀM NHƯ VẦY):**
+   Task: "hoc code", estimatedDuration=780 phút, dailyMin=60, dailyMax=150
+   
+   ❌ SAI: Ngày 1: 180 phút (vượt quá dailyMax=150)
+   ❌ SAI: Ngày 2: 200 phút (vượt quá dailyMax=150)
+   ❌ SAI: Tổng = 900 phút (khác estimatedDuration=780)
+   
+   ✓ ĐÚNG: Mỗi ngày tối đa 150 phút, tổng = 780 phút
+   
+7. **QUY TẮC BẮT ĐẦU TỪ HÔM NAY:**
+   ${
+     isStartDateToday
+       ? `- HÔM NAY là ${currentDateStr}, giờ hiện tại ${currentHour}:00
+   - BẮT BUỘC: Task đầu tiên PHẢI bắt đầu từ HÔM NAY (${currentDateStr})
+   - Giờ bắt đầu hôm nay PHẢI >= ${Math.max(currentHour + 1, 8)}:00
+   - KHÔNG ĐƯỢC bỏ qua hôm nay và bắt đầu từ ngày mai`
+       : `- Bắt đầu từ ${startDateStr}`
+   }
 
-VÍ DỤ:
-- Task: "Code web 3 ngày" → title: "Code web 3 ngày"
-- Task: "Học ngữ pháp tiếng anh" → title: "Học ngữ pháp tiếng anh"
-- Task: "Làm báo cáo" → title: "Làm báo cáo"
+8. **XẾP NHIỀU TASK CÙNG NGÀY:**
+   - Mỗi ngày có thể có nhiều task khác nhau
+   - Task deadline gần → ưu tiên buổi sáng
+   - Buffer 15 phút giữa các task
+   - Tổng thời gian/ngày không vượt 8h làm việc
+   - **MỖI TASK PHẢI TUÂN THỦ dailyTargetMax của riêng nó**
 
-LƯU Ý: createSubtask vẫn = true cho tất cả
+9. **TITLE TASK:**
+   - Giữ NGUYÊN title gốc, KHÔNG thêm "Phiên X/Y"
+   - createSubtask = true cho tất cả
 
 ============================
-VÍ DỤ MINH HỌA (2 task):
-Task A: Học tiếng Anh, 480 phút, từ 03/03 đến 08/03 (6 ngày)
-Task B: Làm code, 240 phút, từ 03/03 đến 04/03 (2 ngày)
+VÍ DỤ MINH HỌA:
 
-→ Task A cần 4 phiên, chia vào 6 ngày = mỗi ngày 1 phiên ~80 phút
-→ Task B cần 2 phiên, chia vào 2 ngày = mỗi ngày 1 phiên 120 phút
+Task A: "học tiếng anh", estimatedDuration=420 phút (7h), dailyMin=60, dailyMax=180, deadline=11/3/2026
+Task B: "hoc code", estimatedDuration=240 phút (4h), dailyMin=60, dailyMax=120, deadline=14/3/2026
 
-Ngày 03/03:
-- 08:00-10:00: Code web 3 ngày (120 phút, deadline gần ưu tiên)
-- 10:15-11:35: Học ngữ pháp tiếng anh (80 phút)
+Giả sử hôm nay là 07/03/2026, 13:00
 
-Ngày 04/03:
-- 08:00-10:00: Code web 3 ngày (120 phút, deadline hôm nay)
-- 10:15-11:35: Học ngữ pháp tiếng anh (80 phút)
+**TÍNH TOÁN:**
+- Task A: 420 ÷ 180 = 2.33 → 3 ngày (07/03, 08/03, 09/03)
+  - 07/03: 180 phút (14:00-17:00, vì hiện tại 13:00)
+  - 08/03: 180 phút (08:00-11:00)
+  - 09/03: 60 phút (08:00-09:00)
+  - Tổng: 420 phút ✓
 
-Ngày 05-08/03: Chỉ có Học ngữ pháp tiếng anh mỗi ngày 1 phiên 80 phút
+- Task B: 240 ÷ 120 = 2 ngày (07/03, 08/03)
+  - 07/03: 120 phút (không xếp được vì Task A đã chiếm 14:00-17:00)
+  - 08/03: 120 phút (13:00-15:00)
+  - 09/03: 120 phút (09:15-11:15)
+  - Tổng: 240 phút ✓
+
+**LỊCH TRÌNH:**
+Ngày 07/03/2026 (HÔM NAY):
+- 14:00-17:00: học tiếng anh (180 phút)
+
+Ngày 08/03/2026:
+- 08:00-11:00: học tiếng anh (180 phút)
+- 13:00-15:00: hoc code (120 phút)
+
+Ngày 09/03/2026:
+- 08:00-09:00: học tiếng anh (60 phút)
+- 09:15-11:15: hoc code (120 phút)
 
 ============================
 NGUYÊN TẮC TỐI ƯU (bắt buộc tuân theo):
 
-1. Công việc khó/ưu tiên cao/deadline gần → ưu tiên buổi sáng (08:00-12:00)
-2. Mỗi phiên tối đa 120 phút (2 tiếng), KHÔNG được vượt quá estimatedDuration còn lại
-3. Thêm buffer 15 phút giữa các phiên
-4. Không xếp 2 công việc nặng liên tiếp (xen kẽ nếu có nhiều task)
-5. Sử dụng estimatedDuration để tính toán chính xác số phiên cần thiết
-6. **QUAN TRỌNG NHẤT**: Mỗi task PHẢI xuất hiện trong schedule của MỌI NGÀY từ ngày bắt đầu cho đến ngày deadline của task đó
-7. **QUAN TRỌNG**: Mỗi ngày PHẢI có thể có nhiều task khác nhau, không phải 1 task/ngày
+1. **THỜI GIAN CHÍNH XÁC**: Tổng thời gian các phiên của mỗi task PHẢI BẰNG estimatedDuration (sai số ±5 phút)
+2. **BẮT ĐẦU TỪ HÔM NAY**: ${isStartDateToday ? `Task đầu tiên PHẢI bắt đầu từ ${currentDateStr} (hôm nay), giờ >= ${Math.max(currentHour + 1, 8)}:00` : `Bắt đầu từ ${startDateStr}`}
+3. **PHÂN BỔ ĐỀU**: Mỗi ngày từ dailyTargetMin đến dailyTargetMax, ưu tiên gần dailyTargetMax
+4. **ƯU TIÊN**: Deadline gần/priority cao → buổi sáng (08:00-12:00)
+5. **BUFFER**: 15 phút giữa các task
+6. **KHÔNG TRÙNG**: Không xếp 2 task cùng giờ
+7. **TITLE GỐC**: Giữ nguyên title, không thêm "Phiên X/Y"
+8. **LIÊN TỤC**: Task xuất hiện liên tục các ngày cho đến khi đủ estimatedDuration
 
 ============================
 FORMAT JSON OUTPUT:
@@ -241,17 +319,18 @@ FORMAT JSON OUTPUT:
 
 QUAN TRỌNG:
 - Trả về DUY NHẤT JSON hợp lệ, không thêm text khác
+- **KIỂM TRA TỔNG THỜI GIAN**: Sau khi tạo schedule, tính tổng thời gian các phiên của mỗi task, PHẢI BẰNG estimatedDuration của task đó
+- ${isStartDateToday ? `**BẮT ĐẦU TỪ HÔM NAY**: Task đầu tiên PHẢI có date = "${currentDateStr}" và giờ >= ${Math.max(currentHour + 1, 8)}:00` : ""}
 - Mỗi task PHẢI có reason giải thích rõ ràng
 - Không để trùng thời gian giữa các task trong cùng ngày
-- Mỗi taskId ĐƯỢC PHÉP xuất hiện lặp lại qua nhiều ngày cho tới deadline
+- Mỗi taskId ĐƯỢC PHÉP xuất hiện lặp lại qua nhiều ngày liên tục
 - Title giữ nguyên từ input, KHÔNG thêm "Phiên X/Y" hay gì cả
 - Nếu 1 task kéo dài nhiều ngày: createSubtask=true cho mọi phiên
 - Mỗi phiên PHẢI có sessionId duy nhất trong toàn bộ schedule
-- **BẮT BUỘC KIỂM TRA**: Sau khi tạo schedule, hãy kiểm tra lại xem mỗi task có xuất hiện trong MỌI NGÀY từ startDate đến deadline của nó không. Nếu thiếu ngày nào, phải thêm vào ngay.
-- Tuyệt đối không được xếp task sau deadline của chính task đó. Nếu task có deadline "YYYY-MM-DD" thì date phải <= deadline.
+- Tuyệt đối không được xếp task sau deadline của chính task đó
 - PHẢI trả về đúng ${totalDays} ngày trong mảng schedule (từ ${startDateStr} đến ${endDateStr})
 - Mỗi ngày phải có đầy đủ: day, date, tasks
-${isStartDateToday ? `TUYỆT ĐỐI KHÔNG đề xuất giờ bắt đầu trước ${Math.max(currentHour + 1, 8)}:00 hôm nay` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
+${isStartDateToday ? `- TUYỆT ĐỐI task đầu tiên phải bắt đầu từ HÔM NAY ${currentDateStr}, không được bỏ qua` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
 
     const result = await aiProvider.chat({
       messages: [
@@ -399,20 +478,96 @@ ${isStartDateToday ? `TUYỆT ĐỐI KHÔNG đề xuất giờ bắt đầu trư
         };
       });
 
+    // VALIDATION: Kiểm tra tổng thời gian của mỗi task
+    const totalMinutesByTask = new Map<string, number>();
+    constrainedSchedule.forEach((day: any) => {
+      day.tasks.forEach((t: any) => {
+        const taskId = String(t.taskId);
+        const timeMatch = String(t.suggestedTime).match(
+          /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+        );
+        if (timeMatch) {
+          const startHour = parseInt(timeMatch[1], 10);
+          const startMinute = parseInt(timeMatch[2], 10);
+          const endHour = parseInt(timeMatch[3], 10);
+          const endMinute = parseInt(timeMatch[4], 10);
+          const durationMinutes =
+            endHour * 60 + endMinute - (startHour * 60 + startMinute);
+          totalMinutesByTask.set(
+            taskId,
+            (totalMinutesByTask.get(taskId) || 0) + durationMinutes,
+          );
+        }
+      });
+    });
+
+    // Log warning nếu tổng thời gian không khớp hoặc vượt quá dailyTargetMax
+    tasks.forEach((task: any) => {
+      const taskId = String(task._id);
+      const expected = task.estimatedDuration || 0;
+      const actual = totalMinutesByTask.get(taskId) || 0;
+      const diff = Math.abs(expected - actual);
+
+      // Kiểm tra tổng thời gian
+      if (diff > 5 && expected > 0) {
+        console.warn(
+          `[AI Schedule Warning] Task "${task.title}" (${taskId}): Expected ${expected} minutes, but scheduled ${actual} minutes (diff: ${diff})`,
+        );
+      }
+
+      // Kiểm tra dailyTargetMax cho từng phiên
+      const dailyMax = task.dailyTargetDuration || 180;
+      constrainedSchedule.forEach((day: any) => {
+        day.tasks.forEach((t: any) => {
+          if (String(t.taskId) === taskId) {
+            const timeMatch = String(t.suggestedTime).match(
+              /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+            );
+            if (timeMatch) {
+              const startHour = parseInt(timeMatch[1], 10);
+              const startMinute = parseInt(timeMatch[2], 10);
+              const endHour = parseInt(timeMatch[3], 10);
+              const endMinute = parseInt(timeMatch[4], 10);
+              const sessionDuration =
+                endHour * 60 + endMinute - (startHour * 60 + startMinute);
+
+              if (sessionDuration > dailyMax) {
+                console.warn(
+                  `[AI Schedule Warning] Task "${task.title}" on ${day.date}: Session duration ${sessionDuration} minutes exceeds dailyTargetMax ${dailyMax} minutes`,
+                );
+              }
+            }
+          }
+        });
+      });
+    });
+
     const finalSchedule = constrainedSchedule.map((day: any, index: number) => {
-      if (
-        day.date === validateDateStr &&
-        day.tasks.length === 0 &&
-        index === 0
-      ) {
-        return {
-          ...day,
-          tasks: [],
-          note: "Hôm nay đã hết giờ làm việc, các công việc được chuyển sang ngày mai",
-        };
+      // Kiểm tra nếu là ngày đầu tiên và là hôm nay
+      if (index === 0 && day.date === validateDateStr) {
+        // Nếu hôm nay không có task nào (do lọc giờ), thêm note
+        if (day.tasks.length === 0) {
+          return {
+            ...day,
+            tasks: [],
+            note: "Hôm nay đã hết giờ làm việc, các công việc được chuyển sang ngày mai",
+          };
+        }
       }
       return day;
     });
+
+    // Kiểm tra xem có task nào bắt đầu từ hôm nay không (nếu startDate là hôm nay)
+    if (isStartDateToday) {
+      const hasTaskToday = finalSchedule.some(
+        (day: any) => day.date === currentDateStr && day.tasks.length > 0,
+      );
+      if (!hasTaskToday && currentHour < 17) {
+        console.warn(
+          `[AI Schedule Warning] Start date is today (${currentDateStr}) but no tasks scheduled for today. Current hour: ${currentHour}`,
+        );
+      }
+    }
 
     return {
       schedule: finalSchedule,

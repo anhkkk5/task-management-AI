@@ -13,13 +13,48 @@ export class AIScheduleController {
         res.status(401).json({ message: "Unauthorized" });
         return;
       }
-
       const schedules = await aiScheduleService.getUserSchedules(userId);
       res.json({ success: true, data: schedules });
     } catch (error: any) {
       res.status(500).json({
         success: false,
         message: error.message || "Failed to get schedules",
+      });
+    }
+  }
+
+  async deleteSession(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.userId;
+      const scheduleId = req.params.scheduleId as string;
+      const sessionId = req.params.sessionId as string;
+
+      if (!userId) {
+        res.status(401).json({ message: "Unauthorized" });
+        return;
+      }
+
+      if (!sessionId) {
+        res.status(400).json({ message: "sessionId is required" });
+        return;
+      }
+
+      const updated = await aiScheduleService.deleteSession(
+        scheduleId,
+        userId,
+        sessionId,
+      );
+
+      if (!updated) {
+        res.status(404).json({ message: "Schedule or session not found" });
+        return;
+      }
+
+      res.json({ success: true, data: updated });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        message: error.message || "Failed to delete session",
       });
     }
   }

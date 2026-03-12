@@ -23,4 +23,7 @@ adminRouter.post("/notifications/broadcast", admin_controller_1.adminController.
 // Queue management
 adminRouter.get("/queue-status", admin_controller_1.adminController.getQueueStatus);
 adminRouter.post("/queue/retry", admin_controller_1.adminController.retryFailedJobs);
+// Cache management
+adminRouter.get("/cache/stats", admin_controller_1.adminController.getCacheStats);
+adminRouter.post("/cache/cleanup", admin_controller_1.adminController.cleanupOldCache);
 exports.default = adminRouter;

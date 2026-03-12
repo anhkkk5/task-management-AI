@@ -10,6 +10,8 @@ taskRouter.get("/overdue", auth_middleware_1.authMiddleware, task_controller_1.l
 taskRouter.get("/:id", auth_middleware_1.authMiddleware, task_controller_1.getTaskById);
 taskRouter.post("/:id/ai-breakdown", auth_middleware_1.authMiddleware, task_controller_1.aiBreakdownTask);
 taskRouter.patch("/:id", auth_middleware_1.authMiddleware, task_controller_1.updateTask);
+// Quick status update endpoint (must be before /:id/... routes)
+taskRouter.patch("/:id/status", auth_middleware_1.authMiddleware, task_controller_1.updateTaskStatus);
 taskRouter.delete("/:id", auth_middleware_1.authMiddleware, task_controller_1.deleteTask);
 taskRouter.post("/save-ai-schedule", auth_middleware_1.authMiddleware, task_controller_1.saveAISchedule);
 exports.default = taskRouter;

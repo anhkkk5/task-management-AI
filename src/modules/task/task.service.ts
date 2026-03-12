@@ -22,6 +22,8 @@ export type PublicTask = {
   parentTaskId?: string;
   aiBreakdown: { title: string; status: string; estimatedDuration?: number }[];
   estimatedDuration?: number;
+  dailyTargetDuration?: number; // Max minutes per day
+  dailyTargetMin?: number; // Min minutes per day
   reminderAt?: Date;
   scheduledTime?: {
     start: Date;
@@ -50,6 +52,8 @@ const toPublicTask = (t: any): PublicTask => {
       estimatedDuration: x.estimatedDuration,
     })),
     estimatedDuration: t.estimatedDuration,
+    dailyTargetDuration: t.dailyTargetDuration,
+    dailyTargetMin: t.dailyTargetMin,
     scheduledTime: t.scheduledTime,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
@@ -104,12 +108,19 @@ const parseCachedTaskList = (raw: string): TaskListResult => {
   const obj = JSON.parse(raw) as Omit<TaskListResult, "items"> & {
     items: (Omit<
       PublicTask,
-      "deadline" | "reminderAt" | "createdAt" | "updatedAt"
+      | "deadline"
+      | "reminderAt"
+      | "createdAt"
+      | "updatedAt"
+      | "dailyTargetDuration"
+      | "dailyTargetMin"
     > & {
       deadline?: string;
       reminderAt?: string;
       createdAt: string;
       updatedAt: string;
+      dailyTargetDuration?: number;
+      dailyTargetMin?: number;
     })[];
   };
 
@@ -121,6 +132,8 @@ const parseCachedTaskList = (raw: string): TaskListResult => {
       reminderAt: t.reminderAt ? new Date(t.reminderAt) : undefined,
       createdAt: new Date(t.createdAt),
       updatedAt: new Date(t.updatedAt),
+      dailyTargetDuration: t.dailyTargetDuration,
+      dailyTargetMin: t.dailyTargetMin,
     })),
   };
 };
@@ -174,6 +187,8 @@ export const taskService = {
       userId: new Types.ObjectId(userId),
       reminderAt: dto.reminderAt,
       estimatedDuration: dto.estimatedDuration,
+      dailyTargetDuration: dto.dailyTargetDuration,
+      dailyTargetMin: dto.dailyTargetMin,
       parentTaskId,
       scheduledTime: dto.scheduledTime
         ? {
@@ -242,6 +257,8 @@ export const taskService = {
         reminderAt: dto.reminderAt,
         aiBreakdown: dto.aiBreakdown,
         estimatedDuration: dto.estimatedDuration,
+        dailyTargetDuration: dto.dailyTargetDuration,
+        dailyTargetMin: dto.dailyTargetMin,
         scheduledTime: dto.scheduledTime,
       },
     );
@@ -532,7 +549,6 @@ export const taskService = {
     }
 
     let updatedCount = 0;
-    let createdCount = 0;
 
     for (const item of schedule) {
       if (!Types.ObjectId.isValid(item.taskId)) {
@@ -548,50 +564,15 @@ export const taskService = {
         continue;
       }
 
-      const durationMinutes = Math.max(
-        0,
-        Math.floor(
-          (item.scheduledTime.end.getTime() -
-            item.scheduledTime.start.getTime()) /
-            (1000 * 60),
-        ),
-      );
-
-      if (item.createSubtask) {
-        const subtaskTitle =
-          `${String(task.title)} - ${String(item.title ?? "")}`
-            .trim()
-            .replace(/\s+-\s*$/, "");
-
-        await taskRepository.create({
-          title: subtaskTitle,
-          description: undefined,
-          status: "todo",
-          priority: task.priority,
-          deadline: task.deadline,
-          tags: task.tags ?? [],
-          userId: new Types.ObjectId(userId),
-          parentTaskId: task._id,
-          estimatedDuration: durationMinutes || task.estimatedDuration,
-          reminderAt: undefined,
-          scheduledTime: {
-            start: item.scheduledTime.start,
-            end: item.scheduledTime.end,
-            aiPlanned: true,
-            reason: item.scheduledTime.reason,
-          },
-        });
-
-        createdCount++;
-        continue;
-      }
-
-      await taskRepository.updateByIdForUser(
+      // Update task gốc với status "scheduled" và scheduledTime
+      // KHÔNG tạo subtasks - AISchedule collection sẽ lưu sessions
+      const updated = await taskRepository.updateByIdForUser(
         {
           taskId: item.taskId,
           userId: new Types.ObjectId(userId),
         },
         {
+          status: "scheduled",
           scheduledTime: {
             start: item.scheduledTime.start,
             end: item.scheduledTime.end,
@@ -601,14 +582,171 @@ export const taskService = {
         },
       );
 
+      if (updated) {
+        console.log(
+          `[Save Schedule] Task "${updated.title}" status updated to "scheduled" with time ${item.scheduledTime.start} - ${item.scheduledTime.end}`,
+        );
+      }
+
       updatedCount++;
     }
 
-    if (updatedCount > 0 || createdCount > 0) {
+    if (updatedCount > 0) {
       await invalidateTasksCache(userId);
     }
 
-    return { updated: updatedCount, created: createdCount };
+    return { updated: updatedCount, created: 0 };
+  },
+
+  /**
+   * Quick update task status (for status dropdown)
+   */
+  updateStatus: async (
+    userId: string,
+    taskId: string,
+    status: TaskStatus,
+  ): Promise<PublicTask> => {
+    if (!Types.ObjectId.isValid(userId) || !Types.ObjectId.isValid(taskId)) {
+      throw new Error("INVALID_ID");
+    }
+
+    // Get current task to check status change
+    const currentTask = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!currentTask) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    const updated = await taskRepository.updateByIdForUser(
+      {
+        taskId,
+        userId: new Types.ObjectId(userId),
+      },
+      { status },
+    );
+
+    if (!updated) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    // Track completion history when task is marked as completed
+    if (status === "completed" && currentTask.status !== "completed") {
+      const completedAt = new Date();
+      const hour = completedAt.getHours();
+      const dayOfWeek = completedAt.getDay();
+      // Estimate duration from creation time (simplified)
+      const duration = Math.floor(
+        (completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60),
+      );
+
+      await userHabitRepository.addCompletionHistory(userId, {
+        hour,
+        dayOfWeek,
+        completed: true,
+        duration,
+      });
+    }
+
+    await invalidateTasksCache(userId);
+
+    return toPublicTask(updated);
+  },
+
+  /**
+   * Clear scheduled time from tasks (when schedule is deleted)
+   */
+  clearScheduledTime: async (
+    userId: string,
+    taskIds: string[],
+  ): Promise<{ updated: number }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+
+    let updatedCount = 0;
+
+    for (const taskId of taskIds) {
+      if (!Types.ObjectId.isValid(taskId)) {
+        continue;
+      }
+
+      const updated = await taskRepository.updateByIdForUser(
+        {
+          taskId,
+          userId: new Types.ObjectId(userId),
+        },
+        {
+          scheduledTime: undefined,
+          status: "todo", // Reset status back to todo
+        },
+      );
+
+      if (updated) {
+        console.log(
+          `[Clear Schedule] Task "${updated.title}" scheduledTime cleared and status reset to "todo"`,
+        );
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount > 0) {
+      await invalidateTasksCache(userId);
+    }
+
+    return { updated: updatedCount };
+  },
+
+  /**
+   * Clear all scheduled times for user (emergency cleanup)
+   */
+  clearAllScheduledTimes: async (
+    userId: string,
+  ): Promise<{ updated: number }> => {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("USER_ID_INVALID");
+    }
+
+    // Find all tasks with scheduledTime
+    const { items: scheduledTasks } = await taskRepository.listByUser({
+      userId: new Types.ObjectId(userId),
+      page: 1,
+      limit: 1000,
+    });
+
+    const tasksWithSchedule = scheduledTasks.filter(
+      (task) => task.scheduledTime?.start && task.scheduledTime?.end,
+    );
+
+    let updatedCount = 0;
+
+    for (const task of tasksWithSchedule) {
+      const updated = await taskRepository.updateByIdForUser(
+        {
+          taskId: String(task._id),
+          userId: new Types.ObjectId(userId),
+        },
+        {
+          scheduledTime: undefined,
+          status: task.status === "scheduled" ? "todo" : task.status, // Only reset scheduled tasks to todo
+        },
+      );
+
+      if (updated) {
+        console.log(
+          `[Clear All Schedule] Task "${updated.title}" scheduledTime cleared`,
+        );
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount > 0) {
+      await invalidateTasksCache(userId);
+    }
+
+    return { updated: updatedCount };
   },
 
   checkScheduleConflicts: async (

@@ -13,6 +13,7 @@ const swagger_parser_1 = __importDefault(require("@apidevtools/swagger-parser"))
 const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const chat_gateway_1 = require("./modules/chat/chat.gateway");
 const reminder_cron_1 = require("./modules/notification/reminder.cron");
+const cache_cleanup_service_1 = require("./services/cache-cleanup.service");
 require("./modules/notification/notification.worker");
 const bootstrap = async () => {
     await (0, database_1.connect)();
@@ -37,6 +38,9 @@ const bootstrap = async () => {
         reminder_cron_1.reminderCronService.start();
         console.log(`Reminder cron job started for deadline alerts`);
         console.log(`Notification worker started for queue processing`);
+        // Start cache cleanup job
+        cache_cleanup_service_1.cacheCleanupService.start();
+        console.log(`Cache cleanup job started (runs every 1 hour)`);
     });
 };
 void bootstrap();

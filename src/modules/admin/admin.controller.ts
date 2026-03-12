@@ -209,4 +209,33 @@ export const adminController = {
       res.status(500).json({ message: "Failed to retry jobs" });
     }
   },
+
+  // Cache management
+  getCacheStats: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { cacheCleanupService } =
+        await import("../../services/cache-cleanup.service");
+      const stats = await cacheCleanupService.getStats();
+      res.status(200).json({ stats });
+    } catch (err) {
+      console.error("[AdminController] getCacheStats error:", err);
+      res.status(500).json({ message: "Failed to get cache stats" });
+    }
+  },
+
+  cleanupOldCache: async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { cacheCleanupService } =
+        await import("../../services/cache-cleanup.service");
+      await cacheCleanupService.cleanup();
+      const stats = await cacheCleanupService.getStats();
+      res.status(200).json({
+        message: "Cache cleanup completed",
+        stats,
+      });
+    } catch (err) {
+      console.error("[AdminController] cleanupOldCache error:", err);
+      res.status(500).json({ message: "Failed to cleanup cache" });
+    }
+  },
 };

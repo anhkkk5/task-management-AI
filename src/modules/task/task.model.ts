@@ -15,6 +15,8 @@ export type TaskAttrs = {
     status?: TaskStatus;
     estimatedDuration?: number;
   }[];
+  dailyTargetDuration?: number; // Mục tiêu phút/ngày (max)
+  dailyTargetMin?: number; // Mục tiêu tối thiểu phút/ngày
   estimatedDuration?: number; // Phút dự kiến hoàn thành
   reminderAt?: Date;
   scheduledTime?: {
@@ -39,7 +41,8 @@ export type TaskDoc = mongoose.Document & {
     status: TaskStatus;
     estimatedDuration?: number;
   }[];
-  dailyTargetDuration?: number; // Mục tiêu phút/ngày
+  dailyTargetDuration?: number; // Mục tiêu phút/ngày (max)
+  dailyTargetMin?: number; // Mục tiêu tối thiểu phút/ngày
   estimatedDuration?: number; // Phút dự kiến hoàn thành
   reminderAt?: Date;
   scheduledTime?: {
@@ -60,7 +63,7 @@ const taskSchema = new Schema<TaskDoc>(
     description: { type: String },
     status: {
       type: String,
-      enum: ["todo", "in_progress", "completed", "cancelled"],
+      enum: ["todo", "scheduled", "in_progress", "completed", "cancelled"],
       default: "todo",
       index: true,
     },
@@ -88,7 +91,8 @@ const taskSchema = new Schema<TaskDoc>(
       ],
       default: [],
     },
-    dailyTargetDuration: { type: Number, min: 0 }, // Mục tiêu phút/ngày
+    dailyTargetDuration: { type: Number, min: 0 }, // Mục tiêu phút/ngày (max)
+    dailyTargetMin: { type: Number, min: 0 }, // Mục tiêu tối thiểu phút/ngày
     estimatedDuration: { type: Number, min: 0 }, // Phút dự kiến
     reminderAt: { type: Date },
     scheduledTime: {

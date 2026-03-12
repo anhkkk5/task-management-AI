@@ -23,6 +23,8 @@ const toPublicTask = (t) => {
             estimatedDuration: x.estimatedDuration,
         })),
         estimatedDuration: t.estimatedDuration,
+        dailyTargetDuration: t.dailyTargetDuration,
+        dailyTargetMin: t.dailyTargetMin,
         scheduledTime: t.scheduledTime,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
@@ -59,6 +61,8 @@ const parseCachedTaskList = (raw) => {
             reminderAt: t.reminderAt ? new Date(t.reminderAt) : undefined,
             createdAt: new Date(t.createdAt),
             updatedAt: new Date(t.updatedAt),
+            dailyTargetDuration: t.dailyTargetDuration,
+            dailyTargetMin: t.dailyTargetMin,
         })),
     };
 };
@@ -101,6 +105,8 @@ exports.taskService = {
             userId: new mongoose_1.Types.ObjectId(userId),
             reminderAt: dto.reminderAt,
             estimatedDuration: dto.estimatedDuration,
+            dailyTargetDuration: dto.dailyTargetDuration,
+            dailyTargetMin: dto.dailyTargetMin,
             parentTaskId,
             scheduledTime: dto.scheduledTime
                 ? {
@@ -155,6 +161,8 @@ exports.taskService = {
             reminderAt: dto.reminderAt,
             aiBreakdown: dto.aiBreakdown,
             estimatedDuration: dto.estimatedDuration,
+            dailyTargetDuration: dto.dailyTargetDuration,
+            dailyTargetMin: dto.dailyTargetMin,
             scheduledTime: dto.scheduledTime,
         });
         if (!updated) {
@@ -363,10 +371,11 @@ exports.taskService = {
                 const subtaskTitle = `${String(task.title)} - ${String(item.title ?? "")}`
                     .trim()
                     .replace(/\s+-\s*$/, "");
+                // Subtask được tạo với status "scheduled" vì đã được lên lịch
                 await task_repository_1.taskRepository.create({
                     title: subtaskTitle,
                     description: undefined,
-                    status: "todo",
+                    status: "scheduled", // ← Auto chuyển sang scheduled khi AI schedule
                     priority: task.priority,
                     deadline: task.deadline,
                     tags: task.tags ?? [],
@@ -384,10 +393,12 @@ exports.taskService = {
                 createdCount++;
                 continue;
             }
+            // Task chính được update với status "scheduled" khi AI schedule
             await task_repository_1.taskRepository.updateByIdForUser({
                 taskId: item.taskId,
                 userId: new mongoose_1.Types.ObjectId(userId),
             }, {
+                status: "scheduled", // ← Auto chuyển sang scheduled khi AI schedule
                 scheduledTime: {
                     start: item.scheduledTime.start,
                     end: item.scheduledTime.end,
@@ -401,6 +412,45 @@ exports.taskService = {
             await invalidateTasksCache(userId);
         }
         return { updated: updatedCount, created: createdCount };
+    },
+    /**
+     * Quick update task status (for status dropdown)
+     */
+    updateStatus: async (userId, taskId, status) => {
+        if (!mongoose_1.Types.ObjectId.isValid(userId) || !mongoose_1.Types.ObjectId.isValid(taskId)) {
+            throw new Error("INVALID_ID");
+        }
+        // Get current task to check status change
+        const currentTask = await task_repository_1.taskRepository.findByIdForUser({
+            taskId,
+            userId: new mongoose_1.Types.ObjectId(userId),
+        });
+        if (!currentTask) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        const updated = await task_repository_1.taskRepository.updateByIdForUser({
+            taskId,
+            userId: new mongoose_1.Types.ObjectId(userId),
+        }, { status });
+        if (!updated) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        // Track completion history when task is marked as completed
+        if (status === "completed" && currentTask.status !== "completed") {
+            const completedAt = new Date();
+            const hour = completedAt.getHours();
+            const dayOfWeek = completedAt.getDay();
+            // Estimate duration from creation time (simplified)
+            const duration = Math.floor((completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60));
+            await user_habit_repository_1.userHabitRepository.addCompletionHistory(userId, {
+                hour,
+                dayOfWeek,
+                completed: true,
+                duration,
+            });
+        }
+        await invalidateTasksCache(userId);
+        return toPublicTask(updated);
     },
     checkScheduleConflicts: async (userId, schedule) => {
         if (!mongoose_1.Types.ObjectId.isValid(userId)) {

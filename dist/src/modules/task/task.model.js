@@ -40,7 +40,7 @@ const taskSchema = new mongoose_1.Schema({
     description: { type: String },
     status: {
         type: String,
-        enum: ["todo", "in_progress", "completed", "cancelled"],
+        enum: ["todo", "scheduled", "in_progress", "completed", "cancelled"],
         default: "todo",
         index: true,
     },
@@ -68,6 +68,8 @@ const taskSchema = new mongoose_1.Schema({
         ],
         default: [],
     },
+    dailyTargetDuration: { type: Number, min: 0 }, // Mục tiêu phút/ngày (max)
+    dailyTargetMin: { type: Number, min: 0 }, // Mục tiêu tối thiểu phút/ngày
     estimatedDuration: { type: Number, min: 0 }, // Phút dự kiến
     reminderAt: { type: Date },
     scheduledTime: {

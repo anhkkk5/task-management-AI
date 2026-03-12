@@ -16,6 +16,8 @@ exports.taskRepository = {
             parentTaskId: attrs.parentTaskId,
             aiBreakdown: attrs.aiBreakdown ?? [],
             estimatedDuration: attrs.estimatedDuration,
+            dailyTargetDuration: attrs.dailyTargetDuration,
+            dailyTargetMin: attrs.dailyTargetMin,
             reminderAt: attrs.reminderAt,
             scheduledTime: attrs.scheduledTime,
         });
@@ -50,6 +52,12 @@ exports.taskRepository = {
                 ...(update.estimatedDuration !== undefined
                     ? { estimatedDuration: update.estimatedDuration }
                     : {}),
+                ...(update.dailyTargetDuration !== undefined
+                    ? { dailyTargetDuration: update.dailyTargetDuration }
+                    : {}),
+                ...(update.dailyTargetMin !== undefined
+                    ? { dailyTargetMin: update.dailyTargetMin }
+                    : {}),
                 ...(update.scheduledTime !== undefined
                     ? { scheduledTime: update.scheduledTime }
                     : {}),
@@ -79,6 +87,12 @@ exports.taskRepository = {
                     : {}),
                 ...(update.estimatedDuration !== undefined
                     ? { estimatedDuration: update.estimatedDuration }
+                    : {}),
+                ...(update.dailyTargetDuration !== undefined
+                    ? { dailyTargetDuration: update.dailyTargetDuration }
+                    : {}),
+                ...(update.dailyTargetMin !== undefined
+                    ? { dailyTargetMin: update.dailyTargetMin }
                     : {}),
                 ...(update.scheduledTime !== undefined
                     ? { scheduledTime: update.scheduledTime }
@@ -161,5 +175,18 @@ exports.taskRepository = {
             { "scheduledTime.end": { $gt: params.startTime } },
         ];
         return task_model_1.Task.find(filter).exec();
+    },
+    // Get scheduled tasks for conflict detection
+    getScheduledTasks: async (params) => {
+        return task_model_1.Task.find({
+            userId: params.userId,
+            status: { $in: ["scheduled", "in_progress"] },
+            "scheduledTime.start": {
+                $gte: params.startDate,
+                $lte: params.endDate,
+            },
+        })
+            .sort({ "scheduledTime.start": 1 })
+            .exec();
     },
 };

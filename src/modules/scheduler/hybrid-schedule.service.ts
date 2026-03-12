@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { aiProvider } from "../ai/ai.provider";
 import { taskRepository } from "../task/task.repository";
 import { userHabitRepository } from "../user/user-habit.repository";
+import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 import { extractJson } from "../ai/ai-utils";
 import {
   intervalScheduler,
@@ -47,6 +48,16 @@ export const hybridScheduleService = {
       autoRescheduled: number;
       productivityOptimized: number;
     };
+    warnings?: {
+      taskId: string;
+      title: string;
+      feasible: boolean;
+      daysLeft: number;
+      maxPossibleHours: number;
+      requiredHours: number;
+      shortfallHours: number;
+      message: string;
+    }[];
   }> => {
     if (!Types.ObjectId.isValid(userId)) {
       throw new Error("USER_ID_INVALID");
@@ -66,6 +77,62 @@ export const hybridScheduleService = {
 
     if (tasks.length === 0) {
       throw new Error("NO_VALID_TASKS");
+    }
+
+    // ✅ DEADLINE VALIDATION: Kiểm tra tính khả thi trước khi schedule
+    const today = new Date();
+    const todayStr = toLocalDateStr(today);
+    const warnings: {
+      taskId: string;
+      title: string;
+      feasible: boolean;
+      daysLeft: number;
+      maxPossibleHours: number;
+      requiredHours: number;
+      shortfallHours: number;
+      message: string;
+    }[] = [];
+
+    for (const task of tasks) {
+      if (!task.deadline) continue;
+
+      const deadlineStr = toLocalDateStr(new Date(task.deadline));
+
+      // Đếm số ngày từ hôm nay đến deadline (inclusive)
+      const daysLeft =
+        Math.ceil(
+          (new Date(deadlineStr).getTime() - new Date(todayStr).getTime()) /
+            (1000 * 60 * 60 * 24),
+        ) + 1;
+
+      // Tính thời gian tối đa có thể xếp (daysLeft × dailyTargetMax)
+      const dailyTargetMax = task.dailyTargetDuration ?? 120; // Mặc định 2h/ngày
+      const maxPossibleMinutes = daysLeft * dailyTargetMax;
+      const requiredMinutes = task.estimatedDuration ?? 0;
+
+      if (requiredMinutes > maxPossibleMinutes) {
+        const shortfallMinutes = requiredMinutes - maxPossibleMinutes;
+        const shortfallHours = parseFloat((shortfallMinutes / 60).toFixed(1));
+        const maxHours = parseFloat((maxPossibleMinutes / 60).toFixed(1));
+        const requiredHours = parseFloat((requiredMinutes / 60).toFixed(1));
+
+        console.warn(
+          `[Schedule Warning] Task "${task.title}": ` +
+            `Cần ${requiredHours}h nhưng chỉ có thể xếp tối đa ${maxHours}h ` +
+            `trong ${daysLeft} ngày còn lại. Thiếu ${shortfallHours}h.`,
+        );
+
+        warnings.push({
+          taskId: String(task._id),
+          title: task.title,
+          feasible: false,
+          daysLeft,
+          maxPossibleHours: maxHours,
+          requiredHours: requiredHours,
+          shortfallHours: shortfallHours,
+          message: `Không đủ thời gian: cần ${requiredHours}h nhưng chỉ còn ${daysLeft} ngày × ${dailyTargetMax / 60}h/ngày = ${maxHours}h. Thiếu ${shortfallHours}h.`,
+        });
+      }
     }
 
     // 2. Lấy dữ liệu productivity từ lịch sử
@@ -102,6 +169,60 @@ export const hybridScheduleService = {
       completedTasksHistory,
       30,
     );
+
+    const findOptimalSlotWithFallback = (
+      params: Omit<
+        Parameters<typeof slotFinder.findOptimalSlot>[0],
+        "taskDuration"
+      > & {
+        preferredDuration: number;
+        minDuration: number;
+        stepMinutes: number;
+      },
+    ) => {
+      const step = Math.max(1, Math.floor(params.stepMinutes));
+      const min = Math.max(1, Math.floor(params.minDuration));
+      let duration = Math.floor(params.preferredDuration);
+
+      while (duration >= min) {
+        const slot = slotFinder.findOptimalSlot({
+          taskDuration: duration,
+          preferredTimeOfDay: params.preferredTimeOfDay,
+          productivityScores: params.productivityScores,
+          busySlots: params.busySlots,
+          date: params.date,
+          workHours: params.workHours,
+          currentTime: params.currentTime,
+        });
+        if (slot) {
+          return { slot, duration };
+        }
+        duration -= step;
+      }
+
+      return { slot: null as any, duration: 0 };
+    };
+
+    const priorityWeight = (p: any): number => {
+      switch (String(p || "").toLowerCase()) {
+        case "urgent":
+          return 4;
+        case "high":
+        case "cao":
+          return 3;
+        case "medium":
+        case "trung bình":
+          return 2;
+        case "low":
+        case "thấp":
+          return 1;
+        default:
+          return 2;
+      }
+    };
+
+    const dateOnlyStr = (d?: Date): string | null =>
+      d ? toLocalDateStr(new Date(d)) : null;
 
     // 3. AI chỉ phân tích HIGH-LEVEL (ngắn gọn)
     const taskDataForAI = tasks.map((t) => ({
@@ -162,7 +283,142 @@ Format JSON:
     // 4. ALGORITHM SCHEDULING (backend xử lý)
     const startDate = new Date(input.startDate);
     const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + 7); // 1 tuần
+    endDate.setDate(endDate.getDate() + 7); // default 1 tuần
+
+    // Extend endDate to the latest deadline (if any) so scheduling doesn't miss days
+    // ✅ BUT: Strictly respect deadline - don't allow overflow
+    for (const t of tasks) {
+      if (t.deadline) {
+        const d = new Date(t.deadline);
+        if (d > endDate) {
+          endDate.setTime(d.getTime());
+        }
+      }
+    }
+
+    // ✅ REMOVED: Overflow mode that allowed scheduling beyond deadline
+    // Now we strictly respect the deadline
+    const hardEndDate = new Date(endDate);
+
+    // ⭐ NEW: Get scheduled tasks to avoid conflicts
+    // Exclude tasks that are being scheduled in this request
+    const excludeTaskIds = input.taskIds.filter((id) =>
+      Types.ObjectId.isValid(id),
+    );
+
+    const scheduledTasks = await taskRepository.getScheduledTasks({
+      userId: userObjectId,
+      startDate,
+      endDate: hardEndDate,
+      excludeTaskIds, // Don't include tasks being scheduled
+    });
+
+    console.log(
+      `[Conflict Detection] Found ${scheduledTasks.length} scheduled tasks (excluding ${excludeTaskIds.length} tasks being scheduled)`,
+    );
+
+    // Debug: Log scheduled tasks details
+    if (scheduledTasks.length > 0) {
+      console.log("[Conflict Detection] Scheduled tasks:");
+      scheduledTasks.forEach((t: any) => {
+        console.log(
+          `  - ${t.title}: ${t.scheduledTime?.start} to ${t.scheduledTime?.end} (status: ${t.status})`,
+        );
+      });
+    } else {
+      console.log("[Conflict Detection] No scheduled tasks found in database");
+      // Debug: Check if there are ANY scheduled tasks for this user
+      const allScheduledTasks = await taskRepository.listByUser({
+        userId: userObjectId,
+        status: "scheduled" as any,
+        page: 1,
+        limit: 100,
+      });
+      console.log(
+        `[Conflict Detection] Total scheduled tasks in DB: ${allScheduledTasks.total}`,
+      );
+      if (allScheduledTasks.total > 0) {
+        console.log("[Conflict Detection] All scheduled tasks:");
+        allScheduledTasks.items.forEach((t: any) => {
+          console.log(
+            `  - ${t.title}: ${t.scheduledTime?.start} to ${t.scheduledTime?.end}`,
+          );
+        });
+      }
+    }
+
+    // Convert scheduled tasks to busy slots by date
+    const existingBusySlotsByDate = new Map<string, TimeInterval[]>();
+    for (const scheduledTask of scheduledTasks) {
+      if (
+        scheduledTask.scheduledTime?.start &&
+        scheduledTask.scheduledTime?.end
+      ) {
+        const taskDate = toLocalDateStr(
+          new Date(scheduledTask.scheduledTime.start),
+        );
+        const busySlot: TimeInterval = {
+          start: new Date(scheduledTask.scheduledTime.start),
+          end: new Date(scheduledTask.scheduledTime.end),
+          taskId: String(scheduledTask._id),
+        };
+
+        if (!existingBusySlotsByDate.has(taskDate)) {
+          existingBusySlotsByDate.set(taskDate, []);
+        }
+        existingBusySlotsByDate.get(taskDate)!.push(busySlot);
+      }
+    }
+
+    const excludeSet = new Set(
+      excludeTaskIds
+        .filter((id) => Types.ObjectId.isValid(id))
+        .map((id) => String(new Types.ObjectId(id))),
+    );
+
+    const activeSchedules =
+      await aiScheduleRepository.findAllActiveByUserId(userId);
+
+    for (const s of activeSchedules) {
+      const days: any[] = Array.isArray((s as any).schedule)
+        ? (s as any).schedule
+        : [];
+      for (const day of days) {
+        const dayDate = String(day?.date ?? "").trim();
+        if (!dayDate) continue;
+
+        const tasksArr: any[] = Array.isArray(day?.tasks) ? day.tasks : [];
+        for (const session of tasksArr) {
+          const taskId = String(session?.taskId ?? "").trim();
+          if (!taskId) continue;
+          if (excludeSet.has(taskId)) continue;
+
+          if (String(session?.status ?? "") === "skipped") continue;
+
+          const suggestedTime = String(session?.suggestedTime ?? "");
+          const timeMatch = suggestedTime.match(
+            /^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+          );
+          if (!timeMatch) continue;
+
+          const [, sh, sm, eh, em] = timeMatch;
+          const sessionDate = new Date(`${dayDate}T00:00:00`);
+          if (Number.isNaN(sessionDate.getTime())) continue;
+
+          const start = new Date(sessionDate);
+          start.setHours(parseInt(sh, 10), parseInt(sm, 10), 0, 0);
+
+          const end = new Date(sessionDate);
+          end.setHours(parseInt(eh, 10), parseInt(em, 10), 0, 0);
+
+          if (end.getTime() <= start.getTime()) continue;
+
+          const existing = existingBusySlotsByDate.get(dayDate) || [];
+          existing.push({ start, end, taskId });
+          existingBusySlotsByDate.set(dayDate, existing);
+        }
+      }
+    }
 
     const schedule: any[] = [];
     const stats = {
@@ -174,9 +430,26 @@ Format JSON:
     let currentDate = new Date(startDate);
     let sessionCounter = 0;
 
+    // ✅ Get current time once to pass to slot finder
+    const now = new Date();
+
     // Track busy slots và daily scheduled time theo ngày
     const busySlotsByDate = new Map<string, TimeInterval[]>();
-    const dailyScheduledMinutes = new Map<string, number>(); // Theo dõi phút đã scheduled/ngày
+    const dailyScheduledMinutesByTask = new Map<string, Map<string, number>>();
+
+    // Initialize busySlotsByDate with existing scheduled tasks
+    for (const [dateStr, slots] of existingBusySlotsByDate.entries()) {
+      busySlotsByDate.set(dateStr, [...slots]);
+    }
+
+    // Track remaining duration per task (minutes)
+    const remainingMinutesByTaskId = new Map<string, number>();
+    tasks.forEach((t: any) => {
+      remainingMinutesByTaskId.set(
+        String(t._id),
+        Math.max(0, Number(t.estimatedDuration ?? 0)),
+      );
+    });
 
     // Lấy các task đã scheduled trước đó (preserve existing)
     const existingScheduledTasks = allUserTasks.items.filter(
@@ -185,16 +458,28 @@ Format JSON:
 
     // Khởi tạo daily scheduled time từ existing tasks
     existingScheduledTasks.forEach((task: any) => {
-      const dateStr = new Date(task.scheduledTime.start)
-        .toISOString()
-        .split("T")[0];
+      const dateStr = toLocalDateStr(new Date(task.scheduledTime.start));
       const duration = task.estimatedDuration || 60;
-      dailyScheduledMinutes.set(
-        dateStr,
-        (dailyScheduledMinutes.get(dateStr) || 0) + duration,
+      const taskId = String(task._id);
+      const perTask = dailyScheduledMinutesByTask.get(dateStr) || new Map();
+      perTask.set(taskId, (perTask.get(taskId) || 0) + duration);
+      dailyScheduledMinutesByTask.set(dateStr, perTask);
+
+      // ⭐ FIX: Only reduce remaining minutes if this task is NOT being scheduled in this request
+      const isBeingScheduled = input.taskIds.some(
+        (id) =>
+          Types.ObjectId.isValid(id) &&
+          String(new Types.ObjectId(id)) === taskId,
       );
 
-      // Add vào busy slots
+      if (!isBeingScheduled && remainingMinutesByTaskId.has(taskId)) {
+        remainingMinutesByTaskId.set(
+          taskId,
+          Math.max(0, (remainingMinutesByTaskId.get(taskId) || 0) - duration),
+        );
+      }
+
+      // Add vào busy slots (always add to avoid conflicts)
       const existingBusy = busySlotsByDate.get(dateStr) || [];
       existingBusy.push({
         start: new Date(task.scheduledTime.start),
@@ -204,8 +489,8 @@ Format JSON:
       busySlotsByDate.set(dateStr, existingBusy);
     });
 
-    while (currentDate <= endDate) {
-      const dateStr = currentDate.toISOString().split("T")[0];
+    while (currentDate <= hardEndDate) {
+      const dateStr = toLocalDateStr(currentDate);
       const daySchedule: any = {
         day: getDayOfWeek(dateStr),
         date: dateStr,
@@ -215,158 +500,311 @@ Format JSON:
       // Lấy busy slots của ngày này (từ các ngày trước đã schedule)
       const existingBusySlots = busySlotsByDate.get(dateStr) || [];
 
-      // Sort tasks theo AI suggested order
-      const sortedTaskIds =
-        aiAnalysis.suggestedOrder || tasks.map((t) => String(t._id));
+      // Sort tasks: deadline gần hơn trước, sau đó priority cao hơn
+      const baseOrder = (
+        Array.isArray(aiAnalysis.suggestedOrder)
+          ? aiAnalysis.suggestedOrder
+          : []
+      ) as string[];
+      const fallbackOrder = tasks.map((t) => String(t._id));
+      const merged = [...baseOrder, ...fallbackOrder].filter(
+        (id, idx, arr) => arr.indexOf(id) === idx,
+      );
+      const sortedTaskIds = merged.sort((a, b) => {
+        const ta: any = tasks.find((t) => String(t._id) === a);
+        const tb: any = tasks.find((t) => String(t._id) === b);
 
+        const da = dateOnlyStr(ta?.deadline);
+        const db = dateOnlyStr(tb?.deadline);
+        if (da && db && da !== db) return da < db ? -1 : 1;
+        if (da && !db) return -1;
+        if (!da && db) return 1;
+
+        const pa = priorityWeight(ta?.priority);
+        const pb = priorityWeight(tb?.priority);
+        if (pa !== pb) return pb - pa;
+        return 0;
+      });
+
+      const scheduleTaskChunksForDay = async (
+        task: any,
+        mode: "reachMin" | "fillMax",
+      ): Promise<void> => {
+        const remainingForTask =
+          remainingMinutesByTaskId.get(String(task._id)) || 0;
+        if (remainingForTask <= 0) return;
+
+        // ✅ STRICT DEADLINE CHECK: Skip nếu đã qua deadline (không có allowAfterDeadline)
+        if (
+          task.deadline &&
+          dateStr > toLocalDateStr(new Date(task.deadline))
+        ) {
+          return;
+        }
+
+        const dailyTargetMax = task.dailyTargetDuration ?? 180; // Mặc định 3h/ngày
+        const dailyTargetMin = task.dailyTargetMin ?? 60; // Mặc định 1h/ngày
+
+        const difficulty =
+          aiAnalysis.difficultyAnalysis?.[String(task._id)] ||
+          aiAnalysis.difficultyAnalysis?.[String(task.id)] ||
+          "medium";
+        const requiresFocus = difficulty === "hard";
+
+        const preferredTimeOfDay = requiresFocus ? "morning" : undefined;
+        const stepMinutes = 15;
+        const minChunkMinutes = 15;
+
+        while (true) {
+          const remainingForTaskNow =
+            remainingMinutesByTaskId.get(String(task._id)) || 0;
+          if (remainingForTaskNow <= 0) break;
+
+          const mapForDay =
+            dailyScheduledMinutesByTask.get(dateStr) ||
+            new Map<string, number>();
+          const scheduledToday = mapForDay.get(String(task._id)) || 0;
+
+          if (mode === "reachMin" && scheduledToday >= dailyTargetMin) {
+            break;
+          }
+          if (mode === "fillMax" && scheduledToday >= dailyTargetMax) {
+            break;
+          }
+
+          const remainingToMaxToday = Math.max(
+            0,
+            dailyTargetMax - scheduledToday,
+          );
+          if (remainingToMaxToday <= 0) break;
+
+          const remainingToMinToday = Math.max(
+            0,
+            dailyTargetMin - scheduledToday,
+          );
+
+          let preferredDuration =
+            mode === "reachMin"
+              ? Math.min(remainingToMinToday, remainingToMaxToday)
+              : remainingToMaxToday;
+
+          preferredDuration = Math.min(preferredDuration, remainingForTaskNow);
+          if (preferredDuration <= 0) break;
+
+          const { slot: optimalSlot, duration: actualDuration } =
+            findOptimalSlotWithFallback({
+              preferredDuration,
+              minDuration: Math.min(minChunkMinutes, preferredDuration),
+              stepMinutes,
+              preferredTimeOfDay,
+              productivityScores,
+              busySlots: existingBusySlots,
+              date: new Date(currentDate),
+              workHours: {
+                start: 8,
+                end: 23, // Tối đa 23h
+                breaks: [
+                  { start: 11.5, end: 14 }, // 11:30-14:00 nghỉ trưa
+                  { start: 17.5, end: 19 }, // ✅ 17:30-19:00 nghỉ tối (sửa từ 19.5 → 19)
+                ],
+              },
+              bufferMinutes: 15, // 15 phút nghỉ giữa các task
+              currentTime: now, // ✅ Pass current time to skip past slots
+            });
+
+          if (!optimalSlot || actualDuration <= 0) {
+            break;
+          }
+
+          const intendedEnd = new Date(
+            optimalSlot.start.getTime() + actualDuration * 60 * 1000,
+          );
+
+          const newTaskInterval: TimeInterval = {
+            start: optimalSlot.start,
+            end: intendedEnd,
+            taskId: String(task._id),
+          };
+
+          const conflict = intervalScheduler.checkConflict(
+            newTaskInterval,
+            existingBusySlots,
+          );
+
+          let finalSlot = optimalSlot;
+          let rescheduled = false;
+          if (conflict.hasConflict && conflict.suggestedNewSlot) {
+            finalSlot = {
+              start: conflict.suggestedNewSlot.start,
+              end: new Date(
+                conflict.suggestedNewSlot.start.getTime() +
+                  actualDuration * 60 * 1000,
+              ),
+              duration: actualDuration,
+              productivityScore: 0.5,
+            };
+            stats.aiConflictsDetected++;
+            stats.autoRescheduled++;
+            rescheduled = true;
+          } else {
+            finalSlot = {
+              ...optimalSlot,
+              end: intendedEnd,
+              duration: actualDuration,
+            };
+            stats.productivityOptimized++;
+          }
+
+          const hour = finalSlot.start.getHours();
+          const prodScore = productivityScores.get(hour)?.score || 0.5;
+
+          const sessionId = `session_${++sessionCounter}_${String(
+            task._id,
+          )}_${dateStr}`;
+          daySchedule.tasks.push({
+            sessionId,
+            taskId: String(task._id),
+            title: task.title,
+            priority: task.priority || "medium",
+            suggestedTime: formatTimeRange(finalSlot.start, finalSlot.end),
+            reason: rescheduled
+              ? "Tự động dời do trùng lịch"
+              : `Giờ làm việc hiệu quả (${(prodScore * 100).toFixed(0)}%)`,
+            createSubtask: true,
+            algorithmUsed: rescheduled
+              ? "interval-scheduler"
+              : "productivity-optimized",
+            productivityScore: prodScore,
+          });
+
+          existingBusySlots.push({
+            start: finalSlot.start,
+            end: finalSlot.end,
+            taskId: String(task._id),
+          });
+          busySlotsByDate.set(dateStr, existingBusySlots);
+
+          const scheduledMinutes =
+            (finalSlot.end.getTime() - finalSlot.start.getTime()) / (1000 * 60);
+          mapForDay.set(String(task._id), scheduledToday + scheduledMinutes);
+          dailyScheduledMinutesByTask.set(dateStr, mapForDay);
+
+          remainingMinutesByTaskId.set(
+            String(task._id),
+            Math.max(0, remainingForTaskNow - scheduledMinutes),
+          );
+        }
+      };
+
+      // Phase 1: reach min for each task (in priority order)
       for (const taskId of sortedTaskIds) {
         const task = tasks.find((t) => String(t._id) === taskId);
         if (!task) continue;
-
-        // Skip nếu đã qua deadline
-        if (
-          task.deadline &&
-          dateStr > task.deadline.toISOString().split("T")[0]
-        ) {
-          continue;
-        }
-
-        const duration = task.estimatedDuration || 120;
-        const dailyTarget = task.dailyTargetDuration || duration; // Mặc định = duration nếu không set
-        const difficulty = aiAnalysis.difficultyAnalysis?.[taskId] || "medium";
-        const requiresFocus = difficulty === "hard";
-
-        // Tính đã scheduled bao nhiêu phút trong ngày này
-        const alreadyScheduledMinutes = dailyScheduledMinutes.get(dateStr) || 0;
-        const remainingMinutesForDay = Math.max(
-          0,
-          dailyTarget - alreadyScheduledMinutes,
-        );
-
-        // Nếu đã đủ target cho ngày này, skip sang ngày khác
-        if (remainingMinutesForDay <= 0) {
-          continue;
-        }
-
-        // Chỉ schedule phần còn lại của target, không vượt quá
-        const actualDuration = Math.min(duration, remainingMinutesForDay);
-
-        // Tìm slot tối ưu bằng algorithm (với duration đã điều chỉnh)
-        const optimalSlot = slotFinder.findOptimalSlot({
-          taskDuration: actualDuration,
-          preferredTimeOfDay: requiresFocus ? "morning" : undefined,
-          productivityScores,
-          busySlots: existingBusySlots,
-          date: new Date(currentDate),
-          workHours: { start: 8, end: 17 },
-        });
-
-        if (!optimalSlot) {
-          // Không có slot trong ngày này → thử ngày khác (đã ở trong vòng lặp)
-          continue;
-        }
-
-        // Check conflict
-        const newTaskInterval: TimeInterval = {
-          start: optimalSlot.start,
-          end: optimalSlot.end,
-          taskId: String(task._id),
-        };
-
-        const conflict = intervalScheduler.checkConflict(
-          newTaskInterval,
-          existingBusySlots,
-        );
-
-        let finalSlot = optimalSlot;
-        let rescheduled = false;
-
-        if (conflict.hasConflict && conflict.suggestedNewSlot) {
-          // Auto reschedule
-          finalSlot = {
-            start: conflict.suggestedNewSlot.start,
-            end: conflict.suggestedNewSlot.end,
-            duration:
-              (conflict.suggestedNewSlot.end.getTime() -
-                conflict.suggestedNewSlot.start.getTime()) /
-              (1000 * 60),
-            productivityScore: 0.5,
-          };
-          stats.aiConflictsDetected++;
-          stats.autoRescheduled++;
-          rescheduled = true;
-        } else {
-          stats.productivityOptimized++;
-        }
-
-        // Tính productivity score của slot này
-        const hour = finalSlot.start.getHours();
-        const prodScore = productivityScores.get(hour)?.score || 0.5;
-
-        // Add vào schedule
-        const sessionId = `session_${++sessionCounter}_${taskId}_${dateStr}`;
-        daySchedule.tasks.push({
-          sessionId,
-          taskId: String(task._id),
-          title: task.title,
-          priority: task.priority || "medium",
-          suggestedTime: formatTimeRange(finalSlot.start, finalSlot.end),
-          reason: rescheduled
-            ? "Tự động dời do trùng lịch"
-            : `Giờ làm việc hiệu quả (${(prodScore * 100).toFixed(0)}%)`,
-          createSubtask: true,
-          algorithmUsed: rescheduled
-            ? "interval-scheduler"
-            : "productivity-optimized",
-          productivityScore: prodScore,
-        });
-
-        // Update busy slots cho ngày này
-        existingBusySlots.push({
-          start: finalSlot.start,
-          end: finalSlot.end,
-          taskId: String(task._id),
-        });
-
-        busySlotsByDate.set(dateStr, existingBusySlots);
-
-        // Update daily scheduled minutes
-        const scheduledMinutes =
-          (finalSlot.end.getTime() - finalSlot.start.getTime()) / (1000 * 60);
-        dailyScheduledMinutes.set(
-          dateStr,
-          (dailyScheduledMinutes.get(dateStr) || 0) + scheduledMinutes,
-        );
-
-        // Nếu task chưa được schedule hết (actualDuration < duration),
-        // sẽ được xử lý ở ngày tiếp theo trong vòng lặp while
-        const remainingTaskDuration = duration - actualDuration;
-        if (remainingTaskDuration > 0 && !task.deadline) {
-          // Có thể schedule tiếp phần còn lại vào ngày khác
-          // (Logic này có thể mở rộng để track remaining duration per task)
-        }
-
-        // Chỉ schedule 1 phiên/task/ngày để tránh overload
-        break; // Chuyển sang task tiếp theo
+        await scheduleTaskChunksForDay(task, "reachMin");
       }
 
-      if (daySchedule.tasks.length > 0) {
-        schedule.push(daySchedule);
+      // Phase 2: fill toward max if still have time available
+      for (const taskId of sortedTaskIds) {
+        const task = tasks.find((t) => String(t._id) === taskId);
+        if (!task) continue;
+        await scheduleTaskChunksForDay(task, "fillMax");
+      }
+
+      // Always push the day to avoid missing days in UI
+      schedule.push(daySchedule);
+
+      // Stop early if all tasks are fully scheduled
+      const stillRemaining = Array.from(remainingMinutesByTaskId.values()).some(
+        (v) => v > 0,
+      );
+      if (!stillRemaining) {
+        break;
       }
 
       // Next day
       currentDate.setDate(currentDate.getDate() + 1);
     }
 
+    const remainingSummary = tasks
+      .map((t: any) => {
+        const remaining = remainingMinutesByTaskId.get(String(t._id)) || 0;
+        return { id: String(t._id), title: String(t.title || ""), remaining };
+      })
+      .filter((x) => x.remaining > 0)
+      .map((x) => `${x.title}: còn thiếu ${x.remaining} phút`)
+      .join(", ");
+
+    // VALIDATION: Kiểm tra tổng thời gian và dailyTargetMax
+    tasks.forEach((task: any) => {
+      const taskId = String(task._id);
+      const expected = task.estimatedDuration || 0;
+      const scheduled =
+        (task.estimatedDuration || 0) -
+        (remainingMinutesByTaskId.get(taskId) || 0);
+      const diff = Math.abs(expected - scheduled);
+
+      if (diff > 5 && expected > 0) {
+        console.warn(
+          `[Hybrid Schedule] Task "${task.title}": Expected ${expected}min, scheduled ${scheduled}min (remaining: ${remainingMinutesByTaskId.get(taskId) || 0}min)`,
+        );
+      }
+
+      // Kiểm tra dailyTargetMax
+      const dailyMax = task.dailyTargetDuration || 180;
+      schedule.forEach((day: any) => {
+        day.tasks.forEach((t: any) => {
+          if (String(t.taskId) === taskId) {
+            const timeMatch = String(t.suggestedTime).match(
+              /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+            );
+            if (timeMatch) {
+              const startHour = parseInt(timeMatch[1], 10);
+              const startMinute = parseInt(timeMatch[2], 10);
+              const endHour = parseInt(timeMatch[3], 10);
+              const endMinute = parseInt(timeMatch[4], 10);
+              const sessionDuration =
+                endHour * 60 + endMinute - (startHour * 60 + startMinute);
+
+              if (sessionDuration > dailyMax + 5) {
+                // +5 phút tolerance
+                console.warn(
+                  `[Hybrid Schedule] Task "${task.title}" on ${day.date}: Session ${sessionDuration}min exceeds dailyTargetMax ${dailyMax}min`,
+                );
+              }
+            }
+          }
+        });
+      });
+    });
+
+    // ✅ FIX 1: Lọc bỏ ngày rỗng VÀ ngày vượt deadline của tất cả tasks
+    const latestDeadline = tasks.reduce((max: string | null, t: any) => {
+      if (!t.deadline) return max;
+      const d = toLocalDateStr(new Date(t.deadline));
+      return !max || d > max ? d : max;
+    }, null);
+
+    const filteredSchedule = schedule.filter((day: any) => {
+      // Giữ ngày có task
+      if (day.tasks.length > 0) return true;
+      // Bỏ ngày rỗng sau deadline
+      if (latestDeadline && day.date > latestDeadline) return false;
+      return true;
+    });
+
     return {
-      schedule,
+      schedule: filteredSchedule,
       totalTasks: tasks.length,
       suggestedOrder:
         aiAnalysis.suggestedOrder || tasks.map((t) => String(t._id)),
       personalizationNote:
-        aiAnalysis.personalizationNote ||
-        `Lịch trình được tối ưu với ${stats.productivityOptimized} tasks theo thói quen của bạn`,
+        (aiAnalysis.personalizationNote ||
+          `Lịch trình được tối ưu với ${stats.productivityOptimized} tasks theo thói quen của bạn`) +
+        (remainingSummary
+          ? ` | ⚠️ Không đủ thời gian trước deadline: ${remainingSummary}. Bạn nên tăng mục tiêu/ngày hoặc gia hạn deadline.`
+          : ""),
       stats,
+      warnings: warnings.length > 0 ? warnings : undefined,
     };
   },
 
@@ -408,7 +846,7 @@ Format JSON:
         busySlots,
         date: new Date(currentDate),
         minDuration: task.estimatedDuration || 60,
-        workHours: { start: 8, end: 17 },
+        workHours: { start: 8, end: 22 },
       });
 
       freeSlots.push(...slots);
@@ -460,7 +898,7 @@ function getDayOfWeek(dateStr: string): string {
     "Thứ Sáu",
     "Thứ Bảy",
   ];
-  const date = new Date(dateStr);
+  const date = new Date(`${dateStr}T00:00:00`);
   return days[date.getDay()];
 }
 
@@ -468,4 +906,11 @@ function formatTimeRange(start: Date, end: Date): string {
   const formatTime = (d: Date) =>
     `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   return `${formatTime(start)} - ${formatTime(end)}`;
+}
+
+function toLocalDateStr(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }

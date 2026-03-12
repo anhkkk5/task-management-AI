@@ -15,6 +15,8 @@ const chat_routes_1 = __importDefault(require("./modules/chat/chat.routes"));
 const notification_routes_1 = __importDefault(require("./modules/notification/notification.routes"));
 const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const schedule_template_routes_1 = __importDefault(require("./modules/schedule-template/schedule-template.routes"));
+const ai_schedule_routes_1 = __importDefault(require("./modules/ai-schedule/ai-schedule.routes"));
+const scheduler_routes_1 = __importDefault(require("./modules/scheduler/scheduler.routes"));
 const createApp = () => {
     const app = (0, express_1.default)();
     app.use((0, cors_1.default)({
@@ -42,6 +44,8 @@ const createApp = () => {
     app.use("/notifications", notification_routes_1.default);
     app.use("/admin", admin_routes_1.default);
     app.use("/schedule-templates", schedule_template_routes_1.default);
+    app.use("/ai-schedules", ai_schedule_routes_1.default);
+    app.use("/scheduler", scheduler_routes_1.default);
     return app;
 };
 exports.createApp = createApp;

@@ -1,0 +1,192 @@
+### Test Auto Status Update Feature
+### File này dùng để test API với REST Client extension trong VS Code
+
+@baseUrl = http://localhost:3002
+@token = YOUR_AUTH_TOKEN_HERE
+
+### 1. Create a new task
+POST {{baseUrl}}/api/tasks
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Test task - học tiếng anh",
+  "description": "Task để test auto status update",
+  "priority": "high",
+  "estimatedDuration": 420,
+  "dailyTargetMin": 60,
+  "dailyTargetDuration": 60,
+  "deadline": "2026-03-11T00:00:00.000Z"
+}
+
+### Response sẽ trả về task với status = "todo"
+
+### 2. Get task by ID (verify initial status)
+GET {{baseUrl}}/api/tasks/TASK_ID_HERE
+Authorization: Bearer {{token}}
+
+### 3. Quick update status to "in_progress"
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "in_progress"
+}
+
+### Expected response:
+# {
+#   "task": {
+#     "id": "...",
+#     "title": "Test task - học tiếng anh",
+#     "status": "in_progress",
+#     ...
+#   },
+#   "message": "Đã cập nhật trạng thái thành in_progress"
+# }
+
+### 4. Update status to "completed"
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "completed"
+}
+
+### 5. Update status to "cancelled"
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "cancelled"
+}
+
+### 6. Update status back to "todo"
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "todo"
+}
+
+### 7. Test invalid status (should return 400)
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "invalid_status"
+}
+
+### Expected error response:
+# {
+#   "message": "Status không hợp lệ. Phải là: todo, in_progress, completed, cancelled"
+# }
+
+### 8. Test AI Schedule Plan (auto status update)
+POST {{baseUrl}}/api/ai/schedule-plan
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "taskIds": ["TASK_ID_HERE"],
+  "startDate": "2026-03-07"
+}
+
+### Response sẽ trả về schedule với các sessions
+
+### 9. Apply AI Schedule (tasks will auto change to "in_progress")
+POST {{baseUrl}}/api/tasks/save-ai-schedule
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "schedule": [
+    {
+      "day": "Thứ Bảy",
+      "date": "2026-03-07",
+      "tasks": [
+        {
+          "sessionId": "session_1",
+          "taskId": "TASK_ID_HERE",
+          "title": "học tiếng anh",
+          "priority": "high",
+          "suggestedTime": "08:00 - 08:30",
+          "reason": "Giờ làm việc hiệu quả",
+          "createSubtask": true
+        }
+      ]
+    }
+  ],
+  "suggestedOrder": ["TASK_ID_HERE"],
+  "personalizationNote": "Test auto status update"
+}
+
+### 10. Verify task status changed to "in_progress"
+GET {{baseUrl}}/api/tasks/TASK_ID_HERE
+Authorization: Bearer {{token}}
+
+### Expected: status should be "in_progress" now
+
+### 11. List all tasks (check status)
+GET {{baseUrl}}/api/tasks
+Authorization: Bearer {{token}}
+
+### 12. Test unauthorized access (no token)
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE/status
+Content-Type: application/json
+
+{
+  "status": "completed"
+}
+
+### Expected error response (401):
+# {
+#   "message": "Chưa đăng nhập"
+# }
+
+### 13. Test forbidden access (wrong user)
+PATCH {{baseUrl}}/api/tasks/OTHER_USER_TASK_ID/status
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "status": "completed"
+}
+
+### Expected error response (403):
+# {
+#   "message": "Không có quyền cập nhật task này"
+# }
+
+### 14. Full task update (existing endpoint - still works)
+PATCH {{baseUrl}}/api/tasks/TASK_ID_HERE
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Updated title",
+  "status": "completed",
+  "description": "Updated description"
+}
+
+### This still works! Quick status update is just a shortcut
+
+### 15. Delete test task (cleanup)
+DELETE {{baseUrl}}/api/tasks/TASK_ID_HERE
+Authorization: Bearer {{token}}
+
+###
+### TEST SCENARIOS SUMMARY:
+###
+### ✓ Create task → status = "todo"
+### ✓ Quick update status → status changes immediately
+### ✓ AI schedule applied → status auto changes to "in_progress"
+### ✓ Invalid status → returns 400 error
+### ✓ Unauthorized → returns 401 error
+### ✓ Forbidden → returns 403 error
+### ✓ Full update still works
+###

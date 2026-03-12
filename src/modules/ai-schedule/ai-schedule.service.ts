@@ -2,10 +2,11 @@ import { aiScheduleRepository } from "./ai-schedule.repository";
 import {
   CreateScheduleInput,
   ScheduleResponse,
+  ScheduleDayResponse,
+  ScheduleSessionResponse,
   UpdateSessionStatusInput,
 } from "./ai-schedule.dto";
 import { AIScheduleDoc } from "./ai-schedule.model";
-import { Types } from "mongoose";
 
 export class AIScheduleService {
   async getUserSchedules(userId: string): Promise<ScheduleResponse[]> {
@@ -14,8 +15,54 @@ export class AIScheduleService {
   }
 
   async getActiveSchedule(userId: string): Promise<ScheduleResponse | null> {
-    const schedule = await aiScheduleRepository.findActiveByUserId(userId);
-    return schedule ? this.toResponse(schedule) : null;
+    const schedules = await aiScheduleRepository.findAllActiveByUserId(userId);
+    if (schedules.length === 0) return null;
+    if (schedules.length === 1) return this.toResponse(schedules[0]);
+
+    const dayMap = new Map<string, ScheduleDayResponse>();
+
+    const allSuggestedOrder: string[] = [];
+    const allSourceTasks: string[] = [];
+
+    for (const s of schedules) {
+      const res = this.toResponse(s);
+
+      if (Array.isArray(res.suggestedOrder)) {
+        allSuggestedOrder.push(...res.suggestedOrder);
+      }
+      if (Array.isArray(res.sourceTasks)) {
+        allSourceTasks.push(...res.sourceTasks);
+      }
+
+      for (const d of res.schedule) {
+        const date = String(d.date);
+        if (!dayMap.has(date)) {
+          dayMap.set(date, {
+            day: d.day,
+            date: d.date,
+            tasks: [] as ScheduleSessionResponse[],
+            note: d.note,
+          });
+        }
+        dayMap
+          .get(date)!
+          .tasks.push(...d.tasks.map((t) => ({ ...t, scheduleId: res.id })));
+      }
+    }
+
+    const mergedSchedule = Array.from(dayMap.values()).sort((a, b) =>
+      a.date.localeCompare(b.date),
+    );
+
+    const base = this.toResponse(schedules[0]);
+
+    return {
+      ...base,
+      schedule: mergedSchedule,
+      suggestedOrder: Array.from(new Set(allSuggestedOrder)),
+      sourceTasks: Array.from(new Set(allSourceTasks)),
+      isActive: true,
+    };
   }
 
   async getScheduleById(
@@ -70,6 +117,19 @@ export class AIScheduleService {
       userId,
       sessionId,
       suggestedTime,
+    );
+    return updated ? this.toResponse(updated) : null;
+  }
+
+  async deleteSession(
+    scheduleId: string,
+    userId: string,
+    sessionId: string,
+  ): Promise<ScheduleResponse | null> {
+    const updated = await aiScheduleRepository.deleteSession(
+      scheduleId,
+      userId,
+      sessionId,
     );
     return updated ? this.toResponse(updated) : null;
   }

@@ -23,10 +23,17 @@ adminRouter.delete("/tasks/:id", adminController.deleteAnyTask);
 adminRouter.get("/tasks/stats", adminController.getTaskStats);
 
 // Notification management
-adminRouter.post("/notifications/broadcast", adminController.broadcastNotification);
+adminRouter.post(
+  "/notifications/broadcast",
+  adminController.broadcastNotification,
+);
 
 // Queue management
 adminRouter.get("/queue-status", adminController.getQueueStatus);
 adminRouter.post("/queue/retry", adminController.retryFailedJobs);
+
+// Cache management
+adminRouter.get("/cache/stats", adminController.getCacheStats);
+adminRouter.post("/cache/cleanup", adminController.cleanupOldCache);
 
 export default adminRouter;
