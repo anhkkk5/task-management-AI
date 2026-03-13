@@ -625,7 +625,10 @@ export const taskService = {
         taskId,
         userId: new Types.ObjectId(userId),
       },
-      { status },
+      {
+        status,
+        ...(status === "todo" ? { scheduledTime: null } : {}),
+      },
     );
 
     if (!updated) {
