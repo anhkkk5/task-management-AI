@@ -27,14 +27,19 @@ export const notificationWorker = new Worker(
       }
 
       case "send-email": {
-        const { email, subject, html, notificationId } = job.data as {
+        const { email, subject, html, notificationId, userId } = job.data as {
           email: string;
           subject: string;
           html: string;
           notificationId: string;
+          userId?: string;
         };
 
-        console.log(`[NotificationWorker] Sending email to ${email}`);
+        console.log(
+          `[NotificationWorker] Sending email to: ${email} (userId: ${userId || "N/A"})`,
+        );
+        console.log(`[NotificationWorker] Subject: ${subject}`);
+        console.log(`[NotificationWorker] NotificationId: ${notificationId}`);
 
         // Send actual email
         const result = await emailService.send({

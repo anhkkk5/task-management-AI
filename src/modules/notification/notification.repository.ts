@@ -52,6 +52,17 @@ export const notificationRepository = {
     return NotificationModel.countDocuments({ userId, isRead: false });
   },
 
+  // Count notifications for user with filters
+  countForUser: async (
+    userId: Types.ObjectId,
+    options: { isRead?: boolean; type?: NotificationType } = {},
+  ) => {
+    const query: any = { userId };
+    if (options.isRead !== undefined) query.isRead = options.isRead;
+    if (options.type) query.type = options.type;
+    return NotificationModel.countDocuments(query);
+  },
+
   // Mark as read
   markAsRead: async (id: string | Types.ObjectId, userId: Types.ObjectId) => {
     return NotificationModel.findOneAndUpdate(
@@ -110,6 +121,20 @@ export const notificationRepository = {
       "data.taskId": taskId,
       createdAt: { $gte: since },
     }).lean();
+  },
+
+  // Delete notifications by taskId and types (used when scheduledTime changes)
+  deleteByTaskId: async (
+    userId: Types.ObjectId,
+    taskId: string,
+    types: NotificationType[],
+  ) => {
+    const result = await NotificationModel.deleteMany({
+      userId,
+      type: { $in: types },
+      "data.taskId": taskId,
+    });
+    return result.deletedCount || 0;
   },
 
   // Delete notification (only owner can delete)

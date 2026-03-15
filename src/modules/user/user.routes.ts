@@ -4,6 +4,8 @@ import {
   sendChangePasswordOtp,
   getById,
   me,
+  getNotificationSettings,
+  updateNotificationSettings,
   updateProfile,
   uploadAvatar,
 } from "./user.controller";
@@ -18,6 +20,16 @@ import { upload } from "../../middleware/upload.middleware";
 const userRouter = Router();
 
 userRouter.get("/me", authMiddleware, me);
+userRouter.get(
+  "/notification-settings",
+  authMiddleware,
+  getNotificationSettings,
+);
+userRouter.patch(
+  "/notification-settings",
+  authMiddleware,
+  updateNotificationSettings,
+);
 userRouter.patch("/update-profile", authMiddleware, updateProfile);
 userRouter.patch(
   "/upload-avatar",

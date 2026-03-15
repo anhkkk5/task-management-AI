@@ -198,3 +198,60 @@ export const changePassword = async (
 export const getById = async (_req: Request, res: Response): Promise<void> => {
   res.status(501).json({ message: "Not implemented" });
 };
+
+export const getNotificationSettings = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const settings = await userService.getNotificationSettings(userId);
+    res.status(200).json({ settings });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "USER_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const updateNotificationSettings = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const settings = await userService.updateNotificationSettings(userId, {
+      reminderMinutes: _req.body?.reminderMinutes,
+    });
+
+    res.status(200).json({ settings });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+
+    if (message === "INVALID_REMINDER_MINUTES") {
+      res.status(400).json({ message: "Số phút nhắc trước không hợp lệ" });
+      return;
+    }
+    if (message === "USER_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy người dùng" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};

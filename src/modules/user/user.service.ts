@@ -26,6 +26,10 @@ export type PublicUser = {
   updatedAt: Date;
 };
 
+export type NotificationSettings = {
+  reminderMinutes: number;
+};
+
 const toPublicUser = (u: {
   _id: unknown;
   email: string;
@@ -125,6 +129,69 @@ export const userService = {
     }
 
     return pub;
+  },
+
+  getNotificationSettings: async (
+    userId: string,
+  ): Promise<NotificationSettings> => {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const raw = (user.settings as any)?.notifications?.reminderMinutes;
+    const n = typeof raw === "number" ? raw : Number(raw);
+    const reminderMinutes = Number.isFinite(n) ? Math.floor(n) : 5;
+
+    return {
+      reminderMinutes:
+        reminderMinutes < 0
+          ? 0
+          : reminderMinutes > 24 * 60
+            ? 24 * 60
+            : reminderMinutes,
+    };
+  },
+
+  updateNotificationSettings: async (
+    userId: string,
+    dto: { reminderMinutes?: unknown },
+  ): Promise<NotificationSettings> => {
+    const user = await userRepository.findById(userId);
+    if (!user) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    const raw = dto.reminderMinutes;
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(n)) {
+      throw new Error("INVALID_REMINDER_MINUTES");
+    }
+
+    const reminderMinutes = Math.min(24 * 60, Math.max(0, Math.floor(n)));
+
+    const existingSettings = (user.settings || {}) as Record<string, unknown>;
+    const existingNotifications =
+      ((existingSettings as any).notifications as Record<string, unknown>) ||
+      {};
+
+    const nextSettings = {
+      ...existingSettings,
+      notifications: {
+        ...existingNotifications,
+        reminderMinutes,
+      },
+    };
+
+    const updated = await userRepository.updateProfile(userId, {
+      settings: nextSettings,
+    });
+    if (!updated) {
+      throw new Error("USER_NOT_FOUND");
+    }
+
+    await invalidateUserProfileCache(userId);
+    return { reminderMinutes };
   },
 
   updateProfile: async (

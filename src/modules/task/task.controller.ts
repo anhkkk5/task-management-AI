@@ -408,11 +408,18 @@ export const updateTask = async (
       return;
     }
 
+    const scheduledTimeRaw = _req.body?.scheduledTime;
     const scheduledTime =
-      _req.body?.scheduledTime !== undefined
-        ? parseScheduledTime(_req.body.scheduledTime)
-        : undefined;
-    if (_req.body?.scheduledTime !== undefined && scheduledTime === undefined) {
+      _req.body?.scheduledTime !== undefined && scheduledTimeRaw !== null
+        ? parseScheduledTime(scheduledTimeRaw)
+        : scheduledTimeRaw === null
+          ? null
+          : undefined;
+    if (
+      _req.body?.scheduledTime !== undefined &&
+      scheduledTimeRaw !== null &&
+      scheduledTime === undefined
+    ) {
       res.status(400).json({ message: "ScheduledTime không hợp lệ" });
       return;
     }

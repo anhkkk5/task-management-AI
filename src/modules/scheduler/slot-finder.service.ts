@@ -233,7 +233,7 @@ export class SlotFinder {
         end: 23,
         breaks: [
           { start: 11.5, end: 14 },
-          { start: 17.5, end: 19.5 },
+          { start: 17.5, end: 19 },
         ],
       },
       bufferMinutes = 15,

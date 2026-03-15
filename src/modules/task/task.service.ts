@@ -9,6 +9,8 @@ import {
 import { getRedis } from "../../services/redis.service";
 import { aiService } from "../ai/ai.service";
 import { userHabitRepository } from "../user/user-habit.repository";
+import { notificationRepository } from "../notification/notification.repository";
+import { NotificationType } from "../notification/notification.model";
 
 export type PublicTask = {
   id: string;
@@ -262,6 +264,30 @@ export const taskService = {
         scheduledTime: dto.scheduledTime,
       },
     );
+
+    // If scheduledTime was updated, delete old scheduled notifications for this task
+    // so that new reminders can be sent for the new time
+    if (dto.scheduledTime && updated) {
+      try {
+        const deletedCount = await notificationRepository.deleteByTaskId(
+          new Types.ObjectId(userId),
+          taskId,
+          [
+            NotificationType.SCHEDULED_TASK_ALERT,
+            NotificationType.DEADLINE_ALERT,
+          ],
+        );
+        if (deletedCount > 0) {
+          console.log(
+            `[TaskUpdate] Deleted ${deletedCount} old scheduled notifications for task ${taskId} due to scheduledTime change`,
+          );
+        }
+      } catch (err: any) {
+        console.error(
+          `[TaskUpdate] Failed to delete old notifications: ${err.message}`,
+        );
+      }
+    }
 
     if (!updated) {
       throw new Error("TASK_FORBIDDEN");
@@ -548,47 +574,60 @@ export const taskService = {
       throw new Error("USER_ID_INVALID");
     }
 
-    let updatedCount = 0;
+    const earliestByTaskId = new Map<
+      string,
+      {
+        start: Date;
+        end: Date;
+        aiPlanned: boolean;
+        reason: string;
+      }
+    >();
 
     for (const item of schedule) {
-      if (!Types.ObjectId.isValid(item.taskId)) {
-        continue;
+      if (!Types.ObjectId.isValid(item.taskId)) continue;
+      const existing = earliestByTaskId.get(item.taskId);
+      if (!existing || item.scheduledTime.start < existing.start) {
+        earliestByTaskId.set(item.taskId, {
+          start: item.scheduledTime.start,
+          end: item.scheduledTime.end,
+          aiPlanned: item.scheduledTime.aiPlanned,
+          reason: item.scheduledTime.reason,
+        });
       }
+    }
 
+    let updatedCount = 0;
+    for (const [taskId, st] of earliestByTaskId.entries()) {
       const task = await taskRepository.findByIdForUser({
-        taskId: item.taskId,
+        taskId,
         userId: new Types.ObjectId(userId),
       });
 
-      if (!task) {
-        continue;
-      }
+      if (!task) continue;
 
-      // Update task gốc với status "scheduled" và scheduledTime
-      // KHÔNG tạo subtasks - AISchedule collection sẽ lưu sessions
       const updated = await taskRepository.updateByIdForUser(
         {
-          taskId: item.taskId,
+          taskId,
           userId: new Types.ObjectId(userId),
         },
         {
           status: "scheduled",
           scheduledTime: {
-            start: item.scheduledTime.start,
-            end: item.scheduledTime.end,
-            aiPlanned: item.scheduledTime.aiPlanned,
-            reason: item.scheduledTime.reason,
+            start: st.start,
+            end: st.end,
+            aiPlanned: st.aiPlanned,
+            reason: st.reason,
           },
         },
       );
 
       if (updated) {
         console.log(
-          `[Save Schedule] Task "${updated.title}" status updated to "scheduled" with time ${item.scheduledTime.start} - ${item.scheduledTime.end}`,
+          `[Save Schedule] Task "${updated.title}" status updated to "scheduled" with time ${st.start} - ${st.end}`,
         );
+        updatedCount++;
       }
-
-      updatedCount++;
     }
 
     if (updatedCount > 0) {

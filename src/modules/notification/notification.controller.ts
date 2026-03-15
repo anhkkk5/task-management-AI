@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
 import { notificationService } from "./notification.service";
 import { NotificationType } from "./notification.model";
+import { notificationRepository } from "./notification.repository";
+import { Types } from "mongoose";
 
 export const notificationController = {
   // List notifications for current user
@@ -30,7 +32,12 @@ export const notificationController = {
       });
       const unreadCount = await notificationService.countUnread(userId);
 
-      res.status(200).json({ notifications, unreadCount });
+      const total = await notificationRepository.countForUser(
+        new Types.ObjectId(userId),
+        { isRead, type },
+      );
+
+      res.status(200).json({ items: notifications, total, unreadCount });
     } catch (err) {
       res.status(500).json({ message: "Failed to list notifications" });
     }

@@ -9,6 +9,7 @@ export type PublicNotification = {
   type: NotificationType;
   title: string;
   content: string;
+  message: string; // alias for content, for FE compatibility
   data?: any;
   isRead: boolean;
   channels: {
@@ -25,6 +26,7 @@ const toPublicNotification = (doc: NotificationDoc): PublicNotification => {
     type: doc.type,
     title: doc.title,
     content: doc.content,
+    message: doc.content, // alias for FE compatibility
     data: doc.data,
     isRead: doc.isRead,
     channels: doc.channels,
