@@ -736,25 +736,23 @@ export const saveAISchedule = async (
 
         const [, year, month, day] = dateMatch;
 
-        // Create Date objects (UTC)
+        // Create Date objects (local time)
+        // NOTE: Using Date.UTC here will shift the time when displayed/used in local timezone,
+        // causing reminders to trigger at the wrong time unless user manually edits the event.
         const startDate = new Date(
-          Date.UTC(
-            parseInt(year),
-            parseInt(month) - 1,
-            parseInt(day),
-            parseInt(startHour),
-            parseInt(startMinute),
-          ),
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          parseInt(startHour),
+          parseInt(startMinute),
         );
 
         const endDate = new Date(
-          Date.UTC(
-            parseInt(year),
-            parseInt(month) - 1,
-            parseInt(day),
-            parseInt(endHour),
-            parseInt(endMinute),
-          ),
+          parseInt(year),
+          parseInt(month) - 1,
+          parseInt(day),
+          parseInt(endHour),
+          parseInt(endMinute),
         );
 
         tasksToUpdate.push({
