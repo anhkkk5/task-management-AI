@@ -7,6 +7,8 @@ import {
   UpdateSessionStatusInput,
 } from "./ai-schedule.dto";
 import { AIScheduleDoc } from "./ai-schedule.model";
+import { Task } from "../task/task.model";
+import { Types } from "mongoose";
 
 export class AIScheduleService {
   async getUserSchedules(userId: string): Promise<ScheduleResponse[]> {
@@ -135,11 +137,40 @@ export class AIScheduleService {
   }
 
   async deleteSchedule(scheduleId: string, userId: string): Promise<boolean> {
-    return aiScheduleRepository.delete(scheduleId, userId);
+    const deleted = await aiScheduleRepository.delete(scheduleId, userId);
+    if (deleted) {
+      await Task.deleteMany({
+        userId: new Types.ObjectId(userId),
+        "scheduledTime.aiPlanned": true,
+        parentTaskId: { $exists: true },
+      });
+      await Task.updateMany(
+        { 
+          userId: new Types.ObjectId(userId), 
+          status: "scheduled",
+          "scheduledTime.start": { $exists: false }
+        },
+        { $set: { status: "todo" } }
+      );
+    }
+    return deleted;
   }
 
   async deleteAllUserSchedules(userId: string): Promise<void> {
     await aiScheduleRepository.deleteAllForUser(userId);
+    await Task.deleteMany({
+      userId: new Types.ObjectId(userId),
+      "scheduledTime.aiPlanned": true,
+      parentTaskId: { $exists: true },
+    });
+    await Task.updateMany(
+      { 
+        userId: new Types.ObjectId(userId), 
+        status: "scheduled",
+        "scheduledTime.start": { $exists: false }
+      },
+      { $set: { status: "todo" } }
+    );
   }
 
   private toResponse(schedule: AIScheduleDoc): ScheduleResponse {

@@ -574,67 +574,92 @@ export const taskService = {
       throw new Error("USER_ID_INVALID");
     }
 
-    const earliestByTaskId = new Map<
-      string,
-      {
-        start: Date;
-        end: Date;
-        aiPlanned: boolean;
-        reason: string;
-      }
-    >();
-
+    // Group sessions by taskId to efficiently fetch parent tasks
+    const sessionsByTaskId = new Map<string, typeof schedule>();
     for (const item of schedule) {
       if (!Types.ObjectId.isValid(item.taskId)) continue;
-      const existing = earliestByTaskId.get(item.taskId);
-      if (!existing || item.scheduledTime.start < existing.start) {
-        earliestByTaskId.set(item.taskId, {
-          start: item.scheduledTime.start,
-          end: item.scheduledTime.end,
-          aiPlanned: item.scheduledTime.aiPlanned,
-          reason: item.scheduledTime.reason,
-        });
-      }
+      const list = sessionsByTaskId.get(item.taskId) || [];
+      list.push(item);
+      sessionsByTaskId.set(item.taskId, list);
     }
 
+    let createdCount = 0;
     let updatedCount = 0;
-    for (const [taskId, st] of earliestByTaskId.entries()) {
-      const task = await taskRepository.findByIdForUser({
+
+    for (const [taskId, sessions] of sessionsByTaskId.entries()) {
+      // Get parent task info
+      const parentTask = await taskRepository.findByIdForUser({
         taskId,
         userId: new Types.ObjectId(userId),
       });
 
-      if (!task) continue;
+      if (!parentTask) {
+        console.log(`[SaveAISchedule] Parent task not found: ${taskId}`);
+        continue;
+      }
 
-      const updated = await taskRepository.updateByIdForUser(
-        {
-          taskId,
-          userId: new Types.ObjectId(userId),
-        },
-        {
-          status: "scheduled",
-          scheduledTime: {
-            start: st.start,
-            end: st.end,
-            aiPlanned: st.aiPlanned,
-            reason: st.reason,
-          },
-        },
-      );
-
-      if (updated) {
-        console.log(
-          `[Save Schedule] Task "${updated.title}" status updated to "scheduled" with time ${st.start} - ${st.end}`,
+      // Mark parent task as having AI schedule (but don't set scheduledTime)
+      // The actual sessions are represented by subtasks
+      if (parentTask.status === "todo") {
+        await taskRepository.updateByIdForUser(
+          { taskId, userId: new Types.ObjectId(userId) },
+          { status: "scheduled" },
         );
         updatedCount++;
       }
+
+      // Create a subtask for each session
+      for (let i = 0; i < sessions.length; i++) {
+        const session = sessions[i];
+        const startTime = session.scheduledTime.start;
+        const endTime = session.scheduledTime.end;
+        const timeStr = `${startTime.getHours().toString().padStart(2, "0")}:${startTime.getMinutes().toString().padStart(2, "0")}-${endTime.getHours().toString().padStart(2, "0")}:${endTime.getMinutes().toString().padStart(2, "0")}`;
+
+        const subtaskTitle =
+          sessions.length === 1
+            ? parentTask.title
+            : `${parentTask.title} (Phiên ${i + 1}/${sessions.length})`;
+
+        try {
+          await taskRepository.create({
+            title: subtaskTitle,
+            description:
+              session.scheduledTime.reason ||
+              `Phiên làm việc ${i + 1} theo lịch AI`,
+            status: "scheduled",
+            priority: parentTask.priority,
+            deadline: parentTask.deadline,
+            tags: [...(parentTask.tags || [])],
+            userId: new Types.ObjectId(userId),
+            parentTaskId: new Types.ObjectId(taskId),
+            estimatedDuration: Math.round(
+              (endTime.getTime() - startTime.getTime()) / (1000 * 60),
+            ),
+            scheduledTime: {
+              start: startTime,
+              end: endTime,
+              aiPlanned: true,
+              reason:
+                session.scheduledTime.reason || `Phiên ${i + 1} theo lịch AI`,
+            },
+          });
+          createdCount++;
+          console.log(
+            `[SaveAISchedule] Created subtask "${subtaskTitle}" for ${timeStr}`,
+          );
+        } catch (err: any) {
+          console.error(
+            `[SaveAISchedule] Failed to create subtask for session ${session.sessionId}: ${err.message}`,
+          );
+        }
+      }
     }
 
-    if (updatedCount > 0) {
+    if (createdCount > 0 || updatedCount > 0) {
       await invalidateTasksCache(userId);
     }
 
-    return { updated: updatedCount, created: 0 };
+    return { updated: updatedCount, created: createdCount };
   },
 
   /**

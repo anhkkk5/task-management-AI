@@ -198,6 +198,7 @@ export const taskRepository = {
   }): Promise<{ items: TaskDoc[]; total: number }> => {
     const filter: Record<string, unknown> = {
       userId: params.userId,
+      isArchived: { $ne: true },
     };
 
     if (params.status) {
@@ -239,6 +240,7 @@ export const taskRepository = {
       userId: params.userId,
       deadline: { $lt: params.now },
       status: { $nin: ["completed", "cancelled"] },
+      isArchived: { $ne: true },
     };
 
     const skip = (params.page - 1) * params.limit;

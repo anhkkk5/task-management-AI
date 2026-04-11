@@ -25,6 +25,7 @@ export type TaskAttrs = {
     aiPlanned: boolean;
     reason?: string;
   };
+  isArchived?: boolean;
 };
 
 export type TaskDoc = mongoose.Document & {
@@ -51,6 +52,7 @@ export type TaskDoc = mongoose.Document & {
     aiPlanned: boolean;
     reason?: string;
   };
+  isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -101,6 +103,7 @@ const taskSchema = new Schema<TaskDoc>(
       aiPlanned: { type: Boolean, default: false },
       reason: { type: String },
     },
+    isArchived: { type: Boolean, default: false, index: true },
   },
   { timestamps: true },
 );

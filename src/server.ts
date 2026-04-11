@@ -11,6 +11,7 @@ import swaggerUi from "swagger-ui-express";
 import { initChatGateway } from "./modules/chat/chat.gateway";
 import { reminderCronService } from "./modules/notification/reminder.cron";
 import { cacheCleanupService } from "./services/cache-cleanup.service";
+import { initCronJobs } from "./services/cron.service";
 import "./modules/notification/notification.worker";
 
 const bootstrap = async (): Promise<void> => {
@@ -51,6 +52,9 @@ const bootstrap = async (): Promise<void> => {
     // Start cache cleanup job
     cacheCleanupService.start();
     console.log(`Cache cleanup job started (runs every 1 hour)`);
+
+    // Start daily task cleanup & archive cron job
+    initCronJobs();
   });
 };
 
