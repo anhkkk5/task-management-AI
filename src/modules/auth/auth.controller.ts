@@ -118,6 +118,8 @@ export const logout = async (_req: Request, res: Response): Promise<void> => {
     await authService.logout({ refreshToken: token });
 
     clearRefreshCookie(res);
+    // Clear token cookie (Google OAuth)
+    res.clearCookie("token", { path: "/" });
     res.status(200).json({ message: "Đăng xuất thành công" });
   } catch (err) {
     handleAuthError(err, res, logoutErrorMap);
@@ -140,6 +142,7 @@ export const logoutAll = async (
     res.clearCookie("refreshToken", {
       path: "/auth",
     });
+    res.clearCookie("token", { path: "/" });
 
     res.status(200).json({ message: "Đăng xuất tất cả thiết bị thành công" });
   } catch (_err) {

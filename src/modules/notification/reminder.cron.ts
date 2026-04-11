@@ -163,7 +163,12 @@ async function scanAndNotifyScheduledTasks(): Promise<void> {
         userCache.set(userId, userInfo);
       }
 
-      const reminderMinutes = userInfo.reminderMinutes;
+      // Ưu tiên reminderMinutes của task nếu có, nếu không thì dùng setting của user
+      const reminderMinutes =
+        typeof (task as any).reminderMinutes === "number"
+          ? (task as any).reminderMinutes
+          : userInfo.reminderMinutes;
+
       if (reminderMinutes <= 0) {
         continue;
       }

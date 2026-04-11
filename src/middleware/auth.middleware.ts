@@ -18,16 +18,22 @@ const getSecret = (): string => {
 export const authMiddleware = (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ): void => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    // Prioritize httpOnly cookie over header (for fresh Google auth)
+    let token: string | undefined;
+
+    if (req.cookies?.token) {
+      token = req.cookies.token;
+    } else if (req.headers.authorization?.startsWith("Bearer ")) {
+      token = req.headers.authorization.slice("Bearer ".length).trim();
+    }
+
+    if (!token) {
       res.status(401).json({ message: "Thiếu token" });
       return;
     }
-
-    const token = authHeader.slice("Bearer ".length).trim();
     const decoded = jwt.verify(token, getSecret()) as JwtPayload | AuthPayload;
 
     const payload = decoded as AuthPayload;

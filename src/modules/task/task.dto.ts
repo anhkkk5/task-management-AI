@@ -7,6 +7,10 @@ export type TaskStatus =
 
 export type TaskPriority = "low" | "medium" | "high" | "urgent";
 
+export type TaskType = "event" | "todo" | "appointment";
+
+export type TaskVisibility = "default" | "public" | "private";
+
 export type CreateTaskDto = {
   title: string;
   description?: string;
@@ -14,6 +18,14 @@ export type CreateTaskDto = {
   priority?: TaskPriority;
   tags?: string[];
   reminderAt?: Date;
+  reminderMinutes?: number;
+  type?: TaskType;
+  allDay?: boolean;
+  guests?: string[];
+  location?: string;
+  visibility?: TaskVisibility;
+  recurrence?: string;
+  meetingLink?: string;
   estimatedDuration?: number;
   dailyTargetDuration?: number; // Max minutes per day
   dailyTargetMin?: number; // Min minutes per day
@@ -34,6 +46,14 @@ export type UpdateTaskDto = {
   deadline?: Date;
   tags?: string[];
   reminderAt?: Date;
+  reminderMinutes?: number | null;
+  type?: TaskType;
+  allDay?: boolean;
+  guests?: string[];
+  location?: string;
+  visibility?: TaskVisibility;
+  recurrence?: string;
+  meetingLink?: string;
   aiBreakdown?: {
     title: string;
     status?: TaskStatus;

@@ -88,6 +88,42 @@ const parsePositiveInt = (value: unknown, defaultValue: number): number => {
   return x;
 };
 
+const parseType = (
+  value: unknown,
+): "event" | "todo" | "appointment" | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const v = String(value);
+  if (v === "event" || v === "todo" || v === "appointment") return v;
+  return undefined;
+};
+
+const parseVisibility = (
+  value: unknown,
+): "default" | "public" | "private" | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const v = String(value);
+  if (v === "default" || v === "public" || v === "private") return v;
+  return undefined;
+};
+
+const parseGuests = (value: unknown): string[] | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const emails = (value as unknown[])
+    .map((x) => String(x).trim().toLowerCase())
+    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+  return emails.length > 0 ? [...new Set(emails)] : [];
+};
+
+const parseReminderMinutes = (value: unknown): number | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  const x = Math.floor(n);
+  if (x < 0) return undefined;
+  return x;
+};
+
 const parseScheduledTime = (
   value: unknown,
 ):
@@ -223,6 +259,25 @@ export const createTask = async (
       ? (_req.body.tags as unknown[]).map((x) => String(x))
       : undefined;
 
+    const type = parseType(_req.body?.type);
+    const allDay =
+      _req.body?.allDay !== undefined ? Boolean(_req.body.allDay) : undefined;
+    const guests = parseGuests(_req.body?.guests);
+    const location =
+      _req.body?.location !== undefined
+        ? String(_req.body.location)
+        : undefined;
+    const visibility = parseVisibility(_req.body?.visibility);
+    const reminderMinutes = parseReminderMinutes(_req.body?.reminderMinutes);
+    const recurrence =
+      _req.body?.recurrence !== undefined
+        ? String(_req.body.recurrence)
+        : undefined;
+    const meetingLink =
+      _req.body?.meetingLink !== undefined
+        ? String(_req.body.meetingLink)
+        : undefined;
+
     const task = await taskService.create(userId, {
       title: String(_req.body?.title ?? ""),
       description:
@@ -233,6 +288,14 @@ export const createTask = async (
       priority: parsePriority(_req.body?.priority),
       tags,
       reminderAt,
+      type,
+      allDay,
+      guests,
+      location,
+      visibility,
+      reminderMinutes,
+      recurrence,
+      meetingLink,
       estimatedDuration,
       dailyTargetDuration,
       dailyTargetMin,
@@ -522,6 +585,27 @@ export const updateTask = async (
       }
     }
 
+    const typeUpdate = parseType(_req.body?.type);
+    const allDayUpdate =
+      _req.body?.allDay !== undefined ? Boolean(_req.body.allDay) : undefined;
+    const guestsUpdate = parseGuests(_req.body?.guests);
+    const locationUpdate =
+      _req.body?.location !== undefined
+        ? String(_req.body.location)
+        : undefined;
+    const visibilityUpdate = parseVisibility(_req.body?.visibility);
+    const reminderMinutesUpdate = parseReminderMinutes(
+      _req.body?.reminderMinutes,
+    );
+    const recurrenceUpdate =
+      _req.body?.recurrence !== undefined
+        ? String(_req.body.recurrence)
+        : undefined;
+    const meetingLinkUpdate =
+      _req.body?.meetingLink !== undefined
+        ? String(_req.body.meetingLink)
+        : undefined;
+
     const task = await taskService.update(userId, String(_req.params.id), {
       title:
         _req.body?.title !== undefined ? String(_req.body.title) : undefined,
@@ -534,6 +618,14 @@ export const updateTask = async (
       deadline,
       tags,
       reminderAt,
+      type: typeUpdate,
+      allDay: allDayUpdate,
+      guests: guestsUpdate,
+      location: locationUpdate,
+      visibility: visibilityUpdate,
+      reminderMinutes: reminderMinutesUpdate,
+      recurrence: recurrenceUpdate,
+      meetingLink: meetingLinkUpdate,
       scheduledTime:
         scheduledTime === null
           ? null

@@ -7,6 +7,14 @@ export const taskRepository = {
     return Task.create({
       title: attrs.title,
       description: attrs.description,
+      type: attrs.type,
+      allDay: attrs.allDay,
+      guests: attrs.guests ?? [],
+      location: attrs.location,
+      visibility: attrs.visibility,
+      reminderMinutes: attrs.reminderMinutes,
+      recurrence: attrs.recurrence,
+      meetingLink: attrs.meetingLink,
       status: attrs.status ?? "todo",
       priority: attrs.priority ?? "medium",
       deadline: attrs.deadline,
@@ -40,6 +48,14 @@ export const taskRepository = {
     update: {
       title?: string;
       description?: string;
+      type?: "event" | "todo" | "appointment";
+      allDay?: boolean;
+      guests?: string[];
+      location?: string;
+      visibility?: "default" | "public" | "private";
+      reminderMinutes?: number | null;
+      recurrence?: string;
+      meetingLink?: string;
       status?: TaskStatus;
       priority?: TaskPriority;
       deadline?: Date;
@@ -68,6 +84,24 @@ export const taskRepository = {
           ...(update.title !== undefined ? { title: update.title } : {}),
           ...(update.description !== undefined
             ? { description: update.description }
+            : {}),
+          ...(update.type !== undefined ? { type: update.type } : {}),
+          ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
+          ...(update.guests !== undefined ? { guests: update.guests } : {}),
+          ...(update.location !== undefined
+            ? { location: update.location }
+            : {}),
+          ...(update.visibility !== undefined
+            ? { visibility: update.visibility }
+            : {}),
+          ...(update.reminderMinutes !== undefined
+            ? { reminderMinutes: update.reminderMinutes }
+            : {}),
+          ...(update.recurrence !== undefined
+            ? { recurrence: update.recurrence }
+            : {}),
+          ...(update.meetingLink !== undefined
+            ? { meetingLink: update.meetingLink }
             : {}),
           ...(update.status !== undefined ? { status: update.status } : {}),
           ...(update.priority !== undefined
@@ -109,6 +143,14 @@ export const taskRepository = {
     update: {
       title?: string;
       description?: string;
+      type?: "event" | "todo" | "appointment";
+      allDay?: boolean;
+      guests?: string[];
+      location?: string;
+      visibility?: "default" | "public" | "private";
+      reminderMinutes?: number | null;
+      recurrence?: string;
+      meetingLink?: string;
       status?: TaskStatus;
       priority?: TaskPriority;
       deadline?: Date;
@@ -137,6 +179,24 @@ export const taskRepository = {
           ...(update.title !== undefined ? { title: update.title } : {}),
           ...(update.description !== undefined
             ? { description: update.description }
+            : {}),
+          ...(update.type !== undefined ? { type: update.type } : {}),
+          ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
+          ...(update.guests !== undefined ? { guests: update.guests } : {}),
+          ...(update.location !== undefined
+            ? { location: update.location }
+            : {}),
+          ...(update.visibility !== undefined
+            ? { visibility: update.visibility }
+            : {}),
+          ...(update.reminderMinutes !== undefined
+            ? { reminderMinutes: update.reminderMinutes }
+            : {}),
+          ...(update.recurrence !== undefined
+            ? { recurrence: update.recurrence }
+            : {}),
+          ...(update.meetingLink !== undefined
+            ? { meetingLink: update.meetingLink }
             : {}),
           ...(update.status !== undefined ? { status: update.status } : {}),
           ...(update.priority !== undefined

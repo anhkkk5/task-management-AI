@@ -11,6 +11,8 @@ import { aiService } from "../ai/ai.service";
 import { userHabitRepository } from "../user/user-habit.repository";
 import { notificationRepository } from "../notification/notification.repository";
 import { NotificationType } from "../notification/notification.model";
+import { notificationQueueService } from "../notification/notification.queue";
+import { userRepository } from "../user/user.repository";
 
 export type PublicTask = {
   id: string;
@@ -20,6 +22,14 @@ export type PublicTask = {
   priority: string;
   deadline?: Date;
   tags: string[];
+  type?: "event" | "todo" | "appointment";
+  allDay?: boolean;
+  guests: string[];
+  location?: string;
+  visibility: "default" | "public" | "private";
+  reminderMinutes?: number;
+  recurrence?: string;
+  meetingLink?: string;
   userId: string;
   parentTaskId?: string;
   aiBreakdown: { title: string; status: string; estimatedDuration?: number }[];
@@ -46,6 +56,14 @@ const toPublicTask = (t: any): PublicTask => {
     priority: t.priority,
     deadline: t.deadline,
     tags: t.tags ?? [],
+    type: t.type,
+    allDay: t.allDay,
+    guests: t.guests ?? [],
+    location: t.location,
+    visibility: t.visibility ?? "default",
+    reminderMinutes: t.reminderMinutes,
+    recurrence: t.recurrence,
+    meetingLink: t.meetingLink,
     userId: String(t.userId),
     parentTaskId: t.parentTaskId ? String(t.parentTaskId) : undefined,
     aiBreakdown: (t.aiBreakdown ?? []).map((x: any) => ({
@@ -60,6 +78,108 @@ const toPublicTask = (t: any): PublicTask => {
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
   };
+};
+
+// Generate invite email HTML template
+const generateInviteEmailHtml = (params: {
+  taskTitle: string;
+  organizerName: string;
+  organizerEmail: string;
+  startTime?: Date;
+  endTime?: Date;
+  location?: string;
+  meetingLink?: string;
+  description?: string;
+}): string => {
+  const timeStr = params.startTime
+    ? `${params.startTime.toLocaleString("vi-VN")}${params.endTime ? ` - ${params.endTime.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}` : ""}`
+    : "Không có thời gian cụ thể";
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lời mời tham gia: ${params.taskTitle}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .container { background: #f9f9f9; border-radius: 8px; padding: 30px; }
+    .header { border-bottom: 2px solid #4CAF50; padding-bottom: 15px; margin-bottom: 20px; }
+    .title { font-size: 24px; font-weight: bold; color: #333; margin: 0; }
+    .content { font-size: 16px; color: #555; margin: 20px 0; }
+    .detail { background: #fff; border-radius: 4px; padding: 15px; margin: 15px 0; }
+    .detail-item { margin: 8px 0; }
+    .detail-label { font-weight: bold; color: #666; }
+    .button { display: inline-block; background: #4CAF50; color: white; text-decoration: none; padding: 12px 24px; border-radius: 4px; margin-top: 20px; }
+    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 class="title">Bạn được mời tham gia: ${params.taskTitle}</h1>
+    </div>
+    <div class="content">
+      <p><strong>${params.organizerName}</strong> (${params.organizerEmail}) đã mời bạn tham gia sự kiện.</p>
+    </div>
+    <div class="detail">
+      <div class="detail-item"><span class="detail-label">Thời gian:</span> ${timeStr}</div>
+      ${params.location ? `<div class="detail-item"><span class="detail-label">Địa điểm:</span> ${params.location}</div>` : ""}
+      ${params.meetingLink ? `<div class="detail-item"><span class="detail-label">Link họp:</span> <a href="${params.meetingLink}">${params.meetingLink}</a></div>` : ""}
+      ${params.description ? `<div class="detail-item"><span class="detail-label">Mô tả:</span> ${params.description}</div>` : ""}
+    </div>
+    <div class="footer">
+      <p>Email này được gửi tự động từ Task Management System.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+// Send invite emails to guests
+const sendGuestInvites = async (params: {
+  userId: string;
+  task: PublicTask;
+  previousGuests?: string[];
+}): Promise<void> => {
+  const { userId, task, previousGuests = [] } = params;
+
+  if (!task.guests || task.guests.length === 0) return;
+
+  // Chỉ gửi cho guests mới (không có trong previousGuests)
+  const newGuests = task.guests.filter((g) => !previousGuests.includes(g));
+  if (newGuests.length === 0) return;
+
+  // Lấy thông tin organizer
+  const organizer = await userRepository.findById(userId);
+  if (!organizer) return;
+
+  const organizerName = organizer.name || organizer.email;
+  const organizerEmail = organizer.email;
+
+  for (const guestEmail of newGuests) {
+    // Không gửi cho chính organizer
+    if (guestEmail === organizerEmail.toLowerCase()) continue;
+
+    const html = generateInviteEmailHtml({
+      taskTitle: task.title,
+      organizerName,
+      organizerEmail,
+      startTime: task.scheduledTime?.start,
+      endTime: task.scheduledTime?.end,
+      location: task.location,
+      meetingLink: task.meetingLink,
+      description: task.description,
+    });
+
+    await notificationQueueService.addInviteEmail({
+      to: guestEmail,
+      subject: `Lời mời tham gia: ${task.title}`,
+      html,
+      taskTitle: task.title,
+      organizerEmail,
+    });
+  }
 };
 
 type TaskListResult = {
@@ -183,6 +303,14 @@ export const taskService = {
     const doc = await taskRepository.create({
       title,
       description: dto.description,
+      type: dto.type,
+      allDay: dto.allDay,
+      guests: dto.guests,
+      location: dto.location,
+      visibility: dto.visibility,
+      reminderMinutes: dto.reminderMinutes,
+      recurrence: dto.recurrence,
+      meetingLink: dto.meetingLink,
       deadline: dto.deadline,
       priority: dto.priority,
       tags: dto.tags,
@@ -210,7 +338,19 @@ export const taskService = {
 
     await invalidateTasksCache(userId);
 
-    return toPublicTask(doc);
+    const publicTask = toPublicTask(doc);
+
+    // Send invite emails to guests (don't wait)
+    if (dto.guests && dto.guests.length > 0) {
+      sendGuestInvites({ userId, task: publicTask }).catch((err) => {
+        console.error(
+          "[TaskService] Failed to send guest invites:",
+          err.message,
+        );
+      });
+    }
+
+    return publicTask;
   },
 
   getById: async (userId: string, taskId: string): Promise<PublicTask> => {
@@ -252,6 +392,14 @@ export const taskService = {
       {
         title,
         description: dto.description,
+        type: dto.type,
+        allDay: dto.allDay,
+        guests: dto.guests,
+        location: dto.location,
+        visibility: dto.visibility,
+        reminderMinutes: dto.reminderMinutes,
+        recurrence: dto.recurrence,
+        meetingLink: dto.meetingLink,
         status: dto.status,
         priority: dto.priority,
         deadline: dto.deadline,
@@ -313,7 +461,24 @@ export const taskService = {
 
     await invalidateTasksCache(userId);
 
-    return toPublicTask(updated);
+    const publicTask = toPublicTask(updated);
+
+    // Send invite emails to new guests (don't wait)
+    if (dto.guests && dto.guests.length > 0) {
+      const previousGuests = (currentTask.guests || []).map((g: string) =>
+        g.toLowerCase(),
+      );
+      sendGuestInvites({ userId, task: publicTask, previousGuests }).catch(
+        (err) => {
+          console.error(
+            "[TaskService] Failed to send guest invites:",
+            err.message,
+          );
+        },
+      );
+    }
+
+    return publicTask;
   },
 
   delete: async (

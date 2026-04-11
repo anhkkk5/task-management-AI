@@ -64,6 +64,38 @@ export const notificationWorker = new Worker(
         return result;
       }
 
+      case "send-invite-email": {
+        const { to, subject, html } = job.data as {
+          to: string;
+          subject: string;
+          html: string;
+          taskTitle: string;
+          organizerEmail?: string;
+        };
+
+        console.log(`[NotificationWorker] Sending invite email to: ${to}`);
+        console.log(`[NotificationWorker] Subject: ${subject}`);
+
+        const result = await emailService.send({
+          to,
+          subject,
+          html,
+        });
+
+        if (result.success) {
+          console.log(
+            `[NotificationWorker] Invite email sent successfully: ${result.messageId}`,
+          );
+        } else {
+          console.error(
+            `[NotificationWorker] Failed to send invite email: ${result.error}`,
+          );
+          throw new Error(result.error || "Failed to send invite email");
+        }
+
+        return result;
+      }
+
       default:
         throw new Error(`Unknown job type: ${job.name}`);
     }

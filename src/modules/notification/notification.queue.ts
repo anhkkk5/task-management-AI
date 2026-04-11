@@ -22,23 +22,30 @@ export interface EmailJobData {
   notificationId: string;
 }
 
+export interface InviteEmailJobData {
+  to: string;
+  subject: string;
+  html: string;
+  taskTitle: string;
+  organizerEmail?: string;
+}
+
 const redisConfig = getRedisConfig();
 
-export const notificationQueue = new Queue<NotificationJobData | EmailJobData>(
-  "notification",
-  {
-    connection: redisConfig,
-    defaultJobOptions: {
-      attempts: 3,
-      backoff: {
-        type: "exponential",
-        delay: 1000,
-      },
-      removeOnComplete: 100,
-      removeOnFail: 50,
+export const notificationQueue = new Queue<
+  NotificationJobData | EmailJobData | InviteEmailJobData
+>("notification", {
+  connection: redisConfig,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: {
+      type: "exponential",
+      delay: 1000,
     },
+    removeOnComplete: 100,
+    removeOnFail: 50,
   },
-);
+});
 
 export const notificationQueueService = {
   // Add notification job to queue
@@ -62,6 +69,18 @@ export const notificationQueueService = {
   }): Promise<Job> => {
     return notificationQueue.add("send-email", data, {
       priority: 2,
+      attempts: 5,
+      backoff: {
+        type: "exponential",
+        delay: 5000,
+      },
+    });
+  },
+
+  // Add invite email job (no notificationId required)
+  addInviteEmail: async (data: InviteEmailJobData): Promise<Job> => {
+    return notificationQueue.add("send-invite-email", data, {
+      priority: 3,
       attempts: 5,
       backoff: {
         type: "exponential",
