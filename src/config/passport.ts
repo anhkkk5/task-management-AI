@@ -1,17 +1,50 @@
 // Passport configuration for Google OAuth
+// Sử dụng cùng hệ thống JWT + Redis refresh token như login thường
 import passport from "passport";
 import {
   Strategy as GoogleStrategy,
   VerifyCallback,
 } from "passport-google-oauth20";
+import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
+import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { User } from "../modules/auth/auth.model";
-import { generateJWT } from "../utils/jwt";
+import { getRedis } from "../services/redis.service";
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 const GOOGLE_CALLBACK_URL =
   process.env.GOOGLE_CALLBACK_URL ||
   "http://localhost:3002/auth/google/callback";
+
+// ========== JWT helpers (phải ĐỒNG BỘ với auth.service.ts) ==========
+
+const getAccessSecret = (): Secret => {
+  const raw = process.env.JWT_ACCESS_SECRET ?? process.env.JWT_SECRET;
+  if (!raw) throw new Error("Missing env JWT_ACCESS_SECRET");
+  return raw;
+};
+
+const getRefreshSecret = (): Secret => {
+  const raw =
+    process.env.JWT_REFRESH_SECRET ??
+    process.env.JWT_ACCESS_SECRET ??
+    process.env.JWT_SECRET;
+  if (!raw) throw new Error("Missing env JWT_REFRESH_SECRET");
+  return raw;
+};
+
+const getRefreshTtlSeconds = (): number => {
+  // Hỗ trợ cả 2 tên biến env
+  const env =
+    process.env.JWT_REFRESH_TTL_SECONDS ??
+    process.env.REFRESH_TOKEN_TTL_SECONDS;
+  if (!env) return 86400; // default 1 day
+  const n = Number(env);
+  return Number.isFinite(n) && n > 0 ? n : 86400;
+};
+
+// ========== Passport Setup ==========
 
 export const setupPassport = (): void => {
   passport.use(
@@ -29,7 +62,7 @@ export const setupPassport = (): void => {
       },
       async (
         accessToken: string,
-        refreshToken: string,
+        _refreshToken: string,
         profile: any,
         done: VerifyCallback,
       ) => {
@@ -39,51 +72,82 @@ export const setupPassport = (): void => {
             return done(new Error("No email found in Google profile"), false);
           }
 
+          console.log("[Google Strategy] Processing user:", email);
+
           // Find or create user
           let user = await User.findOne({ email });
 
           if (!user) {
-            // Create new user from Google profile
+            // Google user không cần mật khẩu, nhưng schema yêu cầu required
+            // → Tạo random hash để schema không reject
+            const placeholder = `google:${randomUUID()}`;
+            const hash = await bcrypt.hash(placeholder, 10);
+
             user = await User.create({
               email,
               name: profile.displayName || email.split("@")[0],
               avatar: profile.photos?.[0]?.value,
-              password: "google-auth-" + Date.now(), // Google auth users - random password
+              password: hash,
               role: "user",
               isVerified: true,
             });
+            console.log("[Google Strategy] Created new user:", email);
           } else {
-            // Update avatar if changed
+            // Update avatar nếu chưa có
             if (profile.photos?.[0]?.value && !user.avatar) {
               user.avatar = profile.photos[0].value;
               await user.save();
             }
+            console.log("[Google Strategy] Found existing user:", email);
           }
 
-          // Generate JWT with Google tokens
-          const token = generateJWT({
-            userId: String(user._id),
-            email: user.email,
-            name: user.name,
-            picture: user.avatar,
-            googleAccessToken: accessToken,
-            googleRefreshToken: refreshToken,
-          });
+          const userId = String(user._id);
+
+          // ===== Access Token (ĐÚNG format như auth.service.ts) =====
+          const accessExpiresIn: SignOptions["expiresIn"] = (process.env
+            .JWT_ACCESS_EXPIRES_IN ?? "1h") as SignOptions["expiresIn"];
+
+          const token = jwt.sign(
+            {
+              userId,
+              email: user.email,
+              role: user.role,
+              googleAccessToken: accessToken,
+            },
+            getAccessSecret(),
+            { expiresIn: accessExpiresIn },
+          );
+
+          // ===== Refresh Token + lưu Redis (ĐÚNG như auth.service.ts) =====
+          const jti = randomUUID();
+          const refreshExpiresIn: SignOptions["expiresIn"] = (process.env
+            .JWT_REFRESH_EXPIRES_IN ?? "1d") as SignOptions["expiresIn"];
+
+          const refreshTokenValue = jwt.sign(
+            { userId, email: user.email, role: user.role, jti },
+            getRefreshSecret(),
+            { expiresIn: refreshExpiresIn },
+          );
+
+          const redis = getRedis();
+          const redisKey = `refresh:${userId}:${jti}`;
+          await redis.set(redisKey, "1", "EX", getRefreshTtlSeconds());
+          console.log("[Google Strategy] Refresh token saved to Redis:", redisKey);
 
           return done(null, {
             user,
             token,
+            refreshToken: refreshTokenValue,
             googleAccessToken: accessToken,
-            googleRefreshToken: refreshToken,
           });
         } catch (error) {
+          console.error("[Google Strategy] Error:", error);
           return done(error as Error, false);
         }
       },
     ),
   );
 
-  // Serialize/deserialize user for session (not used with JWT but required by passport)
   passport.serializeUser(
     (user: any, done: (err: Error | null, user?: any) => void) => {
       done(null, user);

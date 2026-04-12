@@ -23,21 +23,31 @@ export const authMiddleware = (
   try {
     // Prioritize httpOnly cookie over header (for fresh Google auth)
     let token: string | undefined;
+    let tokenSource = "none";
 
     if (req.cookies?.token) {
       token = req.cookies.token;
+      tokenSource = "cookie";
     } else if (req.headers.authorization?.startsWith("Bearer ")) {
       token = req.headers.authorization.slice("Bearer ".length).trim();
+      tokenSource = "header";
     }
 
     if (!token) {
+      console.log("[AuthMiddleware] No token found. Cookies:", Object.keys(req.cookies || {}));
       res.status(401).json({ message: "Thiếu token" });
       return;
     }
-    const decoded = jwt.verify(token, getSecret()) as JwtPayload | AuthPayload;
 
+    const decoded = jwt.verify(token, getSecret()) as JwtPayload | AuthPayload;
     const payload = decoded as AuthPayload;
+
     if (!payload.userId || !payload.email || !payload.role) {
+      console.log("[AuthMiddleware] Invalid payload from", tokenSource, "- fields:", {
+        userId: !!payload.userId,
+        email: !!payload.email,
+        role: !!payload.role,
+      });
       res.status(401).json({ message: "Token không hợp lệ" });
       return;
     }
@@ -49,7 +59,9 @@ export const authMiddleware = (
     };
 
     next();
-  } catch (_err) {
+  } catch (err: any) {
+    console.log("[AuthMiddleware] Token verify error:", err.message);
     res.status(401).json({ message: "Token không hợp lệ" });
   }
 };
+

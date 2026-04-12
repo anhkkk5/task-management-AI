@@ -84,11 +84,11 @@ authRouter.get(
     );
 
     if (user?.token) {
-      // Clear old cookie first to prevent mixing sessions
+      // Clear old cookies first to prevent mixing sessions
       res.clearCookie("token", { path: "/" });
       res.clearCookie("refreshToken", { path: "/auth" });
 
-      // Set httpOnly cookie for security (XSS protection)
+      // Set httpOnly cookie for access token
       res.cookie("token", user.token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
@@ -96,8 +96,20 @@ authRouter.get(
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: "/",
       });
+
+      // Set httpOnly cookie for refresh token (same as normal login)
+      if (user.refreshToken) {
+        res.cookie("refreshToken", user.refreshToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 7 * 24 * 60 * 60 * 1000,
+          path: "/auth",
+        });
+      }
+
       console.log(
-        "[Google Callback] Cookie set, redirecting to:",
+        "[Google Callback] Cookies set, redirecting to:",
         `${process.env.FRONTEND_URL || "http://localhost:5173"}/auth/google/callback`,
       );
       // Redirect without token in URL
