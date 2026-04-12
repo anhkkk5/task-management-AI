@@ -199,6 +199,19 @@ export const login = async (_req: Request, res: Response): Promise<void> => {
       ),
     });
 
+    // Clear old cookies first to prevent mixing sessions
+    res.clearCookie("token", { path: "/" });
+    res.clearCookie("refreshToken", { path: "/auth" });
+
+    // Set httpOnly cookie for access token (same as Google OAuth)
+    res.cookie("token", result.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      path: "/",
+    });
+
     setRefreshCookie(res, result.refreshToken, cookieInput());
 
     res

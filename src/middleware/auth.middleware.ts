@@ -34,7 +34,10 @@ export const authMiddleware = (
     }
 
     if (!token) {
-      console.log("[AuthMiddleware] No token found. Cookies:", Object.keys(req.cookies || {}));
+      console.log(
+        "[AuthMiddleware] No token found. Cookies:",
+        Object.keys(req.cookies || {}),
+      );
       res.status(401).json({ message: "Thiếu token" });
       return;
     }
@@ -43,11 +46,16 @@ export const authMiddleware = (
     const payload = decoded as AuthPayload;
 
     if (!payload.userId || !payload.email || !payload.role) {
-      console.log("[AuthMiddleware] Invalid payload from", tokenSource, "- fields:", {
-        userId: !!payload.userId,
-        email: !!payload.email,
-        role: !!payload.role,
-      });
+      console.log(
+        "[AuthMiddleware] Invalid payload from",
+        tokenSource,
+        "- fields:",
+        {
+          userId: !!payload.userId,
+          email: !!payload.email,
+          role: !!payload.role,
+        },
+      );
       res.status(401).json({ message: "Token không hợp lệ" });
       return;
     }
@@ -61,7 +69,10 @@ export const authMiddleware = (
     next();
   } catch (err: any) {
     console.log("[AuthMiddleware] Token verify error:", err.message);
+    // Clear expired/invalid token cookie
+    if (err.message === "jwt expired" || err.message === "invalid token") {
+      res.clearCookie("token", { path: "/" });
+    }
     res.status(401).json({ message: "Token không hợp lệ" });
   }
 };
-
