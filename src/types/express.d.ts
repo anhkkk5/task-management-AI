@@ -6,6 +6,7 @@ declare module "express-serve-static-core" {
       userId: string;
       email: string;
       role: string;
+      googleAccessToken?: string;
     };
   }
 }

@@ -76,6 +76,52 @@ exports.userService = {
         }
         return pub;
     },
+    getNotificationSettings: async (userId) => {
+        const user = await user_repository_1.userRepository.findById(userId);
+        if (!user) {
+            throw new Error("USER_NOT_FOUND");
+        }
+        const raw = user.settings?.notifications?.reminderMinutes;
+        const n = typeof raw === "number" ? raw : Number(raw);
+        const reminderMinutes = Number.isFinite(n) ? Math.floor(n) : 5;
+        return {
+            reminderMinutes: reminderMinutes < 0
+                ? 0
+                : reminderMinutes > 24 * 60
+                    ? 24 * 60
+                    : reminderMinutes,
+        };
+    },
+    updateNotificationSettings: async (userId, dto) => {
+        const user = await user_repository_1.userRepository.findById(userId);
+        if (!user) {
+            throw new Error("USER_NOT_FOUND");
+        }
+        const raw = dto.reminderMinutes;
+        const n = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isFinite(n)) {
+            throw new Error("INVALID_REMINDER_MINUTES");
+        }
+        const reminderMinutes = Math.min(24 * 60, Math.max(0, Math.floor(n)));
+        const existingSettings = (user.settings || {});
+        const existingNotifications = existingSettings.notifications ||
+            {};
+        const nextSettings = {
+            ...existingSettings,
+            notifications: {
+                ...existingNotifications,
+                reminderMinutes,
+            },
+        };
+        const updated = await user_repository_1.userRepository.updateProfile(userId, {
+            settings: nextSettings,
+        });
+        if (!updated) {
+            throw new Error("USER_NOT_FOUND");
+        }
+        await invalidateUserProfileCache(userId);
+        return { reminderMinutes };
+    },
     updateProfile: async (userId, dto) => {
         const name = dto.name?.trim();
         const bio = dto.bio?.trim();

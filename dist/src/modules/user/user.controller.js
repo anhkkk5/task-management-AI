@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getById = exports.changePassword = exports.uploadAvatar = exports.updateProfile = exports.sendChangePasswordOtp = exports.me = void 0;
+exports.updateNotificationSettings = exports.getNotificationSettings = exports.getById = exports.changePassword = exports.uploadAvatar = exports.updateProfile = exports.sendChangePasswordOtp = exports.me = void 0;
 const user_service_1 = require("./user.service");
 const cloudinary_service_1 = require("../../services/cloudinary.service");
 const refresh_cookie_1 = require("../../common/cookies/refresh-cookie");
@@ -166,3 +166,49 @@ const getById = async (_req, res) => {
     res.status(501).json({ message: "Not implemented" });
 };
 exports.getById = getById;
+const getNotificationSettings = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const settings = await user_service_1.userService.getNotificationSettings(userId);
+        res.status(200).json({ settings });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "USER_NOT_FOUND") {
+            res.status(404).json({ message: "Không tìm thấy người dùng" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi hệ thống" });
+    }
+};
+exports.getNotificationSettings = getNotificationSettings;
+const updateNotificationSettings = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const settings = await user_service_1.userService.updateNotificationSettings(userId, {
+            reminderMinutes: _req.body?.reminderMinutes,
+        });
+        res.status(200).json({ settings });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "INVALID_REMINDER_MINUTES") {
+            res.status(400).json({ message: "Số phút nhắc trước không hợp lệ" });
+            return;
+        }
+        if (message === "USER_NOT_FOUND") {
+            res.status(404).json({ message: "Không tìm thấy người dùng" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi hệ thống" });
+    }
+};
+exports.updateNotificationSettings = updateNotificationSettings;

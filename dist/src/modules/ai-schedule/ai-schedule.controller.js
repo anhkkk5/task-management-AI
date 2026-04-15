@@ -20,6 +20,33 @@ class AIScheduleController {
             });
         }
     }
+    async deleteSession(req, res) {
+        try {
+            const userId = req.user?.userId;
+            const scheduleId = req.params.scheduleId;
+            const sessionId = req.params.sessionId;
+            if (!userId) {
+                res.status(401).json({ message: "Unauthorized" });
+                return;
+            }
+            if (!sessionId) {
+                res.status(400).json({ message: "sessionId is required" });
+                return;
+            }
+            const updated = await ai_schedule_service_1.aiScheduleService.deleteSession(scheduleId, userId, sessionId);
+            if (!updated) {
+                res.status(404).json({ message: "Schedule or session not found" });
+                return;
+            }
+            res.json({ success: true, data: updated });
+        }
+        catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message || "Failed to delete session",
+            });
+        }
+    }
     async getActiveSchedule(req, res) {
         try {
             const userId = req.user?.userId;

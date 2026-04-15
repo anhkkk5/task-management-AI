@@ -16,6 +16,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SlotFinder = exports.slotFinder = exports.IntervalScheduler = exports.intervalScheduler = exports.ProductivityScorer = exports.productivityScorer = void 0;
 __exportStar(require("./types"), exports);
+__exportStar(require("./scheduler.utils"), exports);
 var productivity_service_1 = require("./productivity.service");
 Object.defineProperty(exports, "productivityScorer", { enumerable: true, get: function () { return productivity_service_1.productivityScorer; } });
 Object.defineProperty(exports, "ProductivityScorer", { enumerable: true, get: function () { return productivity_service_1.ProductivityScorer; } });

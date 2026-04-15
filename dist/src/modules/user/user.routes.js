@@ -7,6 +7,8 @@ const auth_middleware_1 = require("../../middleware/auth.middleware");
 const upload_middleware_1 = require("../../middleware/upload.middleware");
 const userRouter = (0, express_1.Router)();
 userRouter.get("/me", auth_middleware_1.authMiddleware, user_controller_1.me);
+userRouter.get("/notification-settings", auth_middleware_1.authMiddleware, user_controller_1.getNotificationSettings);
+userRouter.patch("/notification-settings", auth_middleware_1.authMiddleware, user_controller_1.updateNotificationSettings);
 userRouter.patch("/update-profile", auth_middleware_1.authMiddleware, user_controller_1.updateProfile);
 userRouter.patch("/upload-avatar", auth_middleware_1.authMiddleware, upload_middleware_1.upload.single("avatar"), user_controller_1.uploadAvatar);
 userRouter.patch("/change-password", auth_middleware_1.authMiddleware, user_controller_1.changePassword);

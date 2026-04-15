@@ -51,6 +51,7 @@ const signAccessToken = (payload: {
   userId: string;
   email: string;
   role: UserRole;
+  googleAccessToken?: string;
 }): string => {
   const rawSecret = process.env.JWT_ACCESS_SECRET ?? process.env.JWT_SECRET;
   if (!rawSecret) {
@@ -648,5 +649,15 @@ export const authService = {
     await otpService.deleteChangePasswordOtp(normalizedEmail);
 
     return { message: "Đặt lại mật khẩu thành công" };
+  },
+
+  // ✅ NEW: Public method to generate access token (for Google OAuth callback)
+  generateAccessToken: (payload: {
+    userId: string;
+    email: string;
+    role: UserRole;
+    googleAccessToken?: string;
+  }): string => {
+    return signAccessToken(payload);
   },
 };

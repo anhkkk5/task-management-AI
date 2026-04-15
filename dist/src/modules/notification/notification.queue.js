@@ -35,6 +35,17 @@ exports.notificationQueueService = {
             },
         });
     },
+    // Add invite email job (no notificationId required)
+    addInviteEmail: async (data) => {
+        return exports.notificationQueue.add("send-invite-email", data, {
+            priority: 3,
+            attempts: 5,
+            backoff: {
+                type: "exponential",
+                delay: 5000,
+            },
+        });
+    },
     // Get queue status
     getStatus: async () => {
         const [waiting, active, completed, failed] = await Promise.all([

@@ -446,4 +446,8 @@ exports.authService = {
         await otp_service_1.otpService.deleteChangePasswordOtp(normalizedEmail);
         return { message: "Đặt lại mật khẩu thành công" };
     },
+    // ✅ NEW: Public method to generate access token (for Google OAuth callback)
+    generateAccessToken: (payload) => {
+        return signAccessToken(payload);
+    },
 };

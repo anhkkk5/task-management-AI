@@ -1,7 +1,6 @@
 // Google Auth Controller
 import { Request, Response } from "express";
 import axios from "axios";
-import { verifyJWT, JWTPayload } from "../../utils/jwt";
 
 // Types for Google API responses
 interface GoogleUserInfo {
@@ -28,16 +27,10 @@ export const getGoogleUserInfo = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ message: "Thiếu token" });
-      return;
-    }
+    // ✅ FIX: Use req.user from middleware instead of parsing token again
+    const googleAccessToken = req.user?.googleAccessToken;
 
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = verifyJWT(token);
-
-    if (!payload?.googleAccessToken) {
+    if (!googleAccessToken) {
       res.status(401).json({ message: "Chưa đăng nhập Google" });
       return;
     }
@@ -46,7 +39,7 @@ export const getGoogleUserInfo = async (
       "https://www.googleapis.com/oauth2/v2/userinfo",
       {
         headers: {
-          Authorization: `Bearer ${payload.googleAccessToken}`,
+          Authorization: `Bearer ${googleAccessToken}`,
         },
       },
     );
@@ -68,17 +61,11 @@ export const searchContacts = async (
 ): Promise<void> => {
   try {
     const { query } = req.query;
-    const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ message: "Thiếu token" });
-      return;
-    }
+    // ✅ FIX: Use req.user from middleware instead of parsing token again
+    const googleAccessToken = req.user?.googleAccessToken;
 
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = verifyJWT(token);
-
-    if (!payload?.googleAccessToken) {
+    if (!googleAccessToken) {
       res.status(401).json({ message: "Chưa đăng nhập Google" });
       return;
     }
@@ -92,7 +79,7 @@ export const searchContacts = async (
           pageSize: 10,
         },
         headers: {
-          Authorization: `Bearer ${payload.googleAccessToken}`,
+          Authorization: `Bearer ${googleAccessToken}`,
         },
       },
     );
@@ -122,17 +109,11 @@ export const getContactByEmail = async (
 ): Promise<void> => {
   try {
     const { email } = req.params;
-    const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ message: "Thiếu token" });
-      return;
-    }
+    // ✅ FIX: Use req.user from middleware instead of parsing token again
+    const googleAccessToken = req.user?.googleAccessToken;
 
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = verifyJWT(token);
-
-    if (!payload?.googleAccessToken) {
+    if (!googleAccessToken) {
       res.status(401).json({ message: "Chưa đăng nhập Google" });
       return;
     }
@@ -147,7 +128,7 @@ export const getContactByEmail = async (
             pageSize: 10,
           },
           headers: {
-            Authorization: `Bearer ${payload.googleAccessToken}`,
+            Authorization: `Bearer ${googleAccessToken}`,
           },
         },
       );
@@ -195,17 +176,19 @@ export const createMeetLink = async (
 ): Promise<void> => {
   try {
     const { title, description, startTime, endTime, guests } = req.body;
-    const authHeader = req.headers.authorization;
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ message: "Thiếu token" });
-      return;
-    }
+    // ✅ FIX: Use req.user from middleware instead of parsing token again
+    const googleAccessToken = req.user?.googleAccessToken;
 
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = verifyJWT(token);
+    console.log("[createMeetLink] DEBUG:", {
+      hasUser: !!req.user,
+      userId: req.user?.userId,
+      email: req.user?.email,
+      hasGoogleAccessToken: !!googleAccessToken,
+      googleAccessTokenLength: googleAccessToken?.length,
+    });
 
-    if (!payload?.googleAccessToken) {
+    if (!googleAccessToken) {
       res.status(401).json({ message: "Chưa đăng nhập Google" });
       return;
     }
@@ -237,7 +220,7 @@ export const createMeetLink = async (
       event,
       {
         headers: {
-          Authorization: `Bearer ${payload.googleAccessToken}`,
+          Authorization: `Bearer ${googleAccessToken}`,
           "Content-Type": "application/json",
         },
       },
@@ -267,27 +250,19 @@ export const getGoogleStatus = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      res.status(401).json({ message: "Thiếu token" });
-      return;
-    }
+    // ✅ FIX: Use req.user from middleware
+    const user = req.user;
 
-    const token = authHeader.slice("Bearer ".length).trim();
-    const payload = verifyJWT(token);
-
-    if (!payload) {
+    if (!user) {
       res.status(401).json({ message: "Token không hợp lệ" });
       return;
     }
 
     res.json({
-      connected: !!payload.googleAccessToken,
+      connected: !!user.googleAccessToken,
       user: {
-        userId: payload.userId,
-        email: payload.email,
-        name: payload.name,
-        picture: payload.picture,
+        userId: user.userId,
+        email: user.email,
       },
     });
   } catch (error: any) {

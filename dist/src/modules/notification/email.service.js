@@ -9,7 +9,14 @@ const SMTP_HOST = process.env.SMTP_HOST || "smtp.gmail.com";
 const SMTP_PORT = parseInt(process.env.SMTP_PORT || "587");
 const SMTP_USER = process.env.SMTP_USER || "";
 const SMTP_PASS = process.env.SMTP_PASS || "";
-const SMTP_FROM = process.env.SMTP_FROM || "noreply@taskmanagement.com";
+const SMTP_FROM = process.env.SMTP_FROM ||
+    process.env.EMAIL_FROM ||
+    "noreply@taskmanagement.com";
+// Log SMTP config on startup (hide password)
+console.log(`[EmailService] SMTP Config: host=${SMTP_HOST}, port=${SMTP_PORT}, user=${SMTP_USER}, from=${SMTP_FROM}`);
+if (!SMTP_USER || !SMTP_PASS) {
+    console.warn("[EmailService] WARNING: SMTP_USER or SMTP_PASS not set!");
+}
 // Create reusable transporter
 const transporter = nodemailer_1.default.createTransport({
     host: SMTP_HOST,

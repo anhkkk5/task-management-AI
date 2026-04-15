@@ -14,7 +14,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.versionedKey = exports.CACHE_VERSION = void 0;
 exports.CACHE_VERSION = {
     // Scheduler cache version
-    SCHEDULER: "v3", // Tăng lên v3 sau khi thêm adaptive buffer
+    SCHEDULER: "v6", // Tăng lên v6 sau khi fix break boundary và thêm clear scheduledTime
     // AI cache version
     AI: "v2", // Tăng lên v2 sau khi chuyển sang hybrid algorithm
     // Slot finder cache version
@@ -31,6 +31,11 @@ const versionedKey = (version, key) => {
 exports.versionedKey = versionedKey;
 /**
  * Changelog:
+ *
+ * v4 (2026-03-08 - Fix Conflict Detection):
+ * - Fix getScheduledTasks query: sử dụng overlap condition thay vì range filter
+ * - Thêm excludeTaskIds để loại trừ tasks đang được schedule
+ * - Fix bug: tasks bị trùng giờ khi re-schedule
  *
  * v3 (2026-03-07 - Adaptive Buffer):
  * - Thêm adaptive buffer: session < 40 phút → buffer 10 phút

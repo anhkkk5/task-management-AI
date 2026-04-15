@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.aiBreakdownTask = void 0;
+exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.aiBreakdownTask = void 0;
 const task_service_1 = require("./task.service");
 const ai_schedule_service_1 = require("../ai-schedule/ai-schedule.service");
 const search_helper_1 = __importDefault(require("../../common/utils/search-helper"));
@@ -87,6 +87,43 @@ const parsePositiveInt = (value, defaultValue) => {
         return defaultValue;
     return x;
 };
+const parseType = (value) => {
+    if (value === undefined || value === null)
+        return undefined;
+    const v = String(value);
+    if (v === "event" || v === "todo" || v === "appointment")
+        return v;
+    return undefined;
+};
+const parseVisibility = (value) => {
+    if (value === undefined || value === null)
+        return undefined;
+    const v = String(value);
+    if (v === "default" || v === "public" || v === "private")
+        return v;
+    return undefined;
+};
+const parseGuests = (value) => {
+    if (value === undefined || value === null)
+        return undefined;
+    if (!Array.isArray(value))
+        return undefined;
+    const emails = value
+        .map((x) => String(x).trim().toLowerCase())
+        .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+    return emails.length > 0 ? [...new Set(emails)] : [];
+};
+const parseReminderMinutes = (value) => {
+    if (value === undefined || value === null)
+        return undefined;
+    const n = Number(value);
+    if (!Number.isFinite(n))
+        return undefined;
+    const x = Math.floor(n);
+    if (x < 0)
+        return undefined;
+    return x;
+};
 const parseScheduledTime = (value) => {
     if (value === undefined || value === null)
         return undefined;
@@ -141,10 +178,12 @@ const createTask = async (_req, res) => {
             res.status(400).json({ message: "ReminderAt không hợp lệ" });
             return;
         }
-        const scheduledTime = _req.body?.scheduledTime !== undefined
+        const scheduledTime = _req.body?.scheduledTime !== undefined && _req.body.scheduledTime !== null
             ? parseScheduledTime(_req.body.scheduledTime)
             : undefined;
-        if (_req.body?.scheduledTime !== undefined && scheduledTime === undefined) {
+        if (_req.body?.scheduledTime !== undefined &&
+            _req.body.scheduledTime !== null &&
+            scheduledTime === undefined) {
             res.status(400).json({ message: "ScheduledTime không hợp lệ" });
             return;
         }
@@ -183,6 +222,20 @@ const createTask = async (_req, res) => {
         const tags = Array.isArray(_req.body?.tags)
             ? _req.body.tags.map((x) => String(x))
             : undefined;
+        const type = parseType(_req.body?.type);
+        const allDay = _req.body?.allDay !== undefined ? Boolean(_req.body.allDay) : undefined;
+        const guests = parseGuests(_req.body?.guests);
+        const location = _req.body?.location !== undefined
+            ? String(_req.body.location)
+            : undefined;
+        const visibility = parseVisibility(_req.body?.visibility);
+        const reminderMinutes = parseReminderMinutes(_req.body?.reminderMinutes);
+        const recurrence = _req.body?.recurrence !== undefined
+            ? String(_req.body.recurrence)
+            : undefined;
+        const meetingLink = _req.body?.meetingLink !== undefined
+            ? String(_req.body.meetingLink)
+            : undefined;
         const task = await task_service_1.taskService.create(userId, {
             title: String(_req.body?.title ?? ""),
             description: _req.body?.description !== undefined
@@ -192,6 +245,14 @@ const createTask = async (_req, res) => {
             priority: parsePriority(_req.body?.priority),
             tags,
             reminderAt,
+            type,
+            allDay,
+            guests,
+            location,
+            visibility,
+            reminderMinutes,
+            recurrence,
+            meetingLink,
             estimatedDuration,
             dailyTargetDuration,
             dailyTargetMin,
@@ -330,10 +391,15 @@ const updateTask = async (_req, res) => {
             res.status(400).json({ message: "Tags không hợp lệ" });
             return;
         }
-        const scheduledTime = _req.body?.scheduledTime !== undefined
-            ? parseScheduledTime(_req.body.scheduledTime)
-            : undefined;
-        if (_req.body?.scheduledTime !== undefined && scheduledTime === undefined) {
+        const scheduledTimeRaw = _req.body?.scheduledTime;
+        const scheduledTime = _req.body?.scheduledTime !== undefined && scheduledTimeRaw !== null
+            ? parseScheduledTime(scheduledTimeRaw)
+            : scheduledTimeRaw === null
+                ? null
+                : undefined;
+        if (_req.body?.scheduledTime !== undefined &&
+            scheduledTimeRaw !== null &&
+            scheduledTime === undefined) {
             res.status(400).json({ message: "ScheduledTime không hợp lệ" });
             return;
         }
@@ -406,6 +472,20 @@ const updateTask = async (_req, res) => {
                 });
             }
         }
+        const typeUpdate = parseType(_req.body?.type);
+        const allDayUpdate = _req.body?.allDay !== undefined ? Boolean(_req.body.allDay) : undefined;
+        const guestsUpdate = parseGuests(_req.body?.guests);
+        const locationUpdate = _req.body?.location !== undefined
+            ? String(_req.body.location)
+            : undefined;
+        const visibilityUpdate = parseVisibility(_req.body?.visibility);
+        const reminderMinutesUpdate = parseReminderMinutes(_req.body?.reminderMinutes);
+        const recurrenceUpdate = _req.body?.recurrence !== undefined
+            ? String(_req.body.recurrence)
+            : undefined;
+        const meetingLinkUpdate = _req.body?.meetingLink !== undefined
+            ? String(_req.body.meetingLink)
+            : undefined;
         const task = await task_service_1.taskService.update(userId, String(_req.params.id), {
             title: _req.body?.title !== undefined ? String(_req.body.title) : undefined,
             description: _req.body?.description !== undefined
@@ -416,14 +496,24 @@ const updateTask = async (_req, res) => {
             deadline,
             tags,
             reminderAt,
-            scheduledTime: scheduledTime
-                ? {
-                    start: scheduledTime.start,
-                    end: scheduledTime.end,
-                    aiPlanned: scheduledTime.aiPlanned ?? false,
-                    reason: scheduledTime.reason,
-                }
-                : undefined,
+            type: typeUpdate,
+            allDay: allDayUpdate,
+            guests: guestsUpdate,
+            location: locationUpdate,
+            visibility: visibilityUpdate,
+            reminderMinutes: reminderMinutesUpdate,
+            recurrence: recurrenceUpdate,
+            meetingLink: meetingLinkUpdate,
+            scheduledTime: scheduledTime === null
+                ? null
+                : scheduledTime
+                    ? {
+                        start: scheduledTime.start,
+                        end: scheduledTime.end,
+                        aiPlanned: scheduledTime.aiPlanned ?? false,
+                        reason: scheduledTime.reason,
+                    }
+                    : undefined,
             estimatedDuration,
             dailyTargetDuration,
             dailyTargetMin,
@@ -540,6 +630,7 @@ const saveAISchedule = async (_req, res) => {
                 : [],
             note: dayItem?.note ? String(dayItem.note) : undefined,
         }));
+        // 1. Save to AISchedule collection (for history)
         const result = await ai_schedule_service_1.aiScheduleService.createSchedule(userId, {
             name: "AI Schedule Plan",
             description: personalizationNote,
@@ -551,6 +642,42 @@ const saveAISchedule = async (_req, res) => {
             confidenceScore,
             sourceTasks: Array.isArray(sourceTasks) ? sourceTasks : [],
         });
+        // 2. Update tasks with scheduled time and status ⭐ IMPORTANT
+        const tasksToUpdate = [];
+        for (const dayItem of transformedSchedule) {
+            for (const task of dayItem.tasks) {
+                // Parse suggestedTime (e.g., "08:00 - 09:00")
+                const timeMatch = task.suggestedTime.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+                if (!timeMatch)
+                    continue;
+                const [, startHour, startMinute, endHour, endMinute] = timeMatch;
+                // Parse date (e.g., "2026-03-08")
+                const dateMatch = dayItem.date.match(/(\d{4})-(\d{2})-(\d{2})/);
+                if (!dateMatch)
+                    continue;
+                const [, year, month, day] = dateMatch;
+                // Create Date objects (local time)
+                // NOTE: Using Date.UTC here will shift the time when displayed/used in local timezone,
+                // causing reminders to trigger at the wrong time unless user manually edits the event.
+                const startDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(startHour), parseInt(startMinute));
+                const endDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(endHour), parseInt(endMinute));
+                tasksToUpdate.push({
+                    sessionId: task.sessionId,
+                    taskId: task.taskId,
+                    title: task.title,
+                    createSubtask: task.createSubtask,
+                    scheduledTime: {
+                        start: startDate,
+                        end: endDate,
+                        aiPlanned: true,
+                        reason: task.reason,
+                    },
+                });
+            }
+        }
+        // Update tasks in database
+        const updateResult = await task_service_1.taskService.saveAISchedule(userId, tasksToUpdate);
+        console.log(`[Save Schedule] Updated ${updateResult.updated} tasks, created ${updateResult.created} subtasks`);
         const totalSessions = transformedSchedule.reduce((sum, day) => sum + (day.tasks?.length || 0), 0);
         res.status(200).json({
             message: `Đã lưu lịch trình với ${totalSessions} phiên làm việc`,
@@ -569,3 +696,62 @@ const saveAISchedule = async (_req, res) => {
     }
 };
 exports.saveAISchedule = saveAISchedule;
+/**
+ * Clear scheduled time from specific tasks
+ * DELETE /tasks/schedule/clear
+ */
+const clearScheduledTime = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const { taskIds } = _req.body;
+        if (!Array.isArray(taskIds)) {
+            res.status(400).json({ message: "taskIds phải là một mảng" });
+            return;
+        }
+        const result = await task_service_1.taskService.clearScheduledTime(userId, taskIds);
+        res.status(200).json({
+            message: `Đã xóa lịch trình của ${result.updated} tasks`,
+            updated: result.updated,
+        });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "USER_ID_INVALID") {
+            res.status(400).json({ message: "User ID không hợp lệ" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi hệ thống", error: message });
+    }
+};
+exports.clearScheduledTime = clearScheduledTime;
+/**
+ * Clear all scheduled times for user (emergency cleanup)
+ * DELETE /tasks/schedule/clear-all
+ */
+const clearAllScheduledTimes = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const result = await task_service_1.taskService.clearAllScheduledTimes(userId);
+        res.status(200).json({
+            message: `Đã xóa tất cả lịch trình (${result.updated} tasks)`,
+            updated: result.updated,
+        });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "USER_ID_INVALID") {
+            res.status(400).json({ message: "User ID không hợp lệ" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi hệ thống", error: message });
+    }
+};
+exports.clearAllScheduledTimes = clearAllScheduledTimes;

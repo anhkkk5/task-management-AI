@@ -5,6 +5,13 @@ const scheduler_service_1 = require("./scheduler.service");
 const cache_service_1 = require("./cache.service");
 const cache_version_1 = require("../../config/cache-version");
 const adaptive_buffer_1 = require("./adaptive-buffer");
+// Helper function for local date string
+function toLocalDateStr(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+}
 class SlotFinder {
     /**
      * Tìm free slots có caching
@@ -25,7 +32,7 @@ class SlotFinder {
      * O(n log n) vì cần merge intervals trước
      */
     findFreeSlots(input) {
-        const { busySlots, date, minDuration, workHours, bufferMinutes = 15, } = input;
+        const { busySlots, date, minDuration, workHours, bufferMinutes = 15, currentTime, } = input;
         // Thêm breaks vào busy slots
         const allBusySlots = [...busySlots];
         if (workHours.breaks) {
@@ -44,6 +51,24 @@ class SlotFinder {
                     taskId: "BREAK",
                 });
             });
+        }
+        // ⭐ NEW: Nếu là hôm nay, thêm busy slot cho thời gian đã qua
+        if (currentTime) {
+            const dateStr = toLocalDateStr(date);
+            const currentDateStr = toLocalDateStr(currentTime);
+            if (dateStr === currentDateStr) {
+                // Thêm buffer 30 phút để tránh schedule quá gần
+                const minStartTime = new Date(currentTime.getTime() + 30 * 60 * 1000);
+                const dayStart = new Date(date);
+                dayStart.setHours(workHours.start, 0, 0, 0);
+                if (minStartTime > dayStart) {
+                    allBusySlots.push({
+                        start: dayStart,
+                        end: minStartTime,
+                        taskId: "PAST_TIME",
+                    });
+                }
+            }
         }
         // Merge busy slots để có danh sách gọn gàng
         const mergedBusy = scheduler_service_1.intervalScheduler.mergeIntervals(allBusySlots);
@@ -129,9 +154,9 @@ class SlotFinder {
             end: 23,
             breaks: [
                 { start: 11.5, end: 14 },
-                { start: 17.5, end: 19.5 },
+                { start: 17.5, end: 19 },
             ],
-        }, bufferMinutes = 15, } = input;
+        }, bufferMinutes = 15, currentTime, } = input;
         // Tìm tất cả slots đủ dài
         const freeSlots = this.findFreeSlots({
             busySlots,
@@ -139,6 +164,7 @@ class SlotFinder {
             minDuration: taskDuration,
             workHours,
             bufferMinutes,
+            currentTime, // ⭐ Pass currentTime to findFreeSlots
         });
         if (freeSlots.length === 0) {
             return null;

@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resetPassword = exports.verifyForgotPasswordOtp = exports.forgotPassword = exports.uploadAvatar = exports.updateProfile = exports.me = exports.refreshToken = exports.login = exports.verifyOtp = exports.resendOtp = exports.sendOtp = exports.logoutAll = exports.logout = exports.register = void 0;
 const auth_service_1 = require("./auth.service");
-const auth_repository_1 = require("./auth.repository");
+const auth_model_1 = require("./auth.model");
 const auth_error_handler_1 = require("../../common/errors/auth.error-handler");
 const refresh_cookie_1 = require("../../common/cookies/refresh-cookie");
 const extract_refresh_token_1 = require("../../common/utils/extract-refresh-token");
@@ -107,6 +107,8 @@ const logout = async (_req, res) => {
         const token = (0, extract_refresh_token_1.extractRefreshToken)(_req);
         await auth_service_1.authService.logout({ refreshToken: token });
         (0, refresh_cookie_1.clearRefreshCookie)(res);
+        // Clear token cookie (Google OAuth)
+        res.clearCookie("token", { path: "/" });
         res.status(200).json({ message: "Đăng xuất thành công" });
     }
     catch (err) {
@@ -125,6 +127,7 @@ const logoutAll = async (_req, res) => {
         res.clearCookie("refreshToken", {
             path: "/auth",
         });
+        res.clearCookie("token", { path: "/" });
         res.status(200).json({ message: "Đăng xuất tất cả thiết bị thành công" });
     }
     catch (_err) {
@@ -172,6 +175,17 @@ const login = async (_req, res) => {
                 _req.ip ??
                 ""),
         });
+        // Clear old cookies first to prevent mixing sessions
+        res.clearCookie("token", { path: "/" });
+        res.clearCookie("refreshToken", { path: "/auth" });
+        // Set httpOnly cookie for access token (same as Google OAuth)
+        res.cookie("token", result.accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+            path: "/",
+        });
         (0, refresh_cookie_1.setRefreshCookie)(res, result.refreshToken, cookieInput());
         res
             .status(200)
@@ -201,20 +215,39 @@ const me = async (_req, res) => {
             res.status(401).json({ message: "Chưa đăng nhập" });
             return;
         }
-        const user = await auth_repository_1.authRepository.findById(userId);
+        // Lấy user với googleAccessToken
+        const user = await auth_model_1.User.findById(userId)
+            .select("+googleAccessToken")
+            .exec();
         if (!user) {
             res.status(404).json({ message: "Không tìm thấy người dùng" });
             return;
         }
-        res.status(200).json({
-            id: String(user._id),
+        console.log("[me endpoint] DEBUG:", {
+            userId: String(user._id),
             email: user.email,
-            name: user.name,
+            hasGoogleAccessToken: !!user.googleAccessToken,
+            googleAccessTokenLength: user.googleAccessToken?.length,
+        });
+        // ✅ FIX: Generate new accessToken với googleAccessToken từ database
+        const accessToken = auth_service_1.authService.generateAccessToken({
+            userId: String(user._id),
+            email: user.email,
             role: user.role,
-            avatar: user.avatar,
-            isVerified: user.isVerified,
-            createdAt: user.createdAt,
-            updatedAt: user.updatedAt,
+            googleAccessToken: user.googleAccessToken,
+        });
+        res.status(200).json({
+            accessToken, // ✅ NEW: Return accessToken so frontend can set it in memory
+            user: {
+                id: String(user._id),
+                email: user.email,
+                name: user.name,
+                role: user.role,
+                avatar: user.avatar,
+                isVerified: user.isVerified,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt,
+            },
         });
     }
     catch (_err) {

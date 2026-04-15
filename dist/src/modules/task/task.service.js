@@ -6,6 +6,10 @@ const task_repository_1 = require("./task.repository");
 const redis_service_1 = require("../../services/redis.service");
 const ai_service_1 = require("../ai/ai.service");
 const user_habit_repository_1 = require("../user/user-habit.repository");
+const notification_repository_1 = require("../notification/notification.repository");
+const notification_model_1 = require("../notification/notification.model");
+const notification_queue_1 = require("../notification/notification.queue");
+const user_repository_1 = require("../user/user.repository");
 const toPublicTask = (t) => {
     return {
         id: String(t._id),
@@ -15,6 +19,14 @@ const toPublicTask = (t) => {
         priority: t.priority,
         deadline: t.deadline,
         tags: t.tags ?? [],
+        type: t.type,
+        allDay: t.allDay,
+        guests: t.guests ?? [],
+        location: t.location,
+        visibility: t.visibility ?? "default",
+        reminderMinutes: t.reminderMinutes,
+        recurrence: t.recurrence,
+        meetingLink: t.meetingLink,
         userId: String(t.userId),
         parentTaskId: t.parentTaskId ? String(t.parentTaskId) : undefined,
         aiBreakdown: (t.aiBreakdown ?? []).map((x) => ({
@@ -29,6 +41,89 @@ const toPublicTask = (t) => {
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
     };
+};
+// Generate invite email HTML template
+const generateInviteEmailHtml = (params) => {
+    const timeStr = params.startTime
+        ? `${params.startTime.toLocaleString("vi-VN")}${params.endTime ? ` - ${params.endTime.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}` : ""}`
+        : "Không có thời gian cụ thể";
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lời mời tham gia: ${params.taskTitle}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+    .container { background: #f9f9f9; border-radius: 8px; padding: 30px; }
+    .header { border-bottom: 2px solid #4CAF50; padding-bottom: 15px; margin-bottom: 20px; }
+    .title { font-size: 24px; font-weight: bold; color: #333; margin: 0; }
+    .content { font-size: 16px; color: #555; margin: 20px 0; }
+    .detail { background: #fff; border-radius: 4px; padding: 15px; margin: 15px 0; }
+    .detail-item { margin: 8px 0; }
+    .detail-label { font-weight: bold; color: #666; }
+    .button { display: inline-block; background: #4CAF50; color: white; text-decoration: none; padding: 12px 24px; border-radius: 4px; margin-top: 20px; }
+    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1 class="title">Bạn được mời tham gia: ${params.taskTitle}</h1>
+    </div>
+    <div class="content">
+      <p><strong>${params.organizerName}</strong> (${params.organizerEmail}) đã mời bạn tham gia sự kiện.</p>
+    </div>
+    <div class="detail">
+      <div class="detail-item"><span class="detail-label">Thời gian:</span> ${timeStr}</div>
+      ${params.location ? `<div class="detail-item"><span class="detail-label">Địa điểm:</span> ${params.location}</div>` : ""}
+      ${params.meetingLink ? `<div class="detail-item"><span class="detail-label">Link họp:</span> <a href="${params.meetingLink}">${params.meetingLink}</a></div>` : ""}
+      ${params.description ? `<div class="detail-item"><span class="detail-label">Mô tả:</span> ${params.description}</div>` : ""}
+    </div>
+    <div class="footer">
+      <p>Email này được gửi tự động từ Task Management System.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+// Send invite emails to guests
+const sendGuestInvites = async (params) => {
+    const { userId, task, previousGuests = [] } = params;
+    if (!task.guests || task.guests.length === 0)
+        return;
+    // Chỉ gửi cho guests mới (không có trong previousGuests)
+    const newGuests = task.guests.filter((g) => !previousGuests.includes(g));
+    if (newGuests.length === 0)
+        return;
+    // Lấy thông tin organizer
+    const organizer = await user_repository_1.userRepository.findById(userId);
+    if (!organizer)
+        return;
+    const organizerName = organizer.name || organizer.email;
+    const organizerEmail = organizer.email;
+    for (const guestEmail of newGuests) {
+        // Không gửi cho chính organizer
+        if (guestEmail === organizerEmail.toLowerCase())
+            continue;
+        const html = generateInviteEmailHtml({
+            taskTitle: task.title,
+            organizerName,
+            organizerEmail,
+            startTime: task.scheduledTime?.start,
+            endTime: task.scheduledTime?.end,
+            location: task.location,
+            meetingLink: task.meetingLink,
+            description: task.description,
+        });
+        await notification_queue_1.notificationQueueService.addInviteEmail({
+            to: guestEmail,
+            subject: `Lời mời tham gia: ${task.title}`,
+            html,
+            taskTitle: task.title,
+            organizerEmail,
+        });
+    }
 };
 const tasksListCacheKey = (params) => {
     const parts = [
@@ -99,6 +194,14 @@ exports.taskService = {
         const doc = await task_repository_1.taskRepository.create({
             title,
             description: dto.description,
+            type: dto.type,
+            allDay: dto.allDay,
+            guests: dto.guests,
+            location: dto.location,
+            visibility: dto.visibility,
+            reminderMinutes: dto.reminderMinutes,
+            recurrence: dto.recurrence,
+            meetingLink: dto.meetingLink,
             deadline: dto.deadline,
             priority: dto.priority,
             tags: dto.tags,
@@ -123,7 +226,14 @@ exports.taskService = {
             console.error("[AutoBreakdown] Failed for task:", doc._id, error.message);
         });
         await invalidateTasksCache(userId);
-        return toPublicTask(doc);
+        const publicTask = toPublicTask(doc);
+        // Send invite emails to guests (don't wait)
+        if (dto.guests && dto.guests.length > 0) {
+            sendGuestInvites({ userId, task: publicTask }).catch((err) => {
+                console.error("[TaskService] Failed to send guest invites:", err.message);
+            });
+        }
+        return publicTask;
     },
     getById: async (userId, taskId) => {
         const doc = await task_repository_1.taskRepository.findByIdForUser({
@@ -154,6 +264,14 @@ exports.taskService = {
         }, {
             title,
             description: dto.description,
+            type: dto.type,
+            allDay: dto.allDay,
+            guests: dto.guests,
+            location: dto.location,
+            visibility: dto.visibility,
+            reminderMinutes: dto.reminderMinutes,
+            recurrence: dto.recurrence,
+            meetingLink: dto.meetingLink,
             status: dto.status,
             priority: dto.priority,
             deadline: dto.deadline,
@@ -165,6 +283,22 @@ exports.taskService = {
             dailyTargetMin: dto.dailyTargetMin,
             scheduledTime: dto.scheduledTime,
         });
+        // If scheduledTime was updated, delete old scheduled notifications for this task
+        // so that new reminders can be sent for the new time
+        if (dto.scheduledTime && updated) {
+            try {
+                const deletedCount = await notification_repository_1.notificationRepository.deleteByTaskId(new mongoose_1.Types.ObjectId(userId), taskId, [
+                    notification_model_1.NotificationType.SCHEDULED_TASK_ALERT,
+                    notification_model_1.NotificationType.DEADLINE_ALERT,
+                ]);
+                if (deletedCount > 0) {
+                    console.log(`[TaskUpdate] Deleted ${deletedCount} old scheduled notifications for task ${taskId} due to scheduledTime change`);
+                }
+            }
+            catch (err) {
+                console.error(`[TaskUpdate] Failed to delete old notifications: ${err.message}`);
+            }
+        }
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
@@ -183,7 +317,15 @@ exports.taskService = {
             });
         }
         await invalidateTasksCache(userId);
-        return toPublicTask(updated);
+        const publicTask = toPublicTask(updated);
+        // Send invite emails to new guests (don't wait)
+        if (dto.guests && dto.guests.length > 0) {
+            const previousGuests = (currentTask.guests || []).map((g) => g.toLowerCase());
+            sendGuestInvites({ userId, task: publicTask, previousGuests }).catch((err) => {
+                console.error("[TaskService] Failed to send guest invites:", err.message);
+            });
+        }
+        return publicTask;
     },
     delete: async (userId, taskId) => {
         const deleted = await task_repository_1.taskRepository.deleteByIdForUser({
@@ -351,64 +493,70 @@ exports.taskService = {
         if (!mongoose_1.Types.ObjectId.isValid(userId)) {
             throw new Error("USER_ID_INVALID");
         }
-        let updatedCount = 0;
-        let createdCount = 0;
+        // Group sessions by taskId to efficiently fetch parent tasks
+        const sessionsByTaskId = new Map();
         for (const item of schedule) {
-            if (!mongoose_1.Types.ObjectId.isValid(item.taskId)) {
+            if (!mongoose_1.Types.ObjectId.isValid(item.taskId))
                 continue;
-            }
-            const task = await task_repository_1.taskRepository.findByIdForUser({
-                taskId: item.taskId,
-                userId: new mongoose_1.Types.ObjectId(userId),
-            });
-            if (!task) {
-                continue;
-            }
-            const durationMinutes = Math.max(0, Math.floor((item.scheduledTime.end.getTime() -
-                item.scheduledTime.start.getTime()) /
-                (1000 * 60)));
-            if (item.createSubtask) {
-                const subtaskTitle = `${String(task.title)} - ${String(item.title ?? "")}`
-                    .trim()
-                    .replace(/\s+-\s*$/, "");
-                // Subtask được tạo với status "scheduled" vì đã được lên lịch
-                await task_repository_1.taskRepository.create({
-                    title: subtaskTitle,
-                    description: undefined,
-                    status: "scheduled", // ← Auto chuyển sang scheduled khi AI schedule
-                    priority: task.priority,
-                    deadline: task.deadline,
-                    tags: task.tags ?? [],
-                    userId: new mongoose_1.Types.ObjectId(userId),
-                    parentTaskId: task._id,
-                    estimatedDuration: durationMinutes || task.estimatedDuration,
-                    reminderAt: undefined,
-                    scheduledTime: {
-                        start: item.scheduledTime.start,
-                        end: item.scheduledTime.end,
-                        aiPlanned: true,
-                        reason: item.scheduledTime.reason,
-                    },
-                });
-                createdCount++;
-                continue;
-            }
-            // Task chính được update với status "scheduled" khi AI schedule
-            await task_repository_1.taskRepository.updateByIdForUser({
-                taskId: item.taskId,
-                userId: new mongoose_1.Types.ObjectId(userId),
-            }, {
-                status: "scheduled", // ← Auto chuyển sang scheduled khi AI schedule
-                scheduledTime: {
-                    start: item.scheduledTime.start,
-                    end: item.scheduledTime.end,
-                    aiPlanned: item.scheduledTime.aiPlanned,
-                    reason: item.scheduledTime.reason,
-                },
-            });
-            updatedCount++;
+            const list = sessionsByTaskId.get(item.taskId) || [];
+            list.push(item);
+            sessionsByTaskId.set(item.taskId, list);
         }
-        if (updatedCount > 0 || createdCount > 0) {
+        let createdCount = 0;
+        let updatedCount = 0;
+        for (const [taskId, sessions] of sessionsByTaskId.entries()) {
+            // Get parent task info
+            const parentTask = await task_repository_1.taskRepository.findByIdForUser({
+                taskId,
+                userId: new mongoose_1.Types.ObjectId(userId),
+            });
+            if (!parentTask) {
+                console.log(`[SaveAISchedule] Parent task not found: ${taskId}`);
+                continue;
+            }
+            // Mark parent task as having AI schedule (but don't set scheduledTime)
+            // The actual sessions are represented by subtasks
+            if (parentTask.status === "todo") {
+                await task_repository_1.taskRepository.updateByIdForUser({ taskId, userId: new mongoose_1.Types.ObjectId(userId) }, { status: "scheduled" });
+                updatedCount++;
+            }
+            // Create a subtask for each session
+            for (let i = 0; i < sessions.length; i++) {
+                const session = sessions[i];
+                const startTime = session.scheduledTime.start;
+                const endTime = session.scheduledTime.end;
+                const timeStr = `${startTime.getHours().toString().padStart(2, "0")}:${startTime.getMinutes().toString().padStart(2, "0")}-${endTime.getHours().toString().padStart(2, "0")}:${endTime.getMinutes().toString().padStart(2, "0")}`;
+                const subtaskTitle = sessions.length === 1
+                    ? parentTask.title
+                    : `${parentTask.title} (Phiên ${i + 1}/${sessions.length})`;
+                try {
+                    await task_repository_1.taskRepository.create({
+                        title: subtaskTitle,
+                        description: session.scheduledTime.reason ||
+                            `Phiên làm việc ${i + 1} theo lịch AI`,
+                        status: "scheduled",
+                        priority: parentTask.priority,
+                        deadline: parentTask.deadline,
+                        tags: [...(parentTask.tags || [])],
+                        userId: new mongoose_1.Types.ObjectId(userId),
+                        parentTaskId: new mongoose_1.Types.ObjectId(taskId),
+                        estimatedDuration: Math.round((endTime.getTime() - startTime.getTime()) / (1000 * 60)),
+                        scheduledTime: {
+                            start: startTime,
+                            end: endTime,
+                            aiPlanned: true,
+                            reason: session.scheduledTime.reason || `Phiên ${i + 1} theo lịch AI`,
+                        },
+                    });
+                    createdCount++;
+                    console.log(`[SaveAISchedule] Created subtask "${subtaskTitle}" for ${timeStr}`);
+                }
+                catch (err) {
+                    console.error(`[SaveAISchedule] Failed to create subtask for session ${session.sessionId}: ${err.message}`);
+                }
+            }
+        }
+        if (createdCount > 0 || updatedCount > 0) {
             await invalidateTasksCache(userId);
         }
         return { updated: updatedCount, created: createdCount };
@@ -431,7 +579,10 @@ exports.taskService = {
         const updated = await task_repository_1.taskRepository.updateByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
-        }, { status });
+        }, {
+            status,
+            ...(status === "todo" ? { scheduledTime: null } : {}),
+        });
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
@@ -451,6 +602,68 @@ exports.taskService = {
         }
         await invalidateTasksCache(userId);
         return toPublicTask(updated);
+    },
+    /**
+     * Clear scheduled time from tasks (when schedule is deleted)
+     */
+    clearScheduledTime: async (userId, taskIds) => {
+        if (!mongoose_1.Types.ObjectId.isValid(userId)) {
+            throw new Error("USER_ID_INVALID");
+        }
+        let updatedCount = 0;
+        for (const taskId of taskIds) {
+            if (!mongoose_1.Types.ObjectId.isValid(taskId)) {
+                continue;
+            }
+            const updated = await task_repository_1.taskRepository.updateByIdForUser({
+                taskId,
+                userId: new mongoose_1.Types.ObjectId(userId),
+            }, {
+                scheduledTime: undefined,
+                status: "todo", // Reset status back to todo
+            });
+            if (updated) {
+                console.log(`[Clear Schedule] Task "${updated.title}" scheduledTime cleared and status reset to "todo"`);
+                updatedCount++;
+            }
+        }
+        if (updatedCount > 0) {
+            await invalidateTasksCache(userId);
+        }
+        return { updated: updatedCount };
+    },
+    /**
+     * Clear all scheduled times for user (emergency cleanup)
+     */
+    clearAllScheduledTimes: async (userId) => {
+        if (!mongoose_1.Types.ObjectId.isValid(userId)) {
+            throw new Error("USER_ID_INVALID");
+        }
+        // Find all tasks with scheduledTime
+        const { items: scheduledTasks } = await task_repository_1.taskRepository.listByUser({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            page: 1,
+            limit: 1000,
+        });
+        const tasksWithSchedule = scheduledTasks.filter((task) => task.scheduledTime?.start && task.scheduledTime?.end);
+        let updatedCount = 0;
+        for (const task of tasksWithSchedule) {
+            const updated = await task_repository_1.taskRepository.updateByIdForUser({
+                taskId: String(task._id),
+                userId: new mongoose_1.Types.ObjectId(userId),
+            }, {
+                scheduledTime: undefined,
+                status: task.status === "scheduled" ? "todo" : task.status, // Only reset scheduled tasks to todo
+            });
+            if (updated) {
+                console.log(`[Clear All Schedule] Task "${updated.title}" scheduledTime cleared`);
+                updatedCount++;
+            }
+        }
+        if (updatedCount > 0) {
+            await invalidateTasksCache(userId);
+        }
+        return { updated: updatedCount };
     },
     checkScheduleConflicts: async (userId, schedule) => {
         if (!mongoose_1.Types.ObjectId.isValid(userId)) {

@@ -89,6 +89,11 @@ const userSchema = new mongoose_1.Schema({
         required: true,
         default: false,
     },
+    googleAccessToken: {
+        type: String,
+        required: false,
+        select: false,
+    },
 }, {
     timestamps: true,
 });

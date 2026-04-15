@@ -28,6 +28,9 @@ exports.authRepository = {
             $set: {
                 ...(update.name !== undefined ? { name: update.name } : {}),
                 ...(update.avatar !== undefined ? { avatar: update.avatar } : {}),
+                ...(update.googleAccessToken !== undefined
+                    ? { googleAccessToken: update.googleAccessToken }
+                    : {}),
             },
         }, { new: true }).exec();
     },

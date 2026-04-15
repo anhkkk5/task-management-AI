@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { authService } from "./auth.service";
 import { authRepository } from "./auth.repository";
+import { User } from "./auth.model";
 import { handleAuthError } from "../../common/errors/auth.error-handler";
 import {
   clearRefreshCookie,
@@ -246,21 +247,42 @@ export const me = async (_req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const user = await authRepository.findById(userId);
+    // Lấy user với googleAccessToken
+    const user = await User.findById(userId)
+      .select("+googleAccessToken")
+      .exec();
     if (!user) {
       res.status(404).json({ message: "Không tìm thấy người dùng" });
       return;
     }
 
-    res.status(200).json({
-      id: String(user._id),
+    console.log("[me endpoint] DEBUG:", {
+      userId: String(user._id),
       email: user.email,
-      name: user.name,
+      hasGoogleAccessToken: !!user.googleAccessToken,
+      googleAccessTokenLength: user.googleAccessToken?.length,
+    });
+
+    // ✅ FIX: Generate new accessToken với googleAccessToken từ database
+    const accessToken = authService.generateAccessToken({
+      userId: String(user._id),
+      email: user.email,
       role: user.role,
-      avatar: user.avatar,
-      isVerified: user.isVerified,
-      createdAt: user.createdAt,
-      updatedAt: user.updatedAt,
+      googleAccessToken: user.googleAccessToken,
+    });
+
+    res.status(200).json({
+      accessToken, // ✅ NEW: Return accessToken so frontend can set it in memory
+      user: {
+        id: String(user._id),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        avatar: user.avatar,
+        isVerified: user.isVerified,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
     });
   } catch (_err) {
     res.status(500).json({ message: "Lỗi hệ thống" });

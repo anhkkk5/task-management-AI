@@ -2,14 +2,54 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.aiScheduleService = exports.AIScheduleService = void 0;
 const ai_schedule_repository_1 = require("./ai-schedule.repository");
+const task_model_1 = require("../task/task.model");
+const mongoose_1 = require("mongoose");
 class AIScheduleService {
     async getUserSchedules(userId) {
         const schedules = await ai_schedule_repository_1.aiScheduleRepository.findByUserId(userId);
         return schedules.map((s) => this.toResponse(s));
     }
     async getActiveSchedule(userId) {
-        const schedule = await ai_schedule_repository_1.aiScheduleRepository.findActiveByUserId(userId);
-        return schedule ? this.toResponse(schedule) : null;
+        const schedules = await ai_schedule_repository_1.aiScheduleRepository.findAllActiveByUserId(userId);
+        if (schedules.length === 0)
+            return null;
+        if (schedules.length === 1)
+            return this.toResponse(schedules[0]);
+        const dayMap = new Map();
+        const allSuggestedOrder = [];
+        const allSourceTasks = [];
+        for (const s of schedules) {
+            const res = this.toResponse(s);
+            if (Array.isArray(res.suggestedOrder)) {
+                allSuggestedOrder.push(...res.suggestedOrder);
+            }
+            if (Array.isArray(res.sourceTasks)) {
+                allSourceTasks.push(...res.sourceTasks);
+            }
+            for (const d of res.schedule) {
+                const date = String(d.date);
+                if (!dayMap.has(date)) {
+                    dayMap.set(date, {
+                        day: d.day,
+                        date: d.date,
+                        tasks: [],
+                        note: d.note,
+                    });
+                }
+                dayMap
+                    .get(date)
+                    .tasks.push(...d.tasks.map((t) => ({ ...t, scheduleId: res.id })));
+            }
+        }
+        const mergedSchedule = Array.from(dayMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+        const base = this.toResponse(schedules[0]);
+        return {
+            ...base,
+            schedule: mergedSchedule,
+            suggestedOrder: Array.from(new Set(allSuggestedOrder)),
+            sourceTasks: Array.from(new Set(allSourceTasks)),
+            isActive: true,
+        };
     }
     async getScheduleById(scheduleId, userId) {
         const schedule = await ai_schedule_repository_1.aiScheduleRepository.findByIdAndUserId(scheduleId, userId);
@@ -33,11 +73,38 @@ class AIScheduleService {
         const updated = await ai_schedule_repository_1.aiScheduleRepository.updateSessionTime(scheduleId, userId, sessionId, suggestedTime);
         return updated ? this.toResponse(updated) : null;
     }
+    async deleteSession(scheduleId, userId, sessionId) {
+        const updated = await ai_schedule_repository_1.aiScheduleRepository.deleteSession(scheduleId, userId, sessionId);
+        return updated ? this.toResponse(updated) : null;
+    }
     async deleteSchedule(scheduleId, userId) {
-        return ai_schedule_repository_1.aiScheduleRepository.delete(scheduleId, userId);
+        const deleted = await ai_schedule_repository_1.aiScheduleRepository.delete(scheduleId, userId);
+        if (deleted) {
+            await task_model_1.Task.deleteMany({
+                userId: new mongoose_1.Types.ObjectId(userId),
+                "scheduledTime.aiPlanned": true,
+                parentTaskId: { $exists: true },
+            });
+            await task_model_1.Task.updateMany({
+                userId: new mongoose_1.Types.ObjectId(userId),
+                status: "scheduled",
+                "scheduledTime.start": { $exists: false }
+            }, { $set: { status: "todo" } });
+        }
+        return deleted;
     }
     async deleteAllUserSchedules(userId) {
         await ai_schedule_repository_1.aiScheduleRepository.deleteAllForUser(userId);
+        await task_model_1.Task.deleteMany({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            "scheduledTime.aiPlanned": true,
+            parentTaskId: { $exists: true },
+        });
+        await task_model_1.Task.updateMany({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            status: "scheduled",
+            "scheduledTime.start": { $exists: false }
+        }, { $set: { status: "todo" } });
     }
     toResponse(schedule) {
         return {

@@ -23,8 +23,10 @@ exports.notificationWorker = new bullmq_1.Worker("notification", async (job) => 
             });
         }
         case "send-email": {
-            const { email, subject, html, notificationId } = job.data;
-            console.log(`[NotificationWorker] Sending email to ${email}`);
+            const { email, subject, html, notificationId, userId } = job.data;
+            console.log(`[NotificationWorker] Sending email to: ${email} (userId: ${userId || "N/A"})`);
+            console.log(`[NotificationWorker] Subject: ${subject}`);
+            console.log(`[NotificationWorker] NotificationId: ${notificationId}`);
             // Send actual email
             const result = await email_service_1.emailService.send({
                 to: email,
@@ -39,6 +41,24 @@ exports.notificationWorker = new bullmq_1.Worker("notification", async (job) => 
             else {
                 console.error(`[NotificationWorker] Failed to send email: ${result.error}`);
                 throw new Error(result.error || "Failed to send email");
+            }
+            return result;
+        }
+        case "send-invite-email": {
+            const { to, subject, html } = job.data;
+            console.log(`[NotificationWorker] Sending invite email to: ${to}`);
+            console.log(`[NotificationWorker] Subject: ${subject}`);
+            const result = await email_service_1.emailService.send({
+                to,
+                subject,
+                html,
+            });
+            if (result.success) {
+                console.log(`[NotificationWorker] Invite email sent successfully: ${result.messageId}`);
+            }
+            else {
+                console.error(`[NotificationWorker] Failed to send invite email: ${result.error}`);
+                throw new Error(result.error || "Failed to send invite email");
             }
             return result;
         }

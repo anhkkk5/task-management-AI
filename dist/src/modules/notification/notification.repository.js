@@ -34,6 +34,15 @@ exports.notificationRepository = {
     countUnread: async (userId) => {
         return notification_model_1.NotificationModel.countDocuments({ userId, isRead: false });
     },
+    // Count notifications for user with filters
+    countForUser: async (userId, options = {}) => {
+        const query = { userId };
+        if (options.isRead !== undefined)
+            query.isRead = options.isRead;
+        if (options.type)
+            query.type = options.type;
+        return notification_model_1.NotificationModel.countDocuments(query);
+    },
     // Mark as read
     markAsRead: async (id, userId) => {
         return notification_model_1.NotificationModel.findOneAndUpdate({ _id: id, userId }, { isRead: true, readAt: new Date() }, { new: true });
@@ -71,6 +80,15 @@ exports.notificationRepository = {
             "data.taskId": taskId,
             createdAt: { $gte: since },
         }).lean();
+    },
+    // Delete notifications by taskId and types (used when scheduledTime changes)
+    deleteByTaskId: async (userId, taskId, types) => {
+        const result = await notification_model_1.NotificationModel.deleteMany({
+            userId,
+            type: { $in: types },
+            "data.taskId": taskId,
+        });
+        return result.deletedCount || 0;
     },
     // Delete notification (only owner can delete)
     delete: async (id, userId) => {

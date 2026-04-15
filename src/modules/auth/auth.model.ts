@@ -14,6 +14,7 @@ export type UserAttrs = {
   address?: string;
   settings?: Record<string, unknown>;
   isVerified?: boolean;
+  googleAccessToken?: string;
 };
 
 export type UserDoc = {
@@ -29,6 +30,7 @@ export type UserDoc = {
   address?: string;
   settings?: Record<string, unknown>;
   isVerified: boolean;
+  googleAccessToken?: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -89,6 +91,11 @@ const userSchema = new Schema<UserDoc>(
       type: Boolean,
       required: true,
       default: false,
+    },
+    googleAccessToken: {
+      type: String,
+      required: false,
+      select: false,
     },
   },
   {

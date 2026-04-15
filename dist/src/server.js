@@ -14,6 +14,7 @@ const swagger_ui_express_1 = __importDefault(require("swagger-ui-express"));
 const chat_gateway_1 = require("./modules/chat/chat.gateway");
 const reminder_cron_1 = require("./modules/notification/reminder.cron");
 const cache_cleanup_service_1 = require("./services/cache-cleanup.service");
+const cron_service_1 = require("./services/cron.service");
 require("./modules/notification/notification.worker");
 const bootstrap = async () => {
     await (0, database_1.connect)();
@@ -41,6 +42,8 @@ const bootstrap = async () => {
         // Start cache cleanup job
         cache_cleanup_service_1.cacheCleanupService.start();
         console.log(`Cache cleanup job started (runs every 1 hour)`);
+        // Start daily task cleanup & archive cron job
+        (0, cron_service_1.initCronJobs)();
     });
 };
 void bootstrap();

@@ -38,6 +38,24 @@ const mongoose_1 = __importStar(require("mongoose"));
 const taskSchema = new mongoose_1.Schema({
     title: { type: String, required: true, trim: true },
     description: { type: String },
+    type: {
+        type: String,
+        enum: ["event", "todo", "appointment"],
+        default: "todo",
+        index: true,
+    },
+    allDay: { type: Boolean, default: false },
+    guests: { type: [String], default: [] },
+    location: { type: String, trim: true },
+    visibility: {
+        type: String,
+        enum: ["default", "public", "private"],
+        default: "default",
+        index: true,
+    },
+    reminderMinutes: { type: Number, min: 0 },
+    recurrence: { type: String },
+    meetingLink: { type: String },
     status: {
         type: String,
         enum: ["todo", "scheduled", "in_progress", "completed", "cancelled"],
@@ -78,6 +96,7 @@ const taskSchema = new mongoose_1.Schema({
         aiPlanned: { type: Boolean, default: false },
         reason: { type: String },
     },
+    isArchived: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 taskSchema.index({ userId: 1, status: 1, deadline: 1, priority: 1 });
 exports.Task = mongoose_1.default.models.Task ||

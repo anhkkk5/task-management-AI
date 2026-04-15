@@ -90,14 +90,16 @@ export const setupPassport = (): void => {
               password: hash,
               role: "user",
               isVerified: true,
+              googleAccessToken: accessToken,
             });
             console.log("[Google Strategy] Created new user:", email);
           } else {
-            // Update avatar nếu chưa có
+            // Update avatar nếu chưa có + lưu googleAccessToken
             if (profile.photos?.[0]?.value && !user.avatar) {
               user.avatar = profile.photos[0].value;
-              await user.save();
             }
+            user.googleAccessToken = accessToken;
+            await user.save();
             console.log("[Google Strategy] Found existing user:", email);
           }
 
@@ -132,7 +134,10 @@ export const setupPassport = (): void => {
           const redis = getRedis();
           const redisKey = `refresh:${userId}:${jti}`;
           await redis.set(redisKey, "1", "EX", getRefreshTtlSeconds());
-          console.log("[Google Strategy] Refresh token saved to Redis:", redisKey);
+          console.log(
+            "[Google Strategy] Refresh token saved to Redis:",
+            redisKey,
+          );
 
           return done(null, {
             user,

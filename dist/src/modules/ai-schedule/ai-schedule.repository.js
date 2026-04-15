@@ -9,6 +9,14 @@ class AIScheduleRepository {
             .sort({ createdAt: -1 })
             .exec();
     }
+    async findAllActiveByUserId(userId) {
+        return ai_schedule_model_1.AISchedule.find({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            isActive: true,
+        })
+            .sort({ createdAt: -1 })
+            .exec();
+    }
     async findActiveByUserId(userId) {
         return ai_schedule_model_1.AISchedule.findOne({
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -36,28 +44,45 @@ class AIScheduleRepository {
     async update(id, userId, data) {
         return ai_schedule_model_1.AISchedule.findOneAndUpdate({ _id: new mongoose_1.Types.ObjectId(id), userId: new mongoose_1.Types.ObjectId(userId) }, { $set: data }, { new: true }).exec();
     }
-    async updateSessionStatus(scheduleId, userId, sessionId, status) {
+    async deleteSession(scheduleId, userId, sessionId) {
         return ai_schedule_model_1.AISchedule.findOneAndUpdate({
             _id: new mongoose_1.Types.ObjectId(scheduleId),
             userId: new mongoose_1.Types.ObjectId(userId),
-            "schedule.tasks.sessionId": sessionId,
         }, {
-            $set: { "schedule.$[].tasks.$[task].status": status },
+            $pull: { "schedule.$[day].tasks": { sessionId } },
         }, {
             new: true,
-            arrayFilters: [{ "task.sessionId": sessionId }],
+            arrayFilters: [{ "day.tasks": { $elemMatch: { sessionId } } }],
+        }).exec();
+    }
+    async updateSessionStatus(scheduleId, userId, sessionId, status) {
+        // ✅ FIX: Query nested array đúng cách với 2 cấp arrayFilters
+        return ai_schedule_model_1.AISchedule.findOneAndUpdate({
+            _id: new mongoose_1.Types.ObjectId(scheduleId),
+            userId: new mongoose_1.Types.ObjectId(userId),
+        }, {
+            $set: { "schedule.$[day].tasks.$[task].status": status },
+        }, {
+            new: true,
+            arrayFilters: [
+                { "day.tasks": { $elemMatch: { sessionId } } }, // Filter day chứa session
+                { "task.sessionId": sessionId }, // Filter đúng task
+            ],
         }).exec();
     }
     async updateSessionTime(scheduleId, userId, sessionId, suggestedTime) {
+        // ✅ FIX: Query nested array đúng cách với 2 cấp arrayFilters
         return ai_schedule_model_1.AISchedule.findOneAndUpdate({
             _id: new mongoose_1.Types.ObjectId(scheduleId),
             userId: new mongoose_1.Types.ObjectId(userId),
-            "schedule.tasks.sessionId": sessionId,
         }, {
-            $set: { "schedule.$[].tasks.$[task].suggestedTime": suggestedTime },
+            $set: { "schedule.$[day].tasks.$[task].suggestedTime": suggestedTime },
         }, {
             new: true,
-            arrayFilters: [{ "task.sessionId": sessionId }],
+            arrayFilters: [
+                { "day.tasks": { $elemMatch: { sessionId } } }, // Filter day chứa session
+                { "task.sessionId": sessionId }, // Filter đúng task
+            ],
         }).exec();
     }
     async deactivateAllForUser(userId) {

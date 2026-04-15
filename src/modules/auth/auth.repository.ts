@@ -35,7 +35,7 @@ export const authRepository = {
 
   updateProfile: async (
     userId: string | Types.ObjectId,
-    update: { name?: string; avatar?: string },
+    update: { name?: string; avatar?: string; googleAccessToken?: string },
   ): Promise<UserDoc | null> => {
     return User.findByIdAndUpdate(
       userId,
@@ -43,6 +43,9 @@ export const authRepository = {
         $set: {
           ...(update.name !== undefined ? { name: update.name } : {}),
           ...(update.avatar !== undefined ? { avatar: update.avatar } : {}),
+          ...(update.googleAccessToken !== undefined
+            ? { googleAccessToken: update.googleAccessToken }
+            : {}),
         },
       },
       { new: true },

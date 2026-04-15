@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.notificationController = void 0;
 const notification_service_1 = require("./notification.service");
+const notification_repository_1 = require("./notification.repository");
+const mongoose_1 = require("mongoose");
 exports.notificationController = {
     // List notifications for current user
     list: async (req, res) => {
@@ -26,7 +28,8 @@ exports.notificationController = {
                 offset,
             });
             const unreadCount = await notification_service_1.notificationService.countUnread(userId);
-            res.status(200).json({ notifications, unreadCount });
+            const total = await notification_repository_1.notificationRepository.countForUser(new mongoose_1.Types.ObjectId(userId), { isRead, type });
+            res.status(200).json({ items: notifications, total, unreadCount });
         }
         catch (err) {
             res.status(500).json({ message: "Failed to list notifications" });

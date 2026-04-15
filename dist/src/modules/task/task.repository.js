@@ -8,6 +8,14 @@ exports.taskRepository = {
         return task_model_1.Task.create({
             title: attrs.title,
             description: attrs.description,
+            type: attrs.type,
+            allDay: attrs.allDay,
+            guests: attrs.guests ?? [],
+            location: attrs.location,
+            visibility: attrs.visibility,
+            reminderMinutes: attrs.reminderMinutes,
+            recurrence: attrs.recurrence,
+            meetingLink: attrs.meetingLink,
             status: attrs.status ?? "todo",
             priority: attrs.priority ?? "medium",
             deadline: attrs.deadline,
@@ -34,6 +42,24 @@ exports.taskRepository = {
                 ...(update.title !== undefined ? { title: update.title } : {}),
                 ...(update.description !== undefined
                     ? { description: update.description }
+                    : {}),
+                ...(update.type !== undefined ? { type: update.type } : {}),
+                ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
+                ...(update.guests !== undefined ? { guests: update.guests } : {}),
+                ...(update.location !== undefined
+                    ? { location: update.location }
+                    : {}),
+                ...(update.visibility !== undefined
+                    ? { visibility: update.visibility }
+                    : {}),
+                ...(update.reminderMinutes !== undefined
+                    ? { reminderMinutes: update.reminderMinutes }
+                    : {}),
+                ...(update.recurrence !== undefined
+                    ? { recurrence: update.recurrence }
+                    : {}),
+                ...(update.meetingLink !== undefined
+                    ? { meetingLink: update.meetingLink }
                     : {}),
                 ...(update.status !== undefined ? { status: update.status } : {}),
                 ...(update.priority !== undefined
@@ -70,6 +96,24 @@ exports.taskRepository = {
                 ...(update.title !== undefined ? { title: update.title } : {}),
                 ...(update.description !== undefined
                     ? { description: update.description }
+                    : {}),
+                ...(update.type !== undefined ? { type: update.type } : {}),
+                ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
+                ...(update.guests !== undefined ? { guests: update.guests } : {}),
+                ...(update.location !== undefined
+                    ? { location: update.location }
+                    : {}),
+                ...(update.visibility !== undefined
+                    ? { visibility: update.visibility }
+                    : {}),
+                ...(update.reminderMinutes !== undefined
+                    ? { reminderMinutes: update.reminderMinutes }
+                    : {}),
+                ...(update.recurrence !== undefined
+                    ? { recurrence: update.recurrence }
+                    : {}),
+                ...(update.meetingLink !== undefined
+                    ? { meetingLink: update.meetingLink }
                     : {}),
                 ...(update.status !== undefined ? { status: update.status } : {}),
                 ...(update.priority !== undefined
@@ -112,6 +156,7 @@ exports.taskRepository = {
     listByUser: async (params) => {
         const filter = {
             userId: params.userId,
+            isArchived: { $ne: true },
         };
         if (params.status) {
             filter.status = params.status;
@@ -144,6 +189,7 @@ exports.taskRepository = {
             userId: params.userId,
             deadline: { $lt: params.now },
             status: { $nin: ["completed", "cancelled"] },
+            isArchived: { $ne: true },
         };
         const skip = (params.page - 1) * params.limit;
         const [items, total] = await Promise.all([
@@ -178,15 +224,24 @@ exports.taskRepository = {
     },
     // Get scheduled tasks for conflict detection
     getScheduledTasks: async (params) => {
-        return task_model_1.Task.find({
+        const filter = {
             userId: params.userId,
             status: { $in: ["scheduled", "in_progress"] },
-            "scheduledTime.start": {
-                $gte: params.startDate,
-                $lte: params.endDate,
-            },
-        })
-            .sort({ "scheduledTime.start": 1 })
-            .exec();
+            "scheduledTime.start": { $exists: true, $ne: null },
+            "scheduledTime.end": { $exists: true, $ne: null },
+            // Task phải overlap với range [startDate, endDate]
+            // Overlap condition: taskStart < endDate AND taskEnd > startDate
+            $and: [
+                { "scheduledTime.start": { $lt: params.endDate } },
+                { "scheduledTime.end": { $gt: params.startDate } },
+            ],
+        };
+        // Exclude specific tasks (e.g., tasks being scheduled)
+        if (params.excludeTaskIds && params.excludeTaskIds.length > 0) {
+            filter._id = {
+                $nin: params.excludeTaskIds.map((id) => new mongoose_1.Types.ObjectId(id)),
+            };
+        }
+        return task_model_1.Task.find(filter).sort({ "scheduledTime.start": 1 }).exec();
     },
 };

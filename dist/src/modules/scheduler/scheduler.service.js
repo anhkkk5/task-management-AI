@@ -14,8 +14,7 @@ class IntervalScheduler {
         // Tìm các task có thể overlap
         for (const task of sorted) {
             // Check overlap: new.start < existing.end && new.end > existing.start
-            if (newTask.start < task.end &&
-                newTask.end > task.start) {
+            if (newTask.start < task.end && newTask.end > task.start) {
                 hasConflict = true;
                 if (task.taskId) {
                     conflictingTasks.push(task.taskId);
@@ -26,21 +25,21 @@ class IntervalScheduler {
         let suggestedNewSlot;
         if (hasConflict && sorted.length > 0) {
             const lastConflict = sorted
-                .filter(t => t.taskId && conflictingTasks.includes(t.taskId))
+                .filter((t) => t.taskId && conflictingTasks.includes(t.taskId))
                 .sort((a, b) => b.end.getTime() - a.end.getTime())[0];
             if (lastConflict) {
                 const duration = newTask.end.getTime() - newTask.start.getTime();
                 suggestedNewSlot = {
                     start: lastConflict.end,
                     end: new Date(lastConflict.end.getTime() + duration),
-                    taskId: newTask.taskId
+                    taskId: newTask.taskId,
                 };
             }
         }
         return {
             hasConflict,
             conflictingTasks,
-            suggestedNewSlot
+            suggestedNewSlot,
         };
     }
     /**
@@ -88,7 +87,7 @@ class IntervalScheduler {
             const candidate = {
                 start: candidateStart,
                 end: candidateEnd,
-                taskId: task.taskId
+                taskId: task.taskId,
             };
             // Check conflict
             const conflict = this.checkConflict(candidate, busySlots);
@@ -136,19 +135,30 @@ class IntervalScheduler {
      * Kiểm tra 1 slot có valid không (trong work hours, không quá dài/ngắn)
      */
     validateSlot(slot, workHours, minDuration = 15, // minutes
-    maxDuration = 240 // 4 hours
-    ) {
+    maxDuration = 240) {
         const duration = (slot.end.getTime() - slot.start.getTime()) / (1000 * 60); // minutes
         if (duration < minDuration) {
-            return { valid: false, reason: `Slot quá ngắn (${duration} phút, tối thiểu ${minDuration})` };
+            return {
+                valid: false,
+                reason: `Slot quá ngắn (${duration} phút, tối thiểu ${minDuration})`,
+            };
         }
         if (duration > maxDuration) {
-            return { valid: false, reason: `Slot quá dài (${duration} phút, tối đa ${maxDuration})` };
+            return {
+                valid: false,
+                reason: `Slot quá dài (${duration} phút, tối đa ${maxDuration})`,
+            };
         }
         const startHour = slot.start.getHours();
-        const endHour = slot.end.getHours();
-        if (startHour < workHours.start || endHour > workHours.end) {
-            return { valid: false, reason: `Ngoài giờ làm việc (${workHours.start}h-${workHours.end}h)` };
+        const startMinutes = slot.start.getHours() * 60 + slot.start.getMinutes();
+        const endMinutes = slot.end.getHours() * 60 + slot.end.getMinutes();
+        const workStartMinutes = workHours.start * 60;
+        const workEndMinutes = workHours.end * 60;
+        if (startMinutes < workStartMinutes || endMinutes > workEndMinutes) {
+            return {
+                valid: false,
+                reason: `Ngoài giờ làm việc (${workHours.start}h-${workHours.end}h)`,
+            };
         }
         return { valid: true };
     }

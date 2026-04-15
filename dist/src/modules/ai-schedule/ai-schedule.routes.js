@@ -16,6 +16,8 @@ router.post("/", auth_middleware_1.authMiddleware, ai_schedule_controller_1.aiSc
 router.patch("/:scheduleId/sessions/status", auth_middleware_1.authMiddleware, ai_schedule_controller_1.aiScheduleController.updateSessionStatus.bind(ai_schedule_controller_1.aiScheduleController));
 // Update session time (drag-drop)
 router.patch("/:scheduleId/sessions/time", auth_middleware_1.authMiddleware, ai_schedule_controller_1.aiScheduleController.updateSessionTime.bind(ai_schedule_controller_1.aiScheduleController));
+// Delete one session from a schedule
+router.delete("/:scheduleId/sessions/:sessionId", auth_middleware_1.authMiddleware, ai_schedule_controller_1.aiScheduleController.deleteSession.bind(ai_schedule_controller_1.aiScheduleController));
 // Delete schedule
 router.delete("/:scheduleId", auth_middleware_1.authMiddleware, ai_schedule_controller_1.aiScheduleController.deleteSchedule.bind(ai_schedule_controller_1.aiScheduleController));
 exports.default = router;
