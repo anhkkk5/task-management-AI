@@ -1,0 +1,496 @@
+guestSearch:
+  get:
+    tags:
+      - Guest
+    summary: Tìm kiếm liên hệ từ Google Contacts
+    description: Tìm kiếm liên hệ từ Google Contacts API với từ khóa tìm kiếm
+    operationId: searchContacts
+    parameters:
+      - name: q
+        in: query
+        description: Từ khóa tìm kiếm
+        required: true
+        schema:
+          type: string
+          example: john
+      - name: limit
+        in: query
+        description: Số lượng kết quả tối đa (mặc định 50, tối đa 50)
+        required: false
+        schema:
+          type: integer
+          default: 50
+          maximum: 50
+      - name: offset
+        in: query
+        description: Vị trí bắt đầu phân trang (mặc định 0)
+        required: false
+        schema:
+          type: integer
+          default: 0
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: Danh sách liên hệ tìm được
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                data:
+                  type: object
+                  properties:
+                    contacts:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            example: people/c1234567890
+                          email:
+                            type: string
+                            example: john.doe@example.com
+                          name:
+                            type: string
+                            example: John Doe
+                          avatar:
+                            type: string
+                            example: https://lh3.googleusercontent.com/...
+                          phoneNumbers:
+                            type: array
+                            items:
+                              type: string
+                    total:
+                      type: integer
+                      example: 150
+                    limit:
+                      type: integer
+                      example: 50
+                    offset:
+                      type: integer
+                      example: 0
+      "400":
+        description: Yêu cầu không hợp lệ
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "401":
+        description: Không được xác thực hoặc cần xác thực Google
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "429":
+        description: Quá nhiều yêu cầu
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "503":
+        description: Dịch vụ Google Contacts không khả dụng
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+
+guestAdd:
+  post:
+    tags:
+      - Guest
+    summary: Thêm khách mời vào sự kiện
+    description: Thêm một liên hệ từ Google Contacts làm khách mời cho sự kiện
+    operationId: addGuest
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - eventId
+              - email
+              - name
+            properties:
+              eventId:
+                type: string
+                description: ID của sự kiện
+                example: 67a1b2c3d4e5f6g7h8i9j0k1
+              email:
+                type: string
+                description: Email của khách mời
+                format: email
+                example: john.doe@example.com
+              name:
+                type: string
+                description: Tên của khách mời
+                example: John Doe
+              avatar:
+                type: string
+                description: URL ảnh đại diện
+                format: uri
+                example: https://lh3.googleusercontent.com/...
+              permission:
+                type: string
+                description: Quyền hạn của khách mời
+                enum:
+                  - view_guest_list
+                  - edit_event
+                  - invite_others
+                default: view_guest_list
+                example: view_guest_list
+    security:
+      - bearerAuth: []
+    responses:
+      "201":
+        description: Khách mời được thêm thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                data:
+                  type: object
+                  properties:
+                    guestId:
+                      type: string
+                    _id:
+                      type: string
+                    eventId:
+                      type: string
+                    email:
+                      type: string
+                    name:
+                      type: string
+                    avatar:
+                      type: string
+                    permission:
+                      type: string
+                    status:
+                      type: string
+                    createdAt:
+                      type: string
+                      format: date-time
+      "400":
+        description: Yêu cầu không hợp lệ
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "401":
+        description: Không được xác thực
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "409":
+        description: Khách mời đã được thêm vào sự kiện này
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+
+guestRemove:
+  delete:
+    tags:
+      - Guest
+    summary: Xóa khách mời khỏi sự kiện
+    description: Xóa một khách mời khỏi sự kiện
+    operationId: removeGuest
+    parameters:
+      - name: guestId
+        in: path
+        description: ID của khách mời cần xóa
+        required: true
+        schema:
+          type: string
+          example: 67a1b2c3d4e5f6g7h8i9j0k2
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: Khách mời được xóa thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                message:
+                  type: string
+                  example: Guest removed successfully
+      "400":
+        description: ID khách mời không hợp lệ
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "401":
+        description: Không được xác thực
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "404":
+        description: Khách mời không tìm thấy
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+
+guestUpdatePermission:
+  put:
+    tags:
+      - Guest
+    summary: Cập nhật quyền hạn của khách mời
+    description: Cập nhật quyền hạn của một khách mời
+    operationId: updateGuestPermission
+    parameters:
+      - name: guestId
+        in: path
+        description: ID của khách mời
+        required: true
+        schema:
+          type: string
+          example: 67a1b2c3d4e5f6g7h8i9j0k2
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - permission
+            properties:
+              permission:
+                type: string
+                description: Quyền hạn mới
+                enum:
+                  - view_guest_list
+                  - edit_event
+                  - invite_others
+                example: edit_event
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: Quyền hạn được cập nhật thành công
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                data:
+                  type: object
+                  properties:
+                    guestId:
+                      type: string
+                    permission:
+                      type: string
+                    updatedAt:
+                      type: string
+                      format: date-time
+      "400":
+        description: Yêu cầu không hợp lệ
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "401":
+        description: Không được xác thực
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "404":
+        description: Khách mời không tìm thấy
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+
+guestGetEventGuests:
+  get:
+    tags:
+      - Guest
+    summary: Lấy danh sách khách mời của sự kiện
+    description: Lấy tất cả khách mời của một sự kiện cụ thể
+    operationId: getEventGuests
+    parameters:
+      - name: eventId
+        in: path
+        description: ID của sự kiện
+        required: true
+        schema:
+          type: string
+          example: 67a1b2c3d4e5f6g7h8i9j0k1
+    security:
+      - bearerAuth: []
+    responses:
+      "200":
+        description: Danh sách khách mời
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: true
+                data:
+                  type: object
+                  properties:
+                    guests:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          guestId:
+                            type: string
+                          _id:
+                            type: string
+                          eventId:
+                            type: string
+                          email:
+                            type: string
+                          name:
+                            type: string
+                          avatar:
+                            type: string
+                          permission:
+                            type: string
+                          status:
+                            type: string
+                          createdAt:
+                            type: string
+                            format: date-time
+                          addedAt:
+                            type: string
+                            format: date-time
+      "400":
+        description: ID sự kiện không hợp lệ
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "401":
+        description: Không được xác thực
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string
+      "404":
+        description: Sự kiện không tìm thấy
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success:
+                  type: boolean
+                  example: false
+                error:
+                  type: string

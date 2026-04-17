@@ -46,6 +46,49 @@ const taskSchema = new mongoose_1.Schema({
     },
     allDay: { type: Boolean, default: false },
     guests: { type: [String], default: [] },
+    /**
+     * Detailed guest information with permissions and status
+     * Stores guest summary data for quick access without separate queries
+     * Each guest includes: guestId, email, name, avatar, permission, status
+     * Maintains backward compatibility with legacy guests array
+     */
+    guestDetails: {
+        type: [
+            {
+                guestId: {
+                    type: mongoose_1.Schema.Types.ObjectId,
+                    ref: "Guest",
+                    required: true,
+                },
+                email: {
+                    type: String,
+                    required: true,
+                    lowercase: true,
+                    trim: true,
+                },
+                name: {
+                    type: String,
+                    required: true,
+                    trim: true,
+                },
+                avatar: {
+                    type: String,
+                    default: null,
+                },
+                permission: {
+                    type: String,
+                    enum: ["edit_event", "view_guest_list", "invite_others"],
+                    default: "view_guest_list",
+                },
+                status: {
+                    type: String,
+                    enum: ["pending", "accepted", "declined"],
+                    default: "pending",
+                },
+            },
+        ],
+        default: [],
+    },
     location: { type: String, trim: true },
     visibility: {
         type: String,

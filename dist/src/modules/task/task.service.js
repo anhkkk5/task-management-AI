@@ -22,6 +22,16 @@ const toPublicTask = (t) => {
         type: t.type,
         allDay: t.allDay,
         guests: t.guests ?? [],
+        guestDetails: t.guestDetails
+            ? t.guestDetails.map((g) => ({
+                guestId: String(g.guestId),
+                email: g.email,
+                name: g.name,
+                avatar: g.avatar,
+                permission: g.permission,
+                status: g.status,
+            }))
+            : undefined,
         location: t.location,
         visibility: t.visibility ?? "default",
         reminderMinutes: t.reminderMinutes,
@@ -191,12 +201,24 @@ exports.taskService = {
         const parentTaskId = dto.parentTaskId
             ? new mongoose_1.Types.ObjectId(dto.parentTaskId)
             : undefined;
+        // Convert guestDetails guestId strings to ObjectId
+        const guestDetails = dto.guestDetails
+            ? dto.guestDetails.map((g) => ({
+                guestId: new mongoose_1.Types.ObjectId(g.guestId),
+                email: g.email,
+                name: g.name,
+                avatar: g.avatar,
+                permission: g.permission,
+                status: g.status,
+            }))
+            : undefined;
         const doc = await task_repository_1.taskRepository.create({
             title,
             description: dto.description,
             type: dto.type,
             allDay: dto.allDay,
             guests: dto.guests,
+            guestDetails,
             location: dto.location,
             visibility: dto.visibility,
             reminderMinutes: dto.reminderMinutes,
@@ -258,6 +280,17 @@ exports.taskService = {
         if (!currentTask) {
             throw new Error("TASK_FORBIDDEN");
         }
+        // Convert guestDetails guestId strings to ObjectId
+        const guestDetails = dto.guestDetails
+            ? dto.guestDetails.map((g) => ({
+                guestId: new mongoose_1.Types.ObjectId(g.guestId),
+                email: g.email,
+                name: g.name,
+                avatar: g.avatar,
+                permission: g.permission,
+                status: g.status,
+            }))
+            : undefined;
         const updated = await task_repository_1.taskRepository.updateByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -267,6 +300,7 @@ exports.taskService = {
             type: dto.type,
             allDay: dto.allDay,
             guests: dto.guests,
+            guestDetails,
             location: dto.location,
             visibility: dto.visibility,
             reminderMinutes: dto.reminderMinutes,

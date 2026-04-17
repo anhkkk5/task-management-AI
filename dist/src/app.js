@@ -18,6 +18,7 @@ const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const schedule_template_routes_1 = __importDefault(require("./modules/schedule-template/schedule-template.routes"));
 const ai_schedule_routes_1 = __importDefault(require("./modules/ai-schedule/ai-schedule.routes"));
 const scheduler_routes_1 = __importDefault(require("./modules/scheduler/scheduler.routes"));
+const guest_routes_1 = __importDefault(require("./modules/guest/routes/guest.routes"));
 const passport_2 = require("./config/passport");
 const createApp = () => {
     const app = (0, express_1.default)();
@@ -53,6 +54,7 @@ const createApp = () => {
     app.use("/schedule-templates", schedule_template_routes_1.default);
     app.use("/ai-schedules", ai_schedule_routes_1.default);
     app.use("/scheduler", scheduler_routes_1.default);
+    app.use("/guests", guest_routes_1.default);
     return app;
 };
 exports.createApp = createApp;

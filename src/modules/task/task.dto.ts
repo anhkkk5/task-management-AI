@@ -11,6 +11,19 @@ export type TaskType = "event" | "todo" | "appointment";
 
 export type TaskVisibility = "default" | "public" | "private";
 
+/**
+ * Guest summary information for API responses
+ * Contains essential guest details including permissions and status
+ */
+export type GuestSummaryDto = {
+  guestId: string; // MongoDB ObjectId as string
+  email: string;
+  name: string;
+  avatar?: string; // URL to avatar image
+  permission: "edit_event" | "view_guest_list" | "invite_others";
+  status?: "pending" | "accepted" | "declined";
+};
+
 export type CreateTaskDto = {
   title: string;
   description?: string;
@@ -22,6 +35,7 @@ export type CreateTaskDto = {
   type?: TaskType;
   allDay?: boolean;
   guests?: string[];
+  guestDetails?: GuestSummaryDto[]; // New: detailed guest information with permissions
   location?: string;
   visibility?: TaskVisibility;
   recurrence?: string;
@@ -50,6 +64,7 @@ export type UpdateTaskDto = {
   type?: TaskType;
   allDay?: boolean;
   guests?: string[];
+  guestDetails?: GuestSummaryDto[]; // New: detailed guest information with permissions
   location?: string;
   visibility?: TaskVisibility;
   recurrence?: string;

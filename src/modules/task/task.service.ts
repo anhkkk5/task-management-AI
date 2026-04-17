@@ -25,6 +25,14 @@ export type PublicTask = {
   type?: "event" | "todo" | "appointment";
   allDay?: boolean;
   guests: string[];
+  guestDetails?: Array<{
+    guestId: string;
+    email: string;
+    name: string;
+    avatar?: string;
+    permission: "edit_event" | "view_guest_list" | "invite_others";
+    status?: "pending" | "accepted" | "declined";
+  }>;
   location?: string;
   visibility: "default" | "public" | "private";
   reminderMinutes?: number;
@@ -59,6 +67,16 @@ const toPublicTask = (t: any): PublicTask => {
     type: t.type,
     allDay: t.allDay,
     guests: t.guests ?? [],
+    guestDetails: t.guestDetails
+      ? (t.guestDetails as any[]).map((g: any) => ({
+          guestId: String(g.guestId),
+          email: g.email,
+          name: g.name,
+          avatar: g.avatar,
+          permission: g.permission,
+          status: g.status,
+        }))
+      : undefined,
     location: t.location,
     visibility: t.visibility ?? "default",
     reminderMinutes: t.reminderMinutes,
@@ -300,12 +318,25 @@ export const taskService = {
       ? new Types.ObjectId(dto.parentTaskId)
       : undefined;
 
+    // Convert guestDetails guestId strings to ObjectId
+    const guestDetails = dto.guestDetails
+      ? dto.guestDetails.map((g) => ({
+          guestId: new Types.ObjectId(g.guestId),
+          email: g.email,
+          name: g.name,
+          avatar: g.avatar,
+          permission: g.permission,
+          status: g.status,
+        }))
+      : undefined;
+
     const doc = await taskRepository.create({
       title,
       description: dto.description,
       type: dto.type,
       allDay: dto.allDay,
       guests: dto.guests,
+      guestDetails,
       location: dto.location,
       visibility: dto.visibility,
       reminderMinutes: dto.reminderMinutes,
@@ -384,6 +415,18 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
+    // Convert guestDetails guestId strings to ObjectId
+    const guestDetails = dto.guestDetails
+      ? dto.guestDetails.map((g) => ({
+          guestId: new Types.ObjectId(g.guestId),
+          email: g.email,
+          name: g.name,
+          avatar: g.avatar,
+          permission: g.permission,
+          status: g.status,
+        }))
+      : undefined;
+
     const updated = await taskRepository.updateByIdForUser(
       {
         taskId,
@@ -395,6 +438,7 @@ export const taskService = {
         type: dto.type,
         allDay: dto.allDay,
         guests: dto.guests,
+        guestDetails,
         location: dto.location,
         visibility: dto.visibility,
         reminderMinutes: dto.reminderMinutes,

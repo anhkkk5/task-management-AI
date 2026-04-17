@@ -1,6 +1,19 @@
 import mongoose, { Schema, Types } from "mongoose";
 import { TaskPriority, TaskStatus } from "./task.dto";
 
+/**
+ * Guest summary information embedded in Task/Event
+ * Contains essential guest details for quick access without separate database queries
+ */
+export type GuestSummary = {
+  guestId: Types.ObjectId; // Reference to Guest document
+  email: string;
+  name: string;
+  avatar?: string; // URL to avatar image
+  permission: "edit_event" | "view_guest_list" | "invite_others";
+  status?: "pending" | "accepted" | "declined";
+};
+
 export type TaskAttrs = {
   title: string;
   description?: string;
@@ -10,7 +23,8 @@ export type TaskAttrs = {
   tags?: string[];
   type?: "event" | "todo" | "appointment";
   allDay?: boolean;
-  guests?: string[];
+  guests?: string[]; // Legacy: simple email strings
+  guestDetails?: GuestSummary[]; // New: detailed guest information with permissions
   location?: string;
   visibility?: "default" | "public" | "private";
   reminderMinutes?: number;
@@ -45,7 +59,8 @@ export type TaskDoc = mongoose.Document & {
   tags: string[];
   type?: "event" | "todo" | "appointment";
   allDay?: boolean;
-  guests: string[];
+  guests: string[]; // Legacy: simple email strings
+  guestDetails: GuestSummary[]; // New: detailed guest information with permissions
   location?: string;
   visibility: "default" | "public" | "private";
   reminderMinutes?: number;
@@ -87,6 +102,49 @@ const taskSchema = new Schema<TaskDoc>(
     },
     allDay: { type: Boolean, default: false },
     guests: { type: [String], default: [] },
+    /**
+     * Detailed guest information with permissions and status
+     * Stores guest summary data for quick access without separate queries
+     * Each guest includes: guestId, email, name, avatar, permission, status
+     * Maintains backward compatibility with legacy guests array
+     */
+    guestDetails: {
+      type: [
+        {
+          guestId: {
+            type: Schema.Types.ObjectId,
+            ref: "Guest",
+            required: true,
+          },
+          email: {
+            type: String,
+            required: true,
+            lowercase: true,
+            trim: true,
+          },
+          name: {
+            type: String,
+            required: true,
+            trim: true,
+          },
+          avatar: {
+            type: String,
+            default: null,
+          },
+          permission: {
+            type: String,
+            enum: ["edit_event", "view_guest_list", "invite_others"],
+            default: "view_guest_list",
+          },
+          status: {
+            type: String,
+            enum: ["pending", "accepted", "declined"],
+            default: "pending",
+          },
+        },
+      ],
+      default: [],
+    },
     location: { type: String, trim: true },
     visibility: {
       type: String,

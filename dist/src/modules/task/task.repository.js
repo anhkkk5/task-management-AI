@@ -11,6 +11,7 @@ exports.taskRepository = {
             type: attrs.type,
             allDay: attrs.allDay,
             guests: attrs.guests ?? [],
+            guestDetails: attrs.guestDetails ?? [],
             location: attrs.location,
             visibility: attrs.visibility,
             reminderMinutes: attrs.reminderMinutes,
@@ -46,6 +47,9 @@ exports.taskRepository = {
                 ...(update.type !== undefined ? { type: update.type } : {}),
                 ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
                 ...(update.guests !== undefined ? { guests: update.guests } : {}),
+                ...(update.guestDetails !== undefined
+                    ? { guestDetails: update.guestDetails }
+                    : {}),
                 ...(update.location !== undefined
                     ? { location: update.location }
                     : {}),
@@ -100,6 +104,9 @@ exports.taskRepository = {
                 ...(update.type !== undefined ? { type: update.type } : {}),
                 ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
                 ...(update.guests !== undefined ? { guests: update.guests } : {}),
+                ...(update.guestDetails !== undefined
+                    ? { guestDetails: update.guestDetails }
+                    : {}),
                 ...(update.location !== undefined
                     ? { location: update.location }
                     : {}),

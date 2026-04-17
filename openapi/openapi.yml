@@ -15,6 +15,8 @@ tags:
     description: AI assistant
   - name: Notification
     description: Thông báo & nhắc nhở
+  - name: Guest
+    description: Quản lý khách mời & Google Contacts
 paths:
   /auth/register:
     $ref: "./paths/auth.yml#/authRegister"
@@ -86,6 +88,16 @@ paths:
     $ref: "./paths/notification.yml#/notificationMarkRead"
   /notifications/read-all:
     $ref: "./paths/notification.yml#/notificationsMarkAllRead"
+  /guests/search:
+    $ref: "./paths/guest.yml#/guestSearch"
+  /guests/add:
+    $ref: "./paths/guest.yml#/guestAdd"
+  /guests/{guestId}:
+    $ref: "./paths/guest.yml#/guestRemove"
+  /guests/{guestId}/permission:
+    $ref: "./paths/guest.yml#/guestUpdatePermission"
+  /guests/events/{eventId}:
+    $ref: "./paths/guest.yml#/guestGetEventGuests"
 components:
   securitySchemes:
     bearerAuth:

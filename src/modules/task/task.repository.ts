@@ -10,6 +10,7 @@ export const taskRepository = {
       type: attrs.type,
       allDay: attrs.allDay,
       guests: attrs.guests ?? [],
+      guestDetails: attrs.guestDetails ?? [],
       location: attrs.location,
       visibility: attrs.visibility,
       reminderMinutes: attrs.reminderMinutes,
@@ -51,6 +52,14 @@ export const taskRepository = {
       type?: "event" | "todo" | "appointment";
       allDay?: boolean;
       guests?: string[];
+      guestDetails?: Array<{
+        guestId: string | Types.ObjectId;
+        email: string;
+        name: string;
+        avatar?: string;
+        permission: "edit_event" | "view_guest_list" | "invite_others";
+        status?: "pending" | "accepted" | "declined";
+      }>;
       location?: string;
       visibility?: "default" | "public" | "private";
       reminderMinutes?: number | null;
@@ -88,6 +97,9 @@ export const taskRepository = {
           ...(update.type !== undefined ? { type: update.type } : {}),
           ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
           ...(update.guests !== undefined ? { guests: update.guests } : {}),
+          ...(update.guestDetails !== undefined
+            ? { guestDetails: update.guestDetails }
+            : {}),
           ...(update.location !== undefined
             ? { location: update.location }
             : {}),
@@ -146,6 +158,14 @@ export const taskRepository = {
       type?: "event" | "todo" | "appointment";
       allDay?: boolean;
       guests?: string[];
+      guestDetails?: Array<{
+        guestId: string | Types.ObjectId;
+        email: string;
+        name: string;
+        avatar?: string;
+        permission: "edit_event" | "view_guest_list" | "invite_others";
+        status?: "pending" | "accepted" | "declined";
+      }>;
       location?: string;
       visibility?: "default" | "public" | "private";
       reminderMinutes?: number | null;
@@ -183,6 +203,9 @@ export const taskRepository = {
           ...(update.type !== undefined ? { type: update.type } : {}),
           ...(update.allDay !== undefined ? { allDay: update.allDay } : {}),
           ...(update.guests !== undefined ? { guests: update.guests } : {}),
+          ...(update.guestDetails !== undefined
+            ? { guestDetails: update.guestDetails }
+            : {}),
           ...(update.location !== undefined
             ? { location: update.location }
             : {}),

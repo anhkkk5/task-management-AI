@@ -113,6 +113,57 @@ const parseGuests = (value) => {
         .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
     return emails.length > 0 ? [...new Set(emails)] : [];
 };
+/**
+ * Parse guest details from request body
+ * Validates guest information including email, name, avatar, permission, and status
+ */
+const parseGuestDetails = (value) => {
+    if (value === undefined || value === null)
+        return undefined;
+    if (!Array.isArray(value))
+        return undefined;
+    const guestDetails = [];
+    for (const item of value) {
+        if (!item || typeof item !== "object")
+            continue;
+        const guestId = String(item.guestId || "").trim();
+        const email = String(item.email || "")
+            .trim()
+            .toLowerCase();
+        const name = String(item.name || "").trim();
+        const avatar = item.avatar ? String(item.avatar).trim() : undefined;
+        const permission = item.permission;
+        const status = item.status;
+        // Validate required fields
+        if (!guestId || !email || !name)
+            continue;
+        // Validate email format
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+            continue;
+        // Validate permission
+        if (permission !== "edit_event" &&
+            permission !== "view_guest_list" &&
+            permission !== "invite_others") {
+            continue;
+        }
+        // Validate status if provided
+        if (status &&
+            status !== "pending" &&
+            status !== "accepted" &&
+            status !== "declined") {
+            continue;
+        }
+        guestDetails.push({
+            guestId,
+            email,
+            name,
+            avatar,
+            permission,
+            status: status || "pending",
+        });
+    }
+    return guestDetails.length > 0 ? guestDetails : undefined;
+};
 const parseReminderMinutes = (value) => {
     if (value === undefined || value === null)
         return undefined;
@@ -225,6 +276,7 @@ const createTask = async (_req, res) => {
         const type = parseType(_req.body?.type);
         const allDay = _req.body?.allDay !== undefined ? Boolean(_req.body.allDay) : undefined;
         const guests = parseGuests(_req.body?.guests);
+        const guestDetails = parseGuestDetails(_req.body?.guestDetails);
         const location = _req.body?.location !== undefined
             ? String(_req.body.location)
             : undefined;
@@ -248,6 +300,7 @@ const createTask = async (_req, res) => {
             type,
             allDay,
             guests,
+            guestDetails,
             location,
             visibility,
             reminderMinutes,
@@ -475,6 +528,7 @@ const updateTask = async (_req, res) => {
         const typeUpdate = parseType(_req.body?.type);
         const allDayUpdate = _req.body?.allDay !== undefined ? Boolean(_req.body.allDay) : undefined;
         const guestsUpdate = parseGuests(_req.body?.guests);
+        const guestDetailsUpdate = parseGuestDetails(_req.body?.guestDetails);
         const locationUpdate = _req.body?.location !== undefined
             ? String(_req.body.location)
             : undefined;
@@ -499,6 +553,7 @@ const updateTask = async (_req, res) => {
             type: typeUpdate,
             allDay: allDayUpdate,
             guests: guestsUpdate,
+            guestDetails: guestDetailsUpdate,
             location: locationUpdate,
             visibility: visibilityUpdate,
             reminderMinutes: reminderMinutesUpdate,
