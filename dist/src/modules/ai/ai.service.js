@@ -80,22 +80,40 @@ exports.aiService = {
             userId,
             title: input.title,
             deadline: input.deadline,
+            description: input.description,
+            totalMinutes: input.totalMinutes,
         });
         if (cached) {
-            return cached;
+            // Nếu cached nhưng totalMinutes khác → bỏ qua cache, tính lại
+            const cachedTotal = cached.steps?.reduce((s, x) => s + (x.estimatedDuration ?? 0), 0) ?? 0;
+            if (!input.totalMinutes ||
+                Math.abs(cachedTotal - input.totalMinutes) < 5) {
+                return cached;
+            }
         }
         const deadlineText = input.deadline
             ? `Hạn chót: ${input.deadline.toISOString()}`
             : "";
-        const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, rõ ràng, có thể thực thi. Ước tính thời gian cho từng bước.
+        const descriptionText = input.description
+            ? `Mô tả: ${input.description}`
+            : "";
+        const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, cụ thể, mỗi bước là MỘT đơn vị học tập riêng biệt.
 Công việc: ${input.title}
+${descriptionText}
 ${deadlineText}
 
+Ví dụ: nếu công việc là "Học tiếng Anh 12 thì" thì phải tạo ĐÚNG 12 bước, mỗi bước là 1 thì (Present Simple, Present Continuous, Present Perfect, ...).
+Nếu công việc là "Học lập trình Python cơ bản" thì tạo các bước như: Biến và kiểu dữ liệu, Câu lệnh điều kiện, Vòng lặp, Hàm, ...
+
 Yêu cầu bắt buộc:
+- KHÔNG gộp nhiều chủ đề vào 1 bước. Mỗi bước = 1 chủ đề cụ thể.
+- Số bước phải phản ánh đúng số lượng thực tế trong công việc (VD: 12 thì = 12 bước).
 - Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).
-- Format: { "steps": [ { "title": string, "status": "todo", "estimatedDuration": number (phút) } ], "totalEstimatedDuration": number (phút) }
+- Format: { "steps": [ { "title": string, "status": "todo", "estimatedDuration": number (phút), "difficulty": "easy"|"medium"|"hard", "description": string } ], "totalEstimatedDuration": number (phút) }
 - status luôn là "todo".
 - estimatedDuration là thời gian ước tính để hoàn thành bước đó (tính bằng phút).
+- difficulty là độ khó: "easy", "medium", hoặc "hard".
+- description là mô tả ngắn gọn (1-2 câu) về nội dung cần học/làm trong bước đó.
 - totalEstimatedDuration là tổng thời gian ước tính cho cả công việc.`;
         const result = await ai_provider_1.aiProvider.chat({
             messages: [
@@ -109,7 +127,7 @@ Yêu cầu bắt buộc:
                 },
             ],
             temperature: 0.2,
-            maxTokens: 600,
+            maxTokens: 2000,
         });
         const raw = (result.content || "").trim();
         let parsed;
@@ -119,39 +137,87 @@ Yêu cầu bắt buộc:
         catch {
             throw new Error("AI_JSON_INVALID");
         }
-        const steps = Array.isArray(parsed?.steps) ? parsed.steps : null;
-        if (!steps) {
+        const rawSteps = Array.isArray(parsed?.steps) ? parsed.steps : null;
+        if (!rawSteps) {
             throw new Error("AI_RESPONSE_INVALID");
         }
-        const normalized = steps
+        const normalized = rawSteps
             .map((s) => ({
             title: String(s?.title ?? "").trim(),
             status: String(s?.status ?? "todo").trim() || "todo",
             estimatedDuration: typeof s?.estimatedDuration === "number" && s.estimatedDuration > 0
                 ? s.estimatedDuration
                 : undefined,
+            difficulty: ["easy", "medium", "hard"].includes(String(s?.difficulty ?? "").toLowerCase())
+                ? String(s.difficulty).toLowerCase()
+                : undefined,
+            description: String(s?.description ?? "").trim() || undefined,
         }))
             .filter((s) => s.title);
         if (!normalized.length) {
             throw new Error("AI_RESPONSE_INVALID");
         }
+        let steps = normalized.map((s) => ({
+            title: s.title,
+            status: s.status === "todo" ||
+                s.status === "in_progress" ||
+                s.status === "completed" ||
+                s.status === "cancelled"
+                ? s.status
+                : "todo",
+            estimatedDuration: s.estimatedDuration,
+            difficulty: s.difficulty,
+            description: s.description,
+        }));
+        // Post-processing: scale thời gian để tổng = totalMinutes chính xác
+        if (input.totalMinutes && input.totalMinutes > 0 && steps.length > 0) {
+            const currentTotal = steps.reduce((sum, s) => sum + (s.estimatedDuration ?? 60), 0);
+            if (currentTotal > 0) {
+                const scale = input.totalMinutes / currentTotal;
+                // Bước 1: Scale tất cả subtasks (chưa làm tròn)
+                const scaledDurations = steps.map((s) => Math.max(5, (s.estimatedDuration ?? 60) * scale));
+                // Bước 2: Làm tròn xuống bội số 5 cho tất cả
+                const roundedDurations = scaledDurations.map((d) => Math.floor(d / 5) * 5);
+                // Bước 3: Tính phần dư cần phân bổ
+                const roundedTotal = roundedDurations.reduce((sum, d) => sum + d, 0);
+                let remainder = input.totalMinutes - roundedTotal;
+                // Bước 4: Phân bổ phần dư (mỗi lần +5 phút) cho các subtask có phần lẻ lớn nhất
+                const fractionalParts = scaledDurations.map((d, i) => ({
+                    index: i,
+                    fraction: d - roundedDurations[i],
+                }));
+                // Sắp xếp theo phần lẻ giảm dần
+                fractionalParts.sort((a, b) => b.fraction - a.fraction);
+                // Phân bổ phần dư
+                for (let i = 0; i < fractionalParts.length && remainder >= 5; i++) {
+                    const idx = fractionalParts[i].index;
+                    roundedDurations[idx] += 5;
+                    remainder -= 5;
+                }
+                // Bước 5: Nếu vẫn còn dư (< 5 phút), cộng vào subtask cuối
+                if (remainder > 0) {
+                    roundedDurations[roundedDurations.length - 1] += remainder;
+                }
+                // Bước 6: Gán lại estimatedDuration
+                steps = steps.map((s, i) => ({
+                    ...s,
+                    estimatedDuration: Math.max(5, roundedDurations[i]),
+                }));
+            }
+        }
         const response = {
-            steps: normalized.map((s) => ({
-                title: s.title,
-                status: s.status === "todo" ||
-                    s.status === "in_progress" ||
-                    s.status === "completed" ||
-                    s.status === "cancelled"
-                    ? s.status
-                    : "todo",
-                estimatedDuration: s.estimatedDuration,
-            })),
-            totalEstimatedDuration: typeof parsed?.totalEstimatedDuration === "number" &&
-                parsed.totalEstimatedDuration > 0
-                ? parsed.totalEstimatedDuration
-                : normalized.reduce((sum, s) => sum + (s.estimatedDuration || 0), 0),
+            steps,
+            totalEstimatedDuration: input.totalMinutes && input.totalMinutes > 0
+                ? input.totalMinutes
+                : steps.reduce((sum, s) => sum + (s.estimatedDuration ?? 0), 0),
         };
-        await ai_cache_service_1.aiCacheService.setTaskBreakdown({ userId, title: input.title, deadline: input.deadline }, response);
+        await ai_cache_service_1.aiCacheService.setTaskBreakdown({
+            userId,
+            title: input.title,
+            deadline: input.deadline,
+            description: input.description,
+            totalMinutes: input.totalMinutes,
+        }, response);
         return response;
     },
     prioritySuggest: async (userId, input) => {

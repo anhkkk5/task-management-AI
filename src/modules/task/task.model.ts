@@ -38,6 +38,8 @@ export type TaskAttrs = {
     estimatedDuration?: number;
     difficulty?: "easy" | "medium" | "hard";
     description?: string;
+    scheduledDate?: string;
+    scheduledTime?: string;
   }[];
   dailyTargetDuration?: number; // Mục tiêu phút/ngày (max)
   dailyTargetMin?: number; // Mục tiêu tối thiểu phút/ngày
@@ -76,6 +78,8 @@ export type TaskDoc = mongoose.Document & {
     estimatedDuration?: number;
     difficulty?: "easy" | "medium" | "hard";
     description?: string;
+    scheduledDate?: string;
+    scheduledTime?: string;
   }[];
   dailyTargetDuration?: number; // Mục tiêu phút/ngày (max)
   dailyTargetMin?: number; // Mục tiêu tối thiểu phút/ngày

@@ -31,6 +31,7 @@ export const aiCacheService = {
     title: string;
     deadline?: Date;
     description?: string;
+    totalMinutes?: number;
     model?: string;
   }): Promise<{ steps: { title: string; status: string }[] } | null> => {
     try {
@@ -41,7 +42,11 @@ export const aiCacheService = {
       const modelPart = params.model || "default";
       const titleHash = crypto
         .createHash("sha256")
-        .update(params.title + (params.description || ""))
+        .update(
+          params.title +
+            (params.description || "") +
+            (params.totalMinutes?.toString() || ""),
+        )
         .digest("hex")
         .slice(0, 16);
       const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
@@ -62,6 +67,7 @@ export const aiCacheService = {
       title: string;
       deadline?: Date;
       description?: string;
+      totalMinutes?: number;
       model?: string;
     },
     value: { steps: { title: string; status: string }[] },
@@ -75,7 +81,11 @@ export const aiCacheService = {
       const modelPart = params.model || "default";
       const titleHash = crypto
         .createHash("sha256")
-        .update(params.title + (params.description || ""))
+        .update(
+          params.title +
+            (params.description || "") +
+            (params.totalMinutes?.toString() || ""),
+        )
         .digest("hex")
         .slice(0, 16);
       const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;

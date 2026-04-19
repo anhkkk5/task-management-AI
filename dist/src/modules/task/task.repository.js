@@ -160,6 +160,13 @@ exports.taskRepository = {
             userId: params.userId,
         }).exec();
     },
+    deleteManyByParentTaskId: async (params) => {
+        const result = await task_model_1.Task.deleteMany({
+            parentTaskId: params.parentTaskId,
+            userId: params.userId,
+        }).exec();
+        return result.deletedCount || 0;
+    },
     listByUser: async (params) => {
         const filter = {
             userId: params.userId,

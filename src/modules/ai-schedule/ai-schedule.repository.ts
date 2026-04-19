@@ -152,6 +152,39 @@ export class AIScheduleRepository {
   async deleteAllForUser(userId: string): Promise<void> {
     await AISchedule.deleteMany({ userId: new Types.ObjectId(userId) });
   }
+
+  async updateSessionTitlesForTask(
+    userId: string,
+    taskId: string,
+    subtaskTitles: string[],
+  ): Promise<void> {
+    const schedules = await AISchedule.find({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+      sourceTasks: taskId,
+    }).exec();
+
+    for (const schedule of schedules) {
+      let slotIndex = 0;
+      let modified = false;
+      for (const day of schedule.schedule) {
+        for (const session of day.tasks) {
+          if (
+            String(session.taskId) === taskId &&
+            slotIndex < subtaskTitles.length
+          ) {
+            session.title = subtaskTitles[slotIndex];
+            slotIndex++;
+            modified = true;
+          }
+        }
+      }
+      if (modified) {
+        schedule.markModified("schedule");
+        await schedule.save();
+      }
+    }
+  }
 }
 
 export const aiScheduleRepository = new AIScheduleRepository();

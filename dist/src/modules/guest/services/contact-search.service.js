@@ -181,12 +181,11 @@ class ContactSearchService {
      * @returns Contact[] - Parsed contacts
      */
     parseContactsFromResponse(responseData) {
-        if (!responseData.results || !Array.isArray(responseData.results)) {
+        if (!responseData.connections || !Array.isArray(responseData.connections)) {
             return [];
         }
-        return responseData.results
-            .map((result) => {
-            const person = result.person;
+        return responseData.connections
+            .map((person) => {
             if (!person)
                 return null;
             const email = person.emailAddresses?.[0]?.value;
@@ -195,13 +194,15 @@ class ContactSearchService {
             const name = person.names?.[0]?.displayName || email.split("@")[0]; // Fallback to email prefix
             const avatar = person.photos?.[0]?.url;
             const phoneNumbers = person.phoneNumbers?.map((phone) => phone.canonicalForm || phone.value);
-            return {
-                id: result.person.resourceName || email, // Use resourceName as ID
+            const contact = {
+                id: person.resourceName || email, // Use resourceName as ID
                 email: email.toLowerCase(),
                 name,
-                avatar,
+                avatar: avatar || null, // Use null instead of undefined
                 phoneNumbers: phoneNumbers || [],
             };
+            console.log(`[ContactSearchService] Parsed contact: ${contact.name} (${contact.email}) - Avatar: ${contact.avatar ? "YES" : "NO"}`);
+            return contact;
         })
             .filter((contact) => contact !== null);
     }

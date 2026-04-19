@@ -13,6 +13,7 @@ import { notificationRepository } from "../notification/notification.repository"
 import { NotificationType } from "../notification/notification.model";
 import { notificationQueueService } from "../notification/notification.queue";
 import { userRepository } from "../user/user.repository";
+import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 
 export type PublicTask = {
   id: string;
@@ -46,6 +47,8 @@ export type PublicTask = {
     estimatedDuration?: number;
     difficulty?: "easy" | "medium" | "hard";
     description?: string;
+    scheduledDate?: string;
+    scheduledTime?: string;
   }[];
   estimatedDuration?: number;
   dailyTargetDuration?: number; // Max minutes per day
@@ -597,29 +600,133 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
+    // Đọc sessions từ AISchedule
+    const { AISchedule } = await import("../ai-schedule/ai-schedule.model");
+    const activeSchedules = await AISchedule.find({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+      sourceTasks: taskId,
+    }).lean();
+
+    // Thu thập slots theo thứ tự ngày/giờ
+    type Slot = {
+      date: string;
+      day: string;
+      time: string;
+      durationMinutes: number;
+    };
+    const slots: Slot[] = [];
+    for (const schedule of activeSchedules) {
+      for (const day of schedule.schedule) {
+        for (const session of day.tasks) {
+          if (String(session.taskId) === taskId) {
+            let durationMinutes = 60;
+            const m = session.suggestedTime.match(
+              /(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/,
+            );
+            if (m) {
+              durationMinutes =
+                parseInt(m[3]) * 60 +
+                parseInt(m[4]) -
+                (parseInt(m[1]) * 60 + parseInt(m[2]));
+            }
+            slots.push({
+              date: day.date,
+              day: day.day,
+              time: session.suggestedTime,
+              durationMinutes,
+            });
+          }
+        }
+      }
+    }
+    slots.sort((a, b) => a.date.localeCompare(b.date));
+
+    // Tổng thời gian từ slots (nếu có lịch) hoặc từ estimatedDuration
+    const totalSlotMinutes = slots.reduce(
+      (sum, s) => sum + s.durationMinutes,
+      0,
+    );
+    const targetTotalMinutes =
+      task.estimatedDuration || totalSlotMinutes || undefined;
+
     const breakdown = await aiService.taskBreakdown(userId, {
       title: task.title,
       deadline: task.deadline,
       description: task.description,
+      totalMinutes: targetTotalMinutes,
+      slots: slots.length > 0 ? slots : undefined,
+    });
+
+    // Thuật toán phân bổ: gán subtask vào slot theo tỷ lệ thời gian
+    const stepsWithSlot = breakdown.steps.map((s, i) => {
+      let assignedSlot: Slot | undefined;
+
+      if (slots.length === 0) {
+        assignedSlot = undefined;
+      } else if (slots.length === breakdown.steps.length) {
+        // Chẵn → 1-1
+        assignedSlot = slots[i];
+      } else {
+        // Không chẵn → phân bổ theo tỷ lệ tích lũy
+        const totalSubtaskMinutes = breakdown.steps.reduce(
+          (sum: number, step: { estimatedDuration?: number }) =>
+            sum + (step.estimatedDuration ?? 60),
+          0,
+        );
+        const subtaskStartMinutes = breakdown.steps
+          .slice(0, i)
+          .reduce(
+            (sum: number, step: { estimatedDuration?: number }) =>
+              sum + (step.estimatedDuration ?? 60),
+            0,
+          );
+        const subtaskMidMinutes =
+          subtaskStartMinutes + (s.estimatedDuration ?? 60) / 2;
+        const targetSlotMinute =
+          (subtaskMidMinutes / totalSubtaskMinutes) * totalSlotMinutes;
+
+        let accumulated = 0;
+        assignedSlot = slots[slots.length - 1];
+        for (const slot of slots) {
+          accumulated += slot.durationMinutes;
+          if (accumulated >= targetSlotMinute) {
+            assignedSlot = slot;
+            break;
+          }
+        }
+      }
+
+      return {
+        title: s.title,
+        status: s.status as any,
+        estimatedDuration: s.estimatedDuration,
+        difficulty: s.difficulty,
+        description: s.description,
+        scheduledDate: assignedSlot?.date,
+        scheduledTime: assignedSlot?.time,
+      };
     });
 
     const updated = await taskRepository.updateByIdForUser(
       { taskId, userId: new Types.ObjectId(userId) },
       {
-        aiBreakdown: breakdown.steps.map((s) => ({
-          title: s.title,
-          status: s.status as any,
-          estimatedDuration: s.estimatedDuration,
-          difficulty: s.difficulty,
-          description: s.description,
-        })),
-        estimatedDuration: breakdown.totalEstimatedDuration,
+        aiBreakdown: stepsWithSlot,
+        // KHÔNG ghi đè estimatedDuration
       },
     );
 
     if (!updated) {
       throw new Error("TASK_FORBIDDEN");
     }
+
+    // Cập nhật title sessions trong AISchedule
+    const subtaskTitles = stepsWithSlot.map((s) => s.title);
+    await aiScheduleRepository.updateSessionTitlesForTask(
+      userId,
+      taskId,
+      subtaskTitles,
+    );
 
     await invalidateTasksCache(userId);
     return toPublicTask(updated);

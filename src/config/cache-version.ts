@@ -15,7 +15,7 @@ export const CACHE_VERSION = {
   SCHEDULER: "v6", // Tăng lên v6 sau khi fix break boundary và thêm clear scheduledTime
 
   // AI cache version
-  AI: "v2", // Tăng lên v2 sau khi chuyển sang hybrid algorithm
+  AI: "v3", // Tăng lên v3 sau khi fix thuật toán scale thời gian breakdown
 
   // Slot finder cache version
   SLOT_FINDER: "v3", // Tăng lên v3 sau khi thêm adaptive buffer

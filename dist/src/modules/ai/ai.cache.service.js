@@ -32,7 +32,9 @@ exports.aiCacheService = {
             const modelPart = params.model || "default";
             const titleHash = crypto_1.default
                 .createHash("sha256")
-                .update(params.title)
+                .update(params.title +
+                (params.description || "") +
+                (params.totalMinutes?.toString() || ""))
                 .digest("hex")
                 .slice(0, 16);
             const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;
@@ -55,7 +57,9 @@ exports.aiCacheService = {
             const modelPart = params.model || "default";
             const titleHash = crypto_1.default
                 .createHash("sha256")
-                .update(params.title)
+                .update(params.title +
+                (params.description || "") +
+                (params.totalMinutes?.toString() || ""))
                 .digest("hex")
                 .slice(0, 16);
             const baseKey = `ai:task-breakdown:${params.userId}:${titleHash}:${deadlinePart}:${modelPart}`;

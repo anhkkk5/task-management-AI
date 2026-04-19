@@ -73,7 +73,18 @@ export const aiService = {
 
   taskBreakdown: async (
     userId: string,
-    input: { title: string; deadline?: Date; description?: string },
+    input: {
+      title: string;
+      deadline?: Date;
+      description?: string;
+      totalMinutes?: number;
+      slots?: {
+        date: string;
+        day: string;
+        time: string;
+        durationMinutes?: number;
+      }[];
+    },
   ): Promise<{
     steps: {
       title: string;
@@ -93,9 +104,21 @@ export const aiService = {
       title: input.title,
       deadline: input.deadline,
       description: input.description,
+      totalMinutes: input.totalMinutes,
     });
     if (cached) {
-      return cached;
+      // Nếu cached nhưng totalMinutes khác → bỏ qua cache, tính lại
+      const cachedTotal =
+        cached.steps?.reduce(
+          (s: number, x: any) => s + (x.estimatedDuration ?? 0),
+          0,
+        ) ?? 0;
+      if (
+        !input.totalMinutes ||
+        Math.abs(cachedTotal - input.totalMinutes) < 5
+      ) {
+        return cached;
+      }
     }
 
     const deadlineText = input.deadline
@@ -150,12 +173,12 @@ Yêu cầu bắt buộc:
       throw new Error("AI_JSON_INVALID");
     }
 
-    const steps = Array.isArray(parsed?.steps) ? parsed.steps : null;
-    if (!steps) {
+    const rawSteps = Array.isArray(parsed?.steps) ? parsed.steps : null;
+    if (!rawSteps) {
       throw new Error("AI_RESPONSE_INVALID");
     }
 
-    const normalized = steps
+    const normalized = rawSteps
       .map((s: any) => ({
         title: String(s?.title ?? "").trim(),
         status: String(s?.status ?? "todo").trim() || "todo",
@@ -176,26 +199,100 @@ Yêu cầu bắt buộc:
       throw new Error("AI_RESPONSE_INVALID");
     }
 
+    let steps = normalized.map((s: any) => ({
+      title: s.title,
+      status:
+        s.status === "todo" ||
+        s.status === "in_progress" ||
+        s.status === "completed" ||
+        s.status === "cancelled"
+          ? s.status
+          : "todo",
+      estimatedDuration: s.estimatedDuration as number | undefined,
+      difficulty: s.difficulty as "easy" | "medium" | "hard" | undefined,
+      description: s.description as string | undefined,
+    }));
+
+    // Post-processing: scale thời gian để tổng = totalMinutes chính xác
+    if (input.totalMinutes && input.totalMinutes > 0 && steps.length > 0) {
+      const currentTotal = steps.reduce(
+        (sum: number, s: { estimatedDuration?: number }) =>
+          sum + (s.estimatedDuration ?? 60),
+        0,
+      );
+      if (currentTotal > 0) {
+        const scale = input.totalMinutes / currentTotal;
+
+        // Bước 1: Scale tất cả subtasks (chưa làm tròn)
+        const scaledDurations = steps.map((s: { estimatedDuration?: number }) =>
+          Math.max(5, (s.estimatedDuration ?? 60) * scale),
+        );
+
+        // Bước 2: Làm tròn xuống bội số 5 cho tất cả
+        const roundedDurations = scaledDurations.map(
+          (d: number) => Math.floor(d / 5) * 5,
+        );
+
+        // Bước 3: Tính phần dư cần phân bổ
+        const roundedTotal = roundedDurations.reduce(
+          (sum: number, d: number) => sum + d,
+          0,
+        );
+        let remainder = input.totalMinutes - roundedTotal;
+
+        // Bước 4: Phân bổ phần dư (mỗi lần +5 phút) cho các subtask có phần lẻ lớn nhất
+        const fractionalParts = scaledDurations.map((d: number, i: number) => ({
+          index: i,
+          fraction: d - roundedDurations[i],
+        }));
+
+        // Sắp xếp theo phần lẻ giảm dần
+        fractionalParts.sort(
+          (
+            a: { index: number; fraction: number },
+            b: { index: number; fraction: number },
+          ) => b.fraction - a.fraction,
+        );
+
+        // Phân bổ phần dư
+        for (let i = 0; i < fractionalParts.length && remainder >= 5; i++) {
+          const idx = fractionalParts[i].index;
+          roundedDurations[idx] += 5;
+          remainder -= 5;
+        }
+
+        // Bước 5: Nếu vẫn còn dư (< 5 phút), cộng vào subtask cuối
+        if (remainder > 0) {
+          roundedDurations[roundedDurations.length - 1] += remainder;
+        }
+
+        // Bước 6: Gán lại estimatedDuration
+        steps = steps.map(
+          (
+            s: {
+              title: string;
+              status: string;
+              estimatedDuration?: number;
+              difficulty?: "easy" | "medium" | "hard";
+              description?: string;
+            },
+            i: number,
+          ) => ({
+            ...s,
+            estimatedDuration: Math.max(5, roundedDurations[i]),
+          }),
+        );
+      }
+    }
+
     const response = {
-      steps: normalized.map((s: any) => ({
-        title: s.title,
-        status:
-          s.status === "todo" ||
-          s.status === "in_progress" ||
-          s.status === "completed" ||
-          s.status === "cancelled"
-            ? s.status
-            : "todo",
-        estimatedDuration: s.estimatedDuration,
-        difficulty: s.difficulty,
-        description: s.description,
-      })),
+      steps,
       totalEstimatedDuration:
-        typeof parsed?.totalEstimatedDuration === "number" &&
-        parsed.totalEstimatedDuration > 0
-          ? parsed.totalEstimatedDuration
-          : normalized.reduce(
-              (sum: number, s: any) => sum + (s.estimatedDuration || 0),
+        input.totalMinutes && input.totalMinutes > 0
+          ? input.totalMinutes
+          : steps.reduce(
+              (sum: number, s: { estimatedDuration?: number }) =>
+                sum + (s.estimatedDuration ?? 0),
               0,
             ),
     };
@@ -206,6 +303,7 @@ Yêu cầu bắt buộc:
         title: input.title,
         deadline: input.deadline,
         description: input.description,
+        totalMinutes: input.totalMinutes,
       },
       response,
     );

@@ -125,6 +125,11 @@ const taskSchema = new mongoose_1.Schema({
                     default: "todo",
                 },
                 estimatedDuration: { type: Number, min: 0 }, // Phút
+                difficulty: {
+                    type: String,
+                    enum: ["easy", "medium", "hard"],
+                },
+                description: { type: String },
             },
         ],
         default: [],

@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.taskService = void 0;
 const mongoose_1 = require("mongoose");
@@ -10,6 +43,7 @@ const notification_repository_1 = require("../notification/notification.reposito
 const notification_model_1 = require("../notification/notification.model");
 const notification_queue_1 = require("../notification/notification.queue");
 const user_repository_1 = require("../user/user.repository");
+const ai_schedule_repository_1 = require("../ai-schedule/ai-schedule.repository");
 const toPublicTask = (t) => {
     return {
         id: String(t._id),
@@ -43,6 +77,8 @@ const toPublicTask = (t) => {
             title: x.title,
             status: x.status,
             estimatedDuration: x.estimatedDuration,
+            difficulty: x.difficulty,
+            description: x.description,
         })),
         estimatedDuration: t.estimatedDuration,
         dailyTargetDuration: t.dailyTargetDuration,
@@ -369,6 +405,36 @@ exports.taskService = {
         if (!deleted) {
             throw new Error("TASK_FORBIDDEN");
         }
+        // Cascade delete: Xóa tất cả task con có parentTaskId trỏ đến task vừa xóa
+        const deletedChildrenCount = await task_repository_1.taskRepository.deleteManyByParentTaskId({
+            parentTaskId: taskId,
+            userId: new mongoose_1.Types.ObjectId(userId),
+        });
+        if (deletedChildrenCount > 0) {
+            console.log(`[TaskDelete] Đã xóa ${deletedChildrenCount} task con của task ${taskId}`);
+        }
+        // Xóa sessions của taskId này khỏi tất cả AISchedule
+        const { AISchedule } = await Promise.resolve().then(() => __importStar(require("../ai-schedule/ai-schedule.model")));
+        const schedules = await AISchedule.find({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            isActive: true,
+        }).exec();
+        for (const schedule of schedules) {
+            let modified = false;
+            for (const day of schedule.schedule) {
+                const before = day.tasks.length;
+                day.tasks = day.tasks.filter((s) => String(s.taskId) !== taskId);
+                if (day.tasks.length !== before)
+                    modified = true;
+            }
+            if (modified) {
+                schedule.sourceTasks = schedule.sourceTasks.filter((id) => id !== taskId);
+                schedule.markModified("schedule");
+                schedule.markModified("sourceTasks");
+                await schedule.save();
+                console.log(`[TaskDelete] Đã xóa sessions của task ${taskId} khỏi schedule ${schedule._id}`);
+            }
+        }
         await invalidateTasksCache(userId);
         return { message: "Xóa task thành công" };
     },
@@ -380,21 +446,95 @@ exports.taskService = {
         if (!task) {
             throw new Error("TASK_FORBIDDEN");
         }
+        // Đọc sessions từ AISchedule
+        const { AISchedule } = await Promise.resolve().then(() => __importStar(require("../ai-schedule/ai-schedule.model")));
+        const activeSchedules = await AISchedule.find({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            isActive: true,
+            sourceTasks: taskId,
+        }).lean();
+        const slots = [];
+        for (const schedule of activeSchedules) {
+            for (const day of schedule.schedule) {
+                for (const session of day.tasks) {
+                    if (String(session.taskId) === taskId) {
+                        let durationMinutes = 60;
+                        const m = session.suggestedTime.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+                        if (m) {
+                            durationMinutes =
+                                parseInt(m[3]) * 60 +
+                                    parseInt(m[4]) -
+                                    (parseInt(m[1]) * 60 + parseInt(m[2]));
+                        }
+                        slots.push({
+                            date: day.date,
+                            day: day.day,
+                            time: session.suggestedTime,
+                            durationMinutes,
+                        });
+                    }
+                }
+            }
+        }
+        slots.sort((a, b) => a.date.localeCompare(b.date));
+        // Tổng thời gian từ slots (nếu có lịch) hoặc từ estimatedDuration
+        const totalSlotMinutes = slots.reduce((sum, s) => sum + s.durationMinutes, 0);
+        const targetTotalMinutes = task.estimatedDuration || totalSlotMinutes || undefined;
         const breakdown = await ai_service_1.aiService.taskBreakdown(userId, {
             title: task.title,
             deadline: task.deadline,
+            description: task.description,
+            totalMinutes: targetTotalMinutes,
+            slots: slots.length > 0 ? slots : undefined,
         });
-        const updated = await task_repository_1.taskRepository.updateByIdForUser({ taskId, userId: new mongoose_1.Types.ObjectId(userId) }, {
-            aiBreakdown: breakdown.steps.map((s) => ({
+        // Thuật toán phân bổ: gán subtask vào slot theo tỷ lệ thời gian
+        const stepsWithSlot = breakdown.steps.map((s, i) => {
+            let assignedSlot;
+            if (slots.length === 0) {
+                assignedSlot = undefined;
+            }
+            else if (slots.length === breakdown.steps.length) {
+                // Chẵn → 1-1
+                assignedSlot = slots[i];
+            }
+            else {
+                // Không chẵn → phân bổ theo tỷ lệ tích lũy
+                const totalSubtaskMinutes = breakdown.steps.reduce((sum, step) => sum + (step.estimatedDuration ?? 60), 0);
+                const subtaskStartMinutes = breakdown.steps
+                    .slice(0, i)
+                    .reduce((sum, step) => sum + (step.estimatedDuration ?? 60), 0);
+                const subtaskMidMinutes = subtaskStartMinutes + (s.estimatedDuration ?? 60) / 2;
+                const targetSlotMinute = (subtaskMidMinutes / totalSubtaskMinutes) * totalSlotMinutes;
+                let accumulated = 0;
+                assignedSlot = slots[slots.length - 1];
+                for (const slot of slots) {
+                    accumulated += slot.durationMinutes;
+                    if (accumulated >= targetSlotMinute) {
+                        assignedSlot = slot;
+                        break;
+                    }
+                }
+            }
+            return {
                 title: s.title,
                 status: s.status,
                 estimatedDuration: s.estimatedDuration,
-            })),
-            estimatedDuration: breakdown.totalEstimatedDuration,
+                difficulty: s.difficulty,
+                description: s.description,
+                scheduledDate: assignedSlot?.date,
+                scheduledTime: assignedSlot?.time,
+            };
+        });
+        const updated = await task_repository_1.taskRepository.updateByIdForUser({ taskId, userId: new mongoose_1.Types.ObjectId(userId) }, {
+            aiBreakdown: stepsWithSlot,
+            // KHÔNG ghi đè estimatedDuration
         });
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
+        // Cập nhật title sessions trong AISchedule
+        const subtaskTitles = stepsWithSlot.map((s) => s.title);
+        await ai_schedule_repository_1.aiScheduleRepository.updateSessionTitlesForTask(userId, taskId, subtaskTitles);
         await invalidateTasksCache(userId);
         return toPublicTask(updated);
     },

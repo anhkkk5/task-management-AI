@@ -75,6 +75,8 @@ export type UpdateTaskDto = {
     estimatedDuration?: number;
     difficulty?: "easy" | "medium" | "hard";
     description?: string;
+    scheduledDate?: string;
+    scheduledTime?: string;
   }[];
   estimatedDuration?: number;
   dailyTargetDuration?: number;

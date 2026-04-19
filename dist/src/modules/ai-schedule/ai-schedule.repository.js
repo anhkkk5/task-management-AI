@@ -98,6 +98,31 @@ class AIScheduleRepository {
     async deleteAllForUser(userId) {
         await ai_schedule_model_1.AISchedule.deleteMany({ userId: new mongoose_1.Types.ObjectId(userId) });
     }
+    async updateSessionTitlesForTask(userId, taskId, subtaskTitles) {
+        const schedules = await ai_schedule_model_1.AISchedule.find({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            isActive: true,
+            sourceTasks: taskId,
+        }).exec();
+        for (const schedule of schedules) {
+            let slotIndex = 0;
+            let modified = false;
+            for (const day of schedule.schedule) {
+                for (const session of day.tasks) {
+                    if (String(session.taskId) === taskId &&
+                        slotIndex < subtaskTitles.length) {
+                        session.title = subtaskTitles[slotIndex];
+                        slotIndex++;
+                        modified = true;
+                    }
+                }
+            }
+            if (modified) {
+                schedule.markModified("schedule");
+                await schedule.save();
+            }
+        }
+    }
 }
 exports.AIScheduleRepository = AIScheduleRepository;
 exports.aiScheduleRepository = new AIScheduleRepository();
