@@ -301,6 +301,7 @@ export const taskRepository = {
     const filter: Record<string, unknown> = {
       userId: params.userId,
       isArchived: { $ne: true },
+      parentTaskId: { $exists: false }, // Chỉ lấy task cha, không lấy subtask
     };
 
     if (params.status) {
