@@ -545,6 +545,45 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
+    // Cascade delete: Xóa tất cả task con có parentTaskId trỏ đến task vừa xóa
+    const deletedChildrenCount = await taskRepository.deleteManyByParentTaskId({
+      parentTaskId: taskId,
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (deletedChildrenCount > 0) {
+      console.log(
+        `[TaskDelete] Đã xóa ${deletedChildrenCount} task con của task ${taskId}`,
+      );
+    }
+
+    // Xóa sessions của taskId này khỏi tất cả AISchedule
+    const { AISchedule } = await import("../ai-schedule/ai-schedule.model");
+    const schedules = await AISchedule.find({
+      userId: new Types.ObjectId(userId),
+      isActive: true,
+    }).exec();
+
+    for (const schedule of schedules) {
+      let modified = false;
+      for (const day of schedule.schedule) {
+        const before = day.tasks.length;
+        day.tasks = day.tasks.filter((s) => String(s.taskId) !== taskId);
+        if (day.tasks.length !== before) modified = true;
+      }
+      if (modified) {
+        schedule.sourceTasks = schedule.sourceTasks.filter(
+          (id) => id !== taskId,
+        );
+        schedule.markModified("schedule");
+        schedule.markModified("sourceTasks");
+        await schedule.save();
+        console.log(
+          `[TaskDelete] Đã xóa sessions của task ${taskId} khỏi schedule ${schedule._id}`,
+        );
+      }
+    }
+
     await invalidateTasksCache(userId);
     return { message: "Xóa task thành công" };
   },

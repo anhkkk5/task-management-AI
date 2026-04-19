@@ -273,6 +273,17 @@ export const taskRepository = {
     }).exec();
   },
 
+  deleteManyByParentTaskId: async (params: {
+    parentTaskId: string | Types.ObjectId;
+    userId: string | Types.ObjectId;
+  }): Promise<number> => {
+    const result = await Task.deleteMany({
+      parentTaskId: params.parentTaskId,
+      userId: params.userId,
+    }).exec();
+    return result.deletedCount || 0;
+  },
+
   listByUser: async (params: {
     userId: string | Types.ObjectId;
     status?: TaskStatus;
