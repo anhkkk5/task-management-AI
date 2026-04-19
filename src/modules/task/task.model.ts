@@ -36,6 +36,8 @@ export type TaskAttrs = {
     title: string;
     status?: TaskStatus;
     estimatedDuration?: number;
+    difficulty?: "easy" | "medium" | "hard";
+    description?: string;
   }[];
   dailyTargetDuration?: number; // Mục tiêu phút/ngày (max)
   dailyTargetMin?: number; // Mục tiêu tối thiểu phút/ngày
@@ -72,6 +74,8 @@ export type TaskDoc = mongoose.Document & {
     title: string;
     status: TaskStatus;
     estimatedDuration?: number;
+    difficulty?: "easy" | "medium" | "hard";
+    description?: string;
   }[];
   dailyTargetDuration?: number; // Mục tiêu phút/ngày (max)
   dailyTargetMin?: number; // Mục tiêu tối thiểu phút/ngày
@@ -181,6 +185,11 @@ const taskSchema = new Schema<TaskDoc>(
             default: "todo",
           },
           estimatedDuration: { type: Number, min: 0 }, // Phút
+          difficulty: {
+            type: String,
+            enum: ["easy", "medium", "hard"],
+          },
+          description: { type: String },
         },
       ],
       default: [],

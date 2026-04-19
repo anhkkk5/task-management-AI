@@ -40,7 +40,13 @@ export type PublicTask = {
   meetingLink?: string;
   userId: string;
   parentTaskId?: string;
-  aiBreakdown: { title: string; status: string; estimatedDuration?: number }[];
+  aiBreakdown: {
+    title: string;
+    status: string;
+    estimatedDuration?: number;
+    difficulty?: "easy" | "medium" | "hard";
+    description?: string;
+  }[];
   estimatedDuration?: number;
   dailyTargetDuration?: number; // Max minutes per day
   dailyTargetMin?: number; // Min minutes per day
@@ -88,6 +94,8 @@ const toPublicTask = (t: any): PublicTask => {
       title: x.title,
       status: x.status,
       estimatedDuration: x.estimatedDuration,
+      difficulty: x.difficulty,
+      description: x.description,
     })),
     estimatedDuration: t.estimatedDuration,
     dailyTargetDuration: t.dailyTargetDuration,
@@ -553,6 +561,7 @@ export const taskService = {
     const breakdown = await aiService.taskBreakdown(userId, {
       title: task.title,
       deadline: task.deadline,
+      description: task.description,
     });
 
     const updated = await taskRepository.updateByIdForUser(
@@ -562,6 +571,8 @@ export const taskService = {
           title: s.title,
           status: s.status as any,
           estimatedDuration: s.estimatedDuration,
+          difficulty: s.difficulty,
+          description: s.description,
         })),
         estimatedDuration: breakdown.totalEstimatedDuration,
       },

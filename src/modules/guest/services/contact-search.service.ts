@@ -214,13 +214,12 @@ export class ContactSearchService {
    * @returns Contact[] - Parsed contacts
    */
   private parseContactsFromResponse(responseData: any): Contact[] {
-    if (!responseData.results || !Array.isArray(responseData.results)) {
+    if (!responseData.connections || !Array.isArray(responseData.connections)) {
       return [];
     }
 
-    return responseData.results
-      .map((result: any) => {
-        const person = result.person;
+    return responseData.connections
+      .map((person: any) => {
         if (!person) return null;
 
         const email = person.emailAddresses?.[0]?.value;
@@ -232,13 +231,19 @@ export class ContactSearchService {
           (phone: any) => phone.canonicalForm || phone.value,
         );
 
-        return {
-          id: result.person.resourceName || email, // Use resourceName as ID
+        const contact: Contact = {
+          id: person.resourceName || email, // Use resourceName as ID
           email: email.toLowerCase(),
           name,
-          avatar,
+          avatar: avatar || null, // Use null instead of undefined
           phoneNumbers: phoneNumbers || [],
         };
+
+        console.log(
+          `[ContactSearchService] Parsed contact: ${contact.name} (${contact.email}) - Avatar: ${contact.avatar ? "YES" : "NO"}`,
+        );
+
+        return contact;
       })
       .filter((contact: Contact | null) => contact !== null);
   }

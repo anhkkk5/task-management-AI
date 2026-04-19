@@ -73,6 +73,8 @@ export type UpdateTaskDto = {
     title: string;
     status?: TaskStatus;
     estimatedDuration?: number;
+    difficulty?: "easy" | "medium" | "hard";
+    description?: string;
   }[];
   estimatedDuration?: number;
   dailyTargetDuration?: number;

@@ -73,9 +73,15 @@ export const aiService = {
 
   taskBreakdown: async (
     userId: string,
-    input: { title: string; deadline?: Date },
+    input: { title: string; deadline?: Date; description?: string },
   ): Promise<{
-    steps: { title: string; status: string; estimatedDuration?: number }[];
+    steps: {
+      title: string;
+      status: string;
+      estimatedDuration?: number;
+      difficulty?: "easy" | "medium" | "hard";
+      description?: string;
+    }[];
     totalEstimatedDuration?: number;
   }> => {
     if (!Types.ObjectId.isValid(userId)) {
@@ -86,6 +92,7 @@ export const aiService = {
       userId,
       title: input.title,
       deadline: input.deadline,
+      description: input.description,
     });
     if (cached) {
       return cached;
@@ -95,15 +102,27 @@ export const aiService = {
       ? `Hạn chót: ${input.deadline.toISOString()}`
       : "";
 
-    const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, rõ ràng, có thể thực thi. Ước tính thời gian cho từng bước.
+    const descriptionText = input.description
+      ? `Mô tả: ${input.description}`
+      : "";
+
+    const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, cụ thể, mỗi bước là MỘT đơn vị học tập riêng biệt.
 Công việc: ${input.title}
+${descriptionText}
 ${deadlineText}
 
+Ví dụ: nếu công việc là "Học tiếng Anh 12 thì" thì phải tạo ĐÚNG 12 bước, mỗi bước là 1 thì (Present Simple, Present Continuous, Present Perfect, ...).
+Nếu công việc là "Học lập trình Python cơ bản" thì tạo các bước như: Biến và kiểu dữ liệu, Câu lệnh điều kiện, Vòng lặp, Hàm, ...
+
 Yêu cầu bắt buộc:
+- KHÔNG gộp nhiều chủ đề vào 1 bước. Mỗi bước = 1 chủ đề cụ thể.
+- Số bước phải phản ánh đúng số lượng thực tế trong công việc (VD: 12 thì = 12 bước).
 - Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).
-- Format: { "steps": [ { "title": string, "status": "todo", "estimatedDuration": number (phút) } ], "totalEstimatedDuration": number (phút) }
+- Format: { "steps": [ { "title": string, "status": "todo", "estimatedDuration": number (phút), "difficulty": "easy"|"medium"|"hard", "description": string } ], "totalEstimatedDuration": number (phút) }
 - status luôn là "todo".
 - estimatedDuration là thời gian ước tính để hoàn thành bước đó (tính bằng phút).
+- difficulty là độ khó: "easy", "medium", hoặc "hard".
+- description là mô tả ngắn gọn (1-2 câu) về nội dung cần học/làm trong bước đó.
 - totalEstimatedDuration là tổng thời gian ước tính cho cả công việc.`;
 
     const result = await aiProvider.chat({
@@ -119,7 +138,7 @@ Yêu cầu bắt buộc:
         },
       ],
       temperature: 0.2,
-      maxTokens: 600,
+      maxTokens: 2000,
     });
 
     const raw = (result.content || "").trim();
@@ -144,6 +163,12 @@ Yêu cầu bắt buộc:
           typeof s?.estimatedDuration === "number" && s.estimatedDuration > 0
             ? s.estimatedDuration
             : undefined,
+        difficulty: ["easy", "medium", "hard"].includes(
+          String(s?.difficulty ?? "").toLowerCase(),
+        )
+          ? (String(s.difficulty).toLowerCase() as "easy" | "medium" | "hard")
+          : undefined,
+        description: String(s?.description ?? "").trim() || undefined,
       }))
       .filter((s: any) => s.title);
 
@@ -162,6 +187,8 @@ Yêu cầu bắt buộc:
             ? s.status
             : "todo",
         estimatedDuration: s.estimatedDuration,
+        difficulty: s.difficulty,
+        description: s.description,
       })),
       totalEstimatedDuration:
         typeof parsed?.totalEstimatedDuration === "number" &&
@@ -174,7 +201,12 @@ Yêu cầu bắt buộc:
     };
 
     await aiCacheService.setTaskBreakdown(
-      { userId, title: input.title, deadline: input.deadline },
+      {
+        userId,
+        title: input.title,
+        deadline: input.deadline,
+        description: input.description,
+      },
       response,
     );
 

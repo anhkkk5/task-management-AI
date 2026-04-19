@@ -74,6 +74,8 @@ export const taskRepository = {
         title: string;
         status?: TaskStatus;
         estimatedDuration?: number;
+        difficulty?: "easy" | "medium" | "hard";
+        description?: string;
       }[];
       estimatedDuration?: number;
       dailyTargetDuration?: number;
@@ -180,6 +182,8 @@ export const taskRepository = {
         title: string;
         status?: TaskStatus;
         estimatedDuration?: number;
+        difficulty?: "easy" | "medium" | "hard";
+        description?: string;
       }[];
       estimatedDuration?: number;
       dailyTargetDuration?: number;
