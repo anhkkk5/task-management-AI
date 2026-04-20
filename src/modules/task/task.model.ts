@@ -52,6 +52,14 @@ export type TaskAttrs = {
     reason?: string;
   };
   isArchived?: boolean;
+  teamAssignment?: {
+    teamId: Types.ObjectId;
+    assigneeId: Types.ObjectId;
+    assigneeEmail: string;
+    assigneeName: string;
+    assignedBy: Types.ObjectId;
+    assignedAt: Date;
+  };
 };
 
 export type TaskDoc = mongoose.Document & {
@@ -94,6 +102,14 @@ export type TaskDoc = mongoose.Document & {
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
+  teamAssignment?: {
+    teamId: Types.ObjectId;
+    assigneeId: Types.ObjectId;
+    assigneeEmail: string;
+    assigneeName: string;
+    assignedBy: Types.ObjectId;
+    assignedAt: Date;
+  };
 };
 
 type TaskModel = mongoose.Model<TaskDoc>;
@@ -209,6 +225,14 @@ const taskSchema = new Schema<TaskDoc>(
       reason: { type: String },
     },
     isArchived: { type: Boolean, default: false, index: true },
+    teamAssignment: {
+      teamId: { type: Schema.Types.ObjectId, index: true },
+      assigneeId: { type: Schema.Types.ObjectId, index: true },
+      assigneeEmail: { type: String },
+      assigneeName: { type: String },
+      assignedBy: { type: Schema.Types.ObjectId },
+      assignedAt: { type: Date },
+    },
   },
   { timestamps: true },
 );
