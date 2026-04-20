@@ -1,0 +1,200 @@
+ColorPalette:
+  type: object
+  description: Color palette organized by role and intensity
+  properties:
+    neutral:
+      type: object
+      description: Neutral colors (60%) - Clean white and light gray backgrounds
+      properties:
+        white:
+          type: string
+          example: "#FFFFFF"
+          description: Pure white - primary background
+        offWhite:
+          type: string
+          example: "#F9FAFB"
+          description: Off-white - subtle background variation
+        lightGray:
+          type: string
+          example: "#F5F7FA"
+          description: Light gray - secondary background
+        mediumLightGray:
+          type: string
+          example: "#E8ECEF"
+          description: Medium light gray - tertiary background
+        lightBorderGray:
+          type: string
+          example: "#D1D5DB"
+          description: Light border gray - borders and dividers
+    softBlue:
+      type: object
+      description: Soft blue colors (30%) - Professional blue accents inspired by MongoDB
+      properties:
+        primary:
+          type: string
+          example: "#0066CC"
+          description: Primary blue - main accent color
+        secondary:
+          type: string
+          example: "#1A73E8"
+          description: Secondary blue - hover and active states
+        light:
+          type: string
+          example: "#4D94FF"
+          description: Light blue - lighter accents
+        lighter:
+          type: string
+          example: "#B3D9FF"
+          description: Lighter blue - subtle backgrounds
+        veryLight:
+          type: string
+          example: "#E6F0FF"
+          description: Very light blue - very subtle backgrounds
+    accent:
+      type: object
+      description: Accent colors (10%) - Semantic colors for user feedback and states
+      properties:
+        success:
+          type: string
+          example: "#10B981"
+          description: Success - positive feedback
+        warning:
+          type: string
+          example: "#F59E0B"
+          description: Warning - caution and alerts
+        error:
+          type: string
+          example: "#EF4444"
+          description: Error - critical issues
+        info:
+          type: string
+          example: "#3B82F6"
+          description: Info - informational messages
+
+DesignTokens:
+  type: object
+  description: Semantic design tokens that map to specific colors from the palette
+  properties:
+    background:
+      type: object
+      description: Background color tokens
+      properties:
+        primary:
+          type: string
+          example: "#FFFFFF"
+        secondary:
+          type: string
+          example: "#F9FAFB"
+        tertiary:
+          type: string
+          example: "#F5F7FA"
+    button:
+      type: object
+      description: Button styling tokens
+      properties:
+        primary:
+          type: object
+          properties:
+            bg:
+              type: string
+              example: "#0066CC"
+            bgHover:
+              type: string
+              example: "#1A73E8"
+            text:
+              type: string
+              example: "#FFFFFF"
+        secondary:
+          type: object
+          properties:
+            bg:
+              type: string
+              example: "#F5F7FA"
+            bgHover:
+              type: string
+              example: "#E8ECEF"
+            text:
+              type: string
+              example: "#0066CC"
+        disabled:
+          type: object
+          properties:
+            bg:
+              type: string
+              example: "#E8ECEF"
+            text:
+              type: string
+              example: "#D1D5DB"
+    card:
+      type: object
+      description: Card and surface styling tokens
+      properties:
+        bg:
+          type: string
+          example: "#FFFFFF"
+        border:
+          type: string
+          example: "#D1D5DB"
+        shadow:
+          type: string
+          example: "rgba(0, 0, 0, 0.06)"
+    text:
+      type: object
+      description: Text color tokens
+      properties:
+        primary:
+          type: string
+          example: "#3C4043"
+        secondary:
+          type: string
+          example: "#5F6368"
+        tertiary:
+          type: string
+          example: "#70757A"
+        inverse:
+          type: string
+          example: "#FFFFFF"
+    border:
+      type: object
+      description: Border color tokens
+      properties:
+        light:
+          type: string
+          example: "#D1D5DB"
+        medium:
+          type: string
+          example: "#E8ECEF"
+    state:
+      type: object
+      description: State color tokens
+      properties:
+        success:
+          type: string
+          example: "#10B981"
+        warning:
+          type: string
+          example: "#F59E0B"
+        error:
+          type: string
+          example: "#EF4444"
+        info:
+          type: string
+          example: "#3B82F6"
+
+ColorConfigResponse:
+  type: object
+  description: Complete color configuration response
+  properties:
+    palette:
+      $ref: "#/ColorPalette"
+    tokens:
+      $ref: "#/DesignTokens"
+    version:
+      type: string
+      example: "1.0.0"
+      description: Color system version
+    lastUpdated:
+      type: string
+      format: date-time
+      example: "2024-01-15T10:30:00.000Z"
+      description: ISO timestamp of last update

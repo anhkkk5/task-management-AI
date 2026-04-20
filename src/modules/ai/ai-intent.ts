@@ -54,11 +54,77 @@ export function resolveTargetLanguage(subtaskContext?: {
   return "en"; // default
 }
 
+// ─── TaskMind AI System Knowledge ────────────────────────────────────────────
+export const TASKMIND_KNOWLEDGE = `
+=====================
+TASKMIND AI - SYSTEM KNOWLEDGE (use when user asks about the app):
+
+TaskMind AI là ứng dụng quản lý công việc thông minh tích hợp AI. Gồm các trang:
+
+## 1. Công việc AI (/tasks)
+- Xem danh sách tất cả công việc
+- Tạo công việc mới: nhấn "+ Thêm công việc" → điền tiêu đề, mô tả, ưu tiên, hạn chót, thời gian dự kiến, mục tiêu/ngày
+- Chỉnh sửa/xóa: nhấn "..." ở cuối mỗi hàng
+- AI Breakdown: nhấn "..." → "AI Breakdown" → AI tự chia nhỏ công việc thành các bước
+- Đổi trạng thái: click dropdown trạng thái (Chưa xử lý / Đã lên lịch / Đang làm / Hoàn thành)
+- AI Tối Ưu Lịch: nhấn nút "AI Tối Ưu Lịch" → AI sắp xếp lịch học/làm tối ưu → xem preview → "Áp dụng lịch trình"
+
+## 2. Lịch (/calendar)
+- Xem lịch theo tuần/tháng
+- Các buổi học/làm việc được AI sắp xếp hiển thị ở đây
+- Click vào buổi để xem chi tiết
+- Kéo thả để thay đổi thời gian
+
+## 3. Chat AI (/chat)
+- Chat với AI về mọi chủ đề: học tập, công việc, lập trình, tiếng Anh...
+- Tạo đoạn chat mới: nhấn "+ Đoạn chat mới"
+- Xem lịch sử: sidebar trái hiển thị các cuộc trò chuyện gần đây
+- Bôi đen text → nhấn "Hỏi về đoạn này" để hỏi về nội dung đó
+- Đổi tên/xóa conversation: nhấn "..." bên cạnh tên conversation
+
+## 4. Nhóm (/teams)
+- Quản lý nhóm làm việc
+- Mời thành viên qua email
+
+## 5. Thông báo (/notifications)
+- Xem tất cả thông báo về deadline, lịch học, cập nhật
+
+## 6. Chatbot (nút tròn góc phải màn hình)
+- Hỗ trợ nhanh mọi lúc mọi nơi
+- Click vào bước trong AI Breakdown → chatbot tự động hiểu context và dạy về bước đó
+
+## Luồng sử dụng cơ bản:
+1. Tạo công việc → điền thông tin đầy đủ (đặc biệt thời gian dự kiến + mục tiêu/ngày)
+2. Nhấn "AI Tối Ưu Lịch" → AI sắp xếp lịch tối ưu
+3. Xem lịch trên trang Lịch
+4. Nhấn "AI Breakdown" để chia nhỏ công việc
+5. Click vào từng bước → chatbot hỗ trợ học/làm từng bước
+
+## Mẹo sử dụng:
+- Điền "Thời gian dự kiến" và "Mục tiêu/ngày" để AI lên lịch chính xác hơn
+- Dùng tags để phân loại công việc
+- AI Breakdown hoạt động tốt nhất với công việc học tập hoặc dự án có nhiều bước
+=====================`;
+
 // ─── Intent Detection ─────────────────────────────────────────────────────────
-export type ChatIntent = "EXERCISE" | "CHECK_ANSWER" | "EXPLAIN" | "CHAT";
+export type ChatIntent =
+  | "EXERCISE"
+  | "CHECK_ANSWER"
+  | "EXPLAIN"
+  | "SYSTEM_HELP"
+  | "CHAT";
 
 export function detectIntent(message: string): ChatIntent {
   const text = message.toLowerCase();
+
+  // System help - check first
+  if (
+    /\b(hướng dẫn|cách dùng|cách sử dụng|làm thế nào để|how to use|trang web|hệ thống|taskmind|tính năng|chức năng|ai breakdown|tối ưu lịch|lên lịch|công việc ai|trợ giúp|hỗ trợ sử dụng)\b/.test(
+      text,
+    )
+  ) {
+    return "SYSTEM_HELP";
+  }
 
   if (
     /\b(đáp án|answer|correct|wrong|check|chấm|kiểm tra|tôi nghĩ|i think|my answer|câu trả lời)\b/.test(
@@ -125,7 +191,10 @@ CORE CAPABILITIES:
 - Teaching languages, math, physics, programming, and more
 - Answering knowledge questions across all domains
 - Casual conversation and life advice
-- Task planning and productivity support`;
+- Task planning and productivity support
+- Explaining how to use TaskMind AI system
+
+${TASKMIND_KNOWLEDGE}`;
 
   const languageConfig = `
 =====================
@@ -141,6 +210,14 @@ STRICT LANGUAGE RULES (HIGHEST PRIORITY):
 5. NEVER mix languages in the same section`;
 
   const intentPrompts: Record<ChatIntent, string> = {
+    SYSTEM_HELP: `
+=====================
+CURRENT MODE: SYSTEM GUIDE
+
+The user is asking about how to use TaskMind AI. Use the TASKMIND AI SYSTEM KNOWLEDGE above to answer clearly.
+- Answer in ${userLangName}
+- Be specific with step-by-step instructions
+- Use bullet points and numbered lists for clarity`,
     EXERCISE: `
 =====================
 CURRENT MODE: EXERCISE GENERATOR

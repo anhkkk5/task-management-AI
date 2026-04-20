@@ -13,6 +13,7 @@ import scheduleTemplateRouter from "./modules/schedule-template/schedule-templat
 import aiScheduleRouter from "./modules/ai-schedule/ai-schedule.routes";
 import schedulerRouter from "./modules/scheduler/scheduler.routes";
 import guestRouter from "./modules/guest/routes/guest.routes";
+import colorsRouter from "./modules/colors/colors.routes";
 import { setupPassport } from "./config/passport";
 
 export const createApp = (): Express => {
@@ -57,6 +58,7 @@ export const createApp = (): Express => {
   app.use("/ai-schedules", aiScheduleRouter);
   app.use("/scheduler", schedulerRouter);
   app.use("/guests", guestRouter);
+  app.use("/colors", colorsRouter);
 
   return app;
 };

@@ -17,6 +17,8 @@ tags:
     description: Thông báo & nhắc nhở
   - name: Guest
     description: Quản lý khách mời & Google Contacts
+  - name: Colors
+    description: Cấu hình màu sắc & thiết kế
 paths:
   /auth/register:
     $ref: "./paths/auth.yml#/authRegister"
@@ -98,6 +100,14 @@ paths:
     $ref: "./paths/guest.yml#/guestUpdatePermission"
   /guests/events/{eventId}:
     $ref: "./paths/guest.yml#/guestGetEventGuests"
+  /colors:
+    $ref: "./paths/colors.yml#/colorsList"
+  /colors/palette:
+    $ref: "./paths/colors.yml#/colorsPalette"
+  /colors/tokens:
+    $ref: "./paths/colors.yml#/colorsTokens"
+  /colors/version:
+    $ref: "./paths/colors.yml#/colorsVersion"
 components:
   securitySchemes:
     bearerAuth:

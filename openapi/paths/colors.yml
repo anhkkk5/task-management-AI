@@ -1,0 +1,194 @@
+colorsList:
+  get:
+    tags:
+      - Colors
+    summary: Get complete color configuration
+    description: Returns the complete color configuration including palette, design tokens, version, and last updated timestamp.
+    operationId: getColorConfig
+    responses:
+      "200":
+        description: Color configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/colors.yml#/ColorConfigResponse"
+            example:
+              palette:
+                neutral:
+                  white: "#FFFFFF"
+                  offWhite: "#F9FAFB"
+                  lightGray: "#F5F7FA"
+                  mediumLightGray: "#E8ECEF"
+                  lightBorderGray: "#D1D5DB"
+                softBlue:
+                  primary: "#0066CC"
+                  secondary: "#1A73E8"
+                  light: "#4D94FF"
+                  lighter: "#B3D9FF"
+                  veryLight: "#E6F0FF"
+                accent:
+                  success: "#10B981"
+                  warning: "#F59E0B"
+                  error: "#EF4444"
+                  info: "#3B82F6"
+              tokens:
+                background:
+                  primary: "#FFFFFF"
+                  secondary: "#F9FAFB"
+                  tertiary: "#F5F7FA"
+                button:
+                  primary:
+                    bg: "#0066CC"
+                    bgHover: "#1A73E8"
+                    text: "#FFFFFF"
+                  secondary:
+                    bg: "#F5F7FA"
+                    bgHover: "#E8ECEF"
+                    text: "#0066CC"
+                  disabled:
+                    bg: "#E8ECEF"
+                    text: "#D1D5DB"
+                card:
+                  bg: "#FFFFFF"
+                  border: "#D1D5DB"
+                  shadow: "rgba(0, 0, 0, 0.06)"
+                text:
+                  primary: "#3C4043"
+                  secondary: "#5F6368"
+                  tertiary: "#70757A"
+                  inverse: "#FFFFFF"
+                border:
+                  light: "#D1D5DB"
+                  medium: "#E8ECEF"
+                state:
+                  success: "#10B981"
+                  warning: "#F59E0B"
+                  error: "#EF4444"
+                  info: "#3B82F6"
+              version: "1.0.0"
+              lastUpdated: "2024-01-15T10:30:00.000Z"
+      "500":
+        description: Failed to retrieve color configuration
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/common.yml#/ErrorResponse"
+
+colorsPalette:
+  get:
+    tags:
+      - Colors
+    summary: Get color palette only
+    description: Returns only the color palette without design tokens. Useful for clients that only need raw color values.
+    operationId: getColorPalette
+    responses:
+      "200":
+        description: Color palette retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/colors.yml#/ColorPalette"
+            example:
+              neutral:
+                white: "#FFFFFF"
+                offWhite: "#F9FAFB"
+                lightGray: "#F5F7FA"
+                mediumLightGray: "#E8ECEF"
+                lightBorderGray: "#D1D5DB"
+              softBlue:
+                primary: "#0066CC"
+                secondary: "#1A73E8"
+                light: "#4D94FF"
+                lighter: "#B3D9FF"
+                veryLight: "#E6F0FF"
+              accent:
+                success: "#10B981"
+                warning: "#F59E0B"
+                error: "#EF4444"
+                info: "#3B82F6"
+      "500":
+        description: Failed to retrieve color palette
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/common.yml#/ErrorResponse"
+
+colorsTokens:
+  get:
+    tags:
+      - Colors
+    summary: Get design tokens only
+    description: Returns only the design tokens without the raw palette. Useful for clients that only need semantic token names.
+    operationId: getDesignTokens
+    responses:
+      "200":
+        description: Design tokens retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/colors.yml#/DesignTokens"
+            example:
+              background:
+                primary: "#FFFFFF"
+                secondary: "#F9FAFB"
+                tertiary: "#F5F7FA"
+              button:
+                primary:
+                  bg: "#0066CC"
+                  bgHover: "#1A73E8"
+                  text: "#FFFFFF"
+                secondary:
+                  bg: "#F5F7FA"
+                  bgHover: "#E8ECEF"
+                  text: "#0066CC"
+                disabled:
+                  bg: "#E8ECEF"
+                  text: "#D1D5DB"
+              card:
+                bg: "#FFFFFF"
+                border: "#D1D5DB"
+                shadow: "rgba(0, 0, 0, 0.06)"
+              text:
+                primary: "#3C4043"
+                secondary: "#5F6368"
+                tertiary: "#70757A"
+                inverse: "#FFFFFF"
+              border:
+                light: "#D1D5DB"
+                medium: "#E8ECEF"
+              state:
+                success: "#10B981"
+                warning: "#F59E0B"
+                error: "#EF4444"
+                info: "#3B82F6"
+      "500":
+        description: Failed to retrieve design tokens
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/common.yml#/ErrorResponse"
+
+colorsVersion:
+  get:
+    tags:
+      - Colors
+    summary: Get color system version
+    description: Returns the version of the color system. Useful for clients to check if they have the latest color configuration.
+    operationId: getColorVersion
+    responses:
+      "200":
+        description: Version retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: string
+                  example: "1.0.0"
+      "500":
+        description: Failed to retrieve version
+        content:
+          application/json:
+            schema:
+              $ref: "../components/schemas/common.yml#/ErrorResponse"
