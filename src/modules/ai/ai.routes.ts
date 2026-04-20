@@ -9,17 +9,18 @@ import {
   schedulePlan,
   smartReschedule,
   taskBreakdown,
+  deleteConversation,
+  renameConversation,
 } from "./ai.controller";
 
 const aiRouter = Router();
 
 aiRouter.post("/chat", authMiddleware, chat);
-
 aiRouter.post("/chat/stream", authMiddleware, chatStream);
-
 aiRouter.get("/conversations", authMiddleware, listConversations);
-
 aiRouter.get("/conversations/:id", authMiddleware, getConversationById);
+aiRouter.delete("/conversations/:id", authMiddleware, deleteConversation);
+aiRouter.patch("/conversations/:id", authMiddleware, renameConversation);
 
 aiRouter.post("/task-breakdown", authMiddleware, taskBreakdown);
 

@@ -659,3 +659,71 @@ export const smartReschedule = async (
     res.status(500).json({ message: "Lỗi hệ thống", error: message });
   }
 };
+
+export const deleteConversation = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+    const { Types } = await import("mongoose");
+    const id = String((req as any).params?.id ?? "").trim();
+    if (!id || !Types.ObjectId.isValid(id)) {
+      res.status(400).json({ message: "Conversation id không hợp lệ" });
+      return;
+    }
+    const { aiRepository } = await import("./ai.repository");
+    const deleted = await aiRepository.deleteConversation({
+      conversationId: new Types.ObjectId(id),
+      userId: new Types.ObjectId(userId),
+    });
+    if (!deleted) {
+      res.status(403).json({ message: "Không có quyền hoặc không tìm thấy" });
+      return;
+    }
+    res.status(200).json({ message: "Đã xóa cuộc trò chuyện" });
+  } catch {
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const renameConversation = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+    const { Types } = await import("mongoose");
+    const id = String((req as any).params?.id ?? "").trim();
+    if (!id || !Types.ObjectId.isValid(id)) {
+      res.status(400).json({ message: "Conversation id không hợp lệ" });
+      return;
+    }
+    const title = String((req as any).body?.title ?? "").trim();
+    if (!title) {
+      res.status(400).json({ message: "Title không được để trống" });
+      return;
+    }
+    const { aiRepository } = await import("./ai.repository");
+    const updated = await aiRepository.renameConversation({
+      conversationId: new Types.ObjectId(id),
+      userId: new Types.ObjectId(userId),
+      title,
+    });
+    if (!updated) {
+      res.status(403).json({ message: "Không có quyền hoặc không tìm thấy" });
+      return;
+    }
+    res.status(200).json({ message: "Đã đổi tên", title: updated.title });
+  } catch {
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};

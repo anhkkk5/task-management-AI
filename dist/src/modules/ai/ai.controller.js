@@ -1,6 +1,39 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.smartReschedule = exports.schedulePlan = exports.prioritySuggest = exports.taskBreakdown = exports.getConversationById = exports.listConversations = exports.chatStream = exports.chat = void 0;
+exports.renameConversation = exports.deleteConversation = exports.smartReschedule = exports.schedulePlan = exports.prioritySuggest = exports.taskBreakdown = exports.getConversationById = exports.listConversations = exports.chatStream = exports.chat = void 0;
 const ai_service_1 = require("./ai.service");
 const ai_streaming_service_1 = require("./ai.streaming.service");
 const getUserId = (req) => {
@@ -567,3 +600,67 @@ const smartReschedule = async (req, res) => {
     }
 };
 exports.smartReschedule = smartReschedule;
+const deleteConversation = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const { Types } = await Promise.resolve().then(() => __importStar(require("mongoose")));
+        const id = String(req.params?.id ?? "").trim();
+        if (!id || !Types.ObjectId.isValid(id)) {
+            res.status(400).json({ message: "Conversation id không hợp lệ" });
+            return;
+        }
+        const { aiRepository } = await Promise.resolve().then(() => __importStar(require("./ai.repository")));
+        const deleted = await aiRepository.deleteConversation({
+            conversationId: new Types.ObjectId(id),
+            userId: new Types.ObjectId(userId),
+        });
+        if (!deleted) {
+            res.status(403).json({ message: "Không có quyền hoặc không tìm thấy" });
+            return;
+        }
+        res.status(200).json({ message: "Đã xóa cuộc trò chuyện" });
+    }
+    catch {
+        res.status(500).json({ message: "Lỗi hệ thống" });
+    }
+};
+exports.deleteConversation = deleteConversation;
+const renameConversation = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const { Types } = await Promise.resolve().then(() => __importStar(require("mongoose")));
+        const id = String(req.params?.id ?? "").trim();
+        if (!id || !Types.ObjectId.isValid(id)) {
+            res.status(400).json({ message: "Conversation id không hợp lệ" });
+            return;
+        }
+        const title = String(req.body?.title ?? "").trim();
+        if (!title) {
+            res.status(400).json({ message: "Title không được để trống" });
+            return;
+        }
+        const { aiRepository } = await Promise.resolve().then(() => __importStar(require("./ai.repository")));
+        const updated = await aiRepository.renameConversation({
+            conversationId: new Types.ObjectId(id),
+            userId: new Types.ObjectId(userId),
+            title,
+        });
+        if (!updated) {
+            res.status(403).json({ message: "Không có quyền hoặc không tìm thấy" });
+            return;
+        }
+        res.status(200).json({ message: "Đã đổi tên", title: updated.title });
+    }
+    catch {
+        res.status(500).json({ message: "Lỗi hệ thống" });
+    }
+};
+exports.renameConversation = renameConversation;

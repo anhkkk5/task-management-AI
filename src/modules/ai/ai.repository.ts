@@ -7,7 +7,10 @@ export const aiRepository = {
     userId: Types.ObjectId;
     title: string;
   }): Promise<AiConversationDoc> => {
-    return AiConversation.create({ userId: params.userId, title: params.title });
+    return AiConversation.create({
+      userId: params.userId,
+      title: params.title,
+    });
   },
 
   listConversationsByUser: async (params: {
@@ -68,5 +71,34 @@ export const aiRepository = {
       .sort({ createdAt: 1 })
       .limit(params.limit)
       .exec();
+  },
+
+  deleteConversation: async (params: {
+    conversationId: Types.ObjectId;
+    userId: Types.ObjectId;
+  }): Promise<boolean> => {
+    const result = await AiConversation.deleteOne({
+      _id: params.conversationId,
+      userId: params.userId,
+    }).exec();
+    if (result.deletedCount > 0) {
+      await AiMessage.deleteMany({
+        conversationId: params.conversationId,
+      }).exec();
+      return true;
+    }
+    return false;
+  },
+
+  renameConversation: async (params: {
+    conversationId: Types.ObjectId;
+    userId: Types.ObjectId;
+    title: string;
+  }): Promise<AiConversationDoc | null> => {
+    return AiConversation.findOneAndUpdate(
+      { _id: params.conversationId, userId: params.userId },
+      { $set: { title: params.title } },
+      { new: true },
+    ).exec();
   },
 };
