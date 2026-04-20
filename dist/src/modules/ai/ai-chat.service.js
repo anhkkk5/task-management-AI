@@ -5,6 +5,7 @@ const mongoose_1 = require("mongoose");
 const ai_provider_1 = require("./ai.provider");
 const ai_repository_1 = require("./ai.repository");
 const ai_mapper_1 = require("./ai.mapper");
+const ai_intent_1 = require("./ai-intent");
 exports.aiChatService = {
     chat: async (userId, input) => {
         if (!mongoose_1.Types.ObjectId.isValid(userId)) {
@@ -30,25 +31,51 @@ exports.aiChatService = {
                 throw new Error("CONVERSATION_FORBIDDEN");
             }
         }
+        // Load conversation history để AI có context
+        const historyMessages = await ai_repository_1.aiRepository.listMessagesByConversation({
+            conversationId: conversationObjectId,
+            userId: userObjectId,
+            limit: 20, // Lấy 20 tin nhắn gần nhất
+        });
+        // Save user message
         await ai_repository_1.aiRepository.createMessage({
             conversationId: conversationObjectId,
             userId: userObjectId,
             role: "user",
             content: input.message,
         });
+        // Build messages array với history
+        // Intent detection + 2-layer language system
+        const intent = (0, ai_intent_1.detectIntent)(input.message);
+        const userLang = (0, ai_intent_1.detectUserLanguage)(input.message);
+        const targetLang = (0, ai_intent_1.resolveTargetLanguage)(input.subtaskContext);
+        const systemContent = (0, ai_intent_1.buildSystemPrompt)({
+            userLang,
+            targetLang,
+            intent,
+            subtaskContext: input.subtaskContext,
+            customSystemPrompt: input.systemPrompt,
+        });
+        const historyForAI = historyMessages.map((m) => ({
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+        }));
+        // Few-shot examples (chỉ dùng khi chưa có history)
+        const fewShot = historyMessages.length === 0 && input.fewShotMessages?.length
+            ? input.fewShotMessages.map((m) => ({
+                role: m.role,
+                content: m.content,
+            }))
+            : [];
         const result = await ai_provider_1.aiProvider.chat({
             messages: [
-                {
-                    role: "system",
-                    content: "You are a productivity assistant. Reply in Vietnamese.",
-                },
-                {
-                    role: "user",
-                    content: input.message,
-                },
+                { role: "system", content: systemContent },
+                ...fewShot,
+                ...historyForAI,
+                { role: "user", content: input.message },
             ],
             model: input.model,
-            temperature: input.temperature,
+            temperature: intent === "EXERCISE" || intent === "CHECK_ANSWER" ? 0.2 : 0.4,
             maxTokens: input.maxTokens,
         });
         await ai_repository_1.aiRepository.createMessage({

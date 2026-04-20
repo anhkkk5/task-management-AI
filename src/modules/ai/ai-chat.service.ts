@@ -7,6 +7,12 @@ import {
   toPublicConversation,
   toPublicMessage,
 } from "./ai.mapper";
+import {
+  detectIntent,
+  detectUserLanguage,
+  resolveTargetLanguage,
+  buildSystemPrompt,
+} from "./ai-intent";
 
 export const aiChatService = {
   chat: async (
@@ -14,6 +20,19 @@ export const aiChatService = {
     input: {
       message: string;
       conversationId?: string;
+      systemPrompt?: string;
+      subtaskContext?: {
+        subtaskTitle?: string;
+        parentTaskTitle?: string;
+        parentTaskDescription?: string;
+        estimatedDuration?: number;
+        parentEstimatedDuration?: number;
+        dailyTargetMin?: number;
+        dailyTargetDuration?: number;
+        difficulty?: string;
+        description?: string;
+      };
+      fewShotMessages?: { role: "user" | "assistant"; content: string }[];
       model?: string;
       temperature?: number;
       maxTokens?: number;
@@ -56,6 +75,14 @@ export const aiChatService = {
       }
     }
 
+    // Load conversation history để AI có context
+    const historyMessages = await aiRepository.listMessagesByConversation({
+      conversationId: conversationObjectId,
+      userId: userObjectId,
+      limit: 20, // Lấy 20 tin nhắn gần nhất
+    });
+
+    // Save user message
     await aiRepository.createMessage({
       conversationId: conversationObjectId,
       userId: userObjectId,
@@ -63,19 +90,44 @@ export const aiChatService = {
       content: input.message,
     });
 
+    // Build messages array với history
+    // Intent detection + 2-layer language system
+    const intent = detectIntent(input.message);
+    const userLang = detectUserLanguage(input.message);
+    const targetLang = resolveTargetLanguage(input.subtaskContext);
+
+    const systemContent = buildSystemPrompt({
+      userLang,
+      targetLang,
+      intent,
+      subtaskContext: input.subtaskContext,
+      customSystemPrompt: input.systemPrompt,
+    });
+
+    const historyForAI = historyMessages.map((m) => ({
+      role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
+      content: m.content,
+    }));
+
+    // Few-shot examples (chỉ dùng khi chưa có history)
+    const fewShot =
+      historyMessages.length === 0 && input.fewShotMessages?.length
+        ? input.fewShotMessages.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          }))
+        : [];
+
     const result = await aiProvider.chat({
       messages: [
-        {
-          role: "system",
-          content: "You are a productivity assistant. Reply in Vietnamese.",
-        },
-        {
-          role: "user",
-          content: input.message,
-        },
+        { role: "system", content: systemContent },
+        ...fewShot,
+        ...historyForAI,
+        { role: "user", content: input.message },
       ],
       model: input.model,
-      temperature: input.temperature,
+      temperature:
+        intent === "EXERCISE" || intent === "CHECK_ANSWER" ? 0.2 : 0.4,
       maxTokens: input.maxTokens,
     });
 

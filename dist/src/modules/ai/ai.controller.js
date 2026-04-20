@@ -79,9 +79,57 @@ const chat = async (req, res) => {
         const conversationId = conversationIdRaw !== undefined && conversationIdRaw !== null
             ? String(conversationIdRaw).trim()
             : undefined;
+        const systemPromptRaw = body?.systemPrompt;
+        const systemPrompt = systemPromptRaw !== undefined && systemPromptRaw !== null
+            ? String(systemPromptRaw).trim()
+            : undefined;
+        const fewShotMessages = Array.isArray(body?.fewShotMessages)
+            ? body.fewShotMessages
+                .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+                .map((m) => ({
+                role: m.role,
+                content: String(m.content),
+            }))
+            : undefined;
+        // Parse subtask context for 2-layer language system
+        const subtaskContextRaw = body?.subtaskContext;
+        const subtaskContext = subtaskContextRaw && typeof subtaskContextRaw === "object"
+            ? {
+                subtaskTitle: subtaskContextRaw.subtaskTitle
+                    ? String(subtaskContextRaw.subtaskTitle)
+                    : undefined,
+                parentTaskTitle: subtaskContextRaw.parentTaskTitle
+                    ? String(subtaskContextRaw.parentTaskTitle)
+                    : undefined,
+                parentTaskDescription: subtaskContextRaw.parentTaskDescription
+                    ? String(subtaskContextRaw.parentTaskDescription)
+                    : undefined,
+                estimatedDuration: subtaskContextRaw.estimatedDuration
+                    ? Number(subtaskContextRaw.estimatedDuration)
+                    : undefined,
+                parentEstimatedDuration: subtaskContextRaw.parentEstimatedDuration
+                    ? Number(subtaskContextRaw.parentEstimatedDuration)
+                    : undefined,
+                dailyTargetMin: subtaskContextRaw.dailyTargetMin
+                    ? Number(subtaskContextRaw.dailyTargetMin)
+                    : undefined,
+                dailyTargetDuration: subtaskContextRaw.dailyTargetDuration
+                    ? Number(subtaskContextRaw.dailyTargetDuration)
+                    : undefined,
+                difficulty: subtaskContextRaw.difficulty
+                    ? String(subtaskContextRaw.difficulty)
+                    : undefined,
+                description: subtaskContextRaw.description
+                    ? String(subtaskContextRaw.description)
+                    : undefined,
+            }
+            : undefined;
         const result = await ai_service_1.aiService.chat(userId, {
             message,
             conversationId,
+            systemPrompt,
+            subtaskContext,
+            fewShotMessages,
             model,
             temperature,
             maxTokens: maxTokens !== undefined ? Math.floor(maxTokens) : undefined,
