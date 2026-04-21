@@ -1,15 +1,33 @@
 import { Types } from "mongoose";
+import { createHash } from "crypto";
 import { aiProvider } from "../ai/ai.provider";
 import { taskRepository } from "../task/task.repository";
 import { userHabitRepository } from "../user/user-habit.repository";
 import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 import { extractJson } from "../ai/ai-utils";
+import { getRedis } from "../../services/redis.service";
 import {
   intervalScheduler,
   slotFinder,
   productivityScorer,
   TimeInterval,
 } from "../scheduler";
+
+// ───── Types for estimation metadata ─────
+type EstimationMethod = "user" | "ai" | "heuristic" | "hybrid" | "default";
+
+interface TaskEstimationMeta {
+  taskId: string;
+  method: EstimationMethod;
+  confidence: number; // 0-1
+  estimatedFields: string[]; // which fields were auto-filled
+  heuristicDuration?: number;
+  aiDifficulty?: "easy" | "medium" | "hard";
+  aiMultiplier?: number;
+  finalDuration: number;
+  finalDailyTarget: number;
+  finalDailyMin: number;
+}
 
 /**
  * HYBRID AI + Algorithm Schedule Service
@@ -23,7 +41,12 @@ export const hybridScheduleService = {
    */
   schedulePlan: async (
     userId: string,
-    input: { taskIds: string[]; startDate: Date },
+    input: {
+      taskIds: string[];
+      startDate: Date;
+      schedulingStrategy?: "sequential" | "parallel" | "balanced";
+      distributionPattern?: "front-load" | "even" | "adaptive";
+    },
   ): Promise<{
     schedule: {
       day: string;
@@ -58,6 +81,7 @@ export const hybridScheduleService = {
       shortfallHours: number;
       message: string;
     }[];
+    estimationMetadata?: TaskEstimationMeta[];
   }> => {
     if (!Types.ObjectId.isValid(userId)) {
       throw new Error("USER_ID_INVALID");
@@ -79,9 +103,23 @@ export const hybridScheduleService = {
       throw new Error("NO_VALID_TASKS");
     }
 
+    // 1.5 Preprocess planning inputs cho team tasks thiếu dữ liệu
+    const estimationMetaMap = new Map<string, TaskEstimationMeta>();
+    for (const task of tasks) {
+      const meta = await ensureTaskPlanningInputsWithMeta(
+        task,
+        input.startDate,
+        userId,
+      );
+      if (meta) {
+        estimationMetaMap.set(meta.taskId, meta);
+      }
+    }
+
     // ✅ DEADLINE VALIDATION: Kiểm tra tính khả thi trước khi schedule
-    const today = new Date();
-    const todayStr = toLocalDateStr(today);
+    const plannerStartDateOnly = new Date(
+      `${toLocalDateStr(new Date(input.startDate))}T00:00:00`,
+    );
     const warnings: {
       taskId: string;
       title: string;
@@ -96,19 +134,70 @@ export const hybridScheduleService = {
     for (const task of tasks) {
       if (!task.deadline) continue;
 
-      const deadlineStr = toLocalDateStr(new Date(task.deadline));
+      const deadlineDateOnly = new Date(
+        `${toLocalDateStr(new Date(task.deadline))}T00:00:00`,
+      );
+      const taskStartStr = getTaskStartDateStr(task);
+      const taskStartDateOnly = taskStartStr
+        ? new Date(`${taskStartStr}T00:00:00`)
+        : plannerStartDateOnly;
+      const schedulableStartDateOnly =
+        taskStartDateOnly > plannerStartDateOnly
+          ? taskStartDateOnly
+          : plannerStartDateOnly;
 
-      // Đếm số ngày từ hôm nay đến deadline (inclusive)
-      const daysLeft =
+      // Đếm số ngày có thể schedule thực tế (inclusive)
+      const daysLeft = Math.max(
+        1,
         Math.ceil(
-          (new Date(deadlineStr).getTime() - new Date(todayStr).getTime()) /
+          (deadlineDateOnly.getTime() - schedulableStartDateOnly.getTime()) /
             (1000 * 60 * 60 * 24),
-        ) + 1;
+        ) + 1,
+      );
+
+      const requiredMinutes = task.estimatedDuration ?? 0;
+
+      // Với team task: nếu target/ngày đang thấp hơn mức tối thiểu cần thiết,
+      // auto-raise để tránh warning giả khi chính hệ thống là người estimate.
+      if (task.teamAssignment && requiredMinutes > 0) {
+        const requiredPerDay = Math.ceil(requiredMinutes / daysLeft);
+        const enforcedDailyTarget = clamp(
+          roundToNearest5(requiredPerDay),
+          60,
+          480,
+        );
+        const currentDailyTarget = Number(task.dailyTargetDuration ?? 0);
+        if (
+          currentDailyTarget <= 0 ||
+          currentDailyTarget < enforcedDailyTarget
+        ) {
+          task.dailyTargetDuration = enforcedDailyTarget;
+          task.dailyTargetMin = Math.max(
+            30,
+            roundToNearest5(enforcedDailyTarget * 0.7),
+          );
+
+          const taskId = String(task._id);
+          const meta = estimationMetaMap.get(taskId);
+          if (meta) {
+            if (!meta.estimatedFields.includes("dailyTargetDuration")) {
+              meta.estimatedFields.push("dailyTargetDuration");
+            }
+            if (!meta.estimatedFields.includes("dailyTargetMin")) {
+              meta.estimatedFields.push("dailyTargetMin");
+            }
+            meta.finalDailyTarget = task.dailyTargetDuration;
+            meta.finalDailyMin = task.dailyTargetMin;
+            meta.method = meta.method === "user" ? "default" : meta.method;
+            meta.confidence = Math.max(0.65, meta.confidence);
+            estimationMetaMap.set(taskId, meta);
+          }
+        }
+      }
 
       // Tính thời gian tối đa có thể xếp (daysLeft × dailyTargetMax)
-      const dailyTargetMax = task.dailyTargetDuration ?? 120; // Mặc định 2h/ngày
+      const dailyTargetMax = task.dailyTargetDuration ?? 120;
       const maxPossibleMinutes = daysLeft * dailyTargetMax;
-      const requiredMinutes = task.estimatedDuration ?? 0;
 
       if (requiredMinutes > maxPossibleMinutes) {
         const shortfallMinutes = requiredMinutes - maxPossibleMinutes;
@@ -427,6 +516,10 @@ Format JSON:
       productivityOptimized: 0,
     };
 
+    // ── Strategy & distribution config ──
+    const strategy = input.schedulingStrategy || "balanced";
+    const distribution = input.distributionPattern || "adaptive";
+
     let currentDate = new Date(startDate);
     let sessionCounter = 0;
 
@@ -526,6 +619,99 @@ Format JSON:
         return 0;
       });
 
+      // ── Helper: tính adaptive daily target cho 1 task vào ngày dateStr ──
+      const computeAdaptiveDailyTarget = (
+        task: any,
+      ): { max: number; min: number } => {
+        const baseMax = task.dailyTargetDuration ?? 180;
+        const baseMin = task.dailyTargetMin ?? 60;
+        const remaining = remainingMinutesByTaskId.get(String(task._id)) || 0;
+
+        if (remaining <= 0) return { max: 0, min: 0 };
+
+        // Tính số ngày còn lại đến deadline
+        const deadlineStr = task.deadline
+          ? toLocalDateStr(new Date(task.deadline))
+          : null;
+        const remainingDaysToDeadline = deadlineStr
+          ? Math.max(
+              1,
+              Math.ceil(
+                (new Date(deadlineStr).getTime() -
+                  new Date(dateStr).getTime()) /
+                  (1000 * 60 * 60 * 24),
+              ) + 1,
+            )
+          : 7;
+
+        const isTeamTask = !!task.teamAssignment;
+        const absoluteMax = isTeamTask ? 480 : 360; // team: 8h, cá nhân: 6h
+        const teamMinDaily = isTeamTask ? 120 : 0; // team task: tối thiểu 2h/ngày
+
+        if (distribution === "adaptive") {
+          // Adaptive: base demand từ remaining / remainingDays
+          const demandPerDay = remaining / remainingDaysToDeadline;
+          const pressureRatio = demandPerDay / Math.max(1, baseMax);
+
+          // Nếu đang bị trễ tiến độ (pressure > 1), tăng mạnh target để catch up
+          const catchUpBoost = pressureRatio > 1 ? pressureRatio : 1;
+
+          // Mục tiêu max hôm nay = demand + buffer + pressure boost
+          const adaptiveTarget = demandPerDay * 1.25 * catchUpBoost;
+          const adaptiveMax = clamp(
+            roundToNearest5(Math.max(adaptiveTarget, baseMax, teamMinDaily)),
+            Math.max(30, Math.min(baseMin, teamMinDaily || baseMin)),
+            absoluteMax,
+          );
+          const adaptiveMin = clamp(
+            roundToNearest5(
+              Math.max(
+                demandPerDay * (isTeamTask ? 0.75 : 0.65),
+                isTeamTask ? 60 : 30,
+              ),
+            ),
+            isTeamTask ? 60 : 30,
+            adaptiveMax,
+          );
+          return { max: adaptiveMax, min: adaptiveMin };
+        } else if (distribution === "front-load") {
+          // Front-load: ngày đầu 1.5x, giảm dần
+          const dayIndex = Math.ceil(
+            (new Date(dateStr).getTime() -
+              new Date(toLocalDateStr(startDate)).getTime()) /
+              (1000 * 60 * 60 * 24),
+          );
+          const totalDays = remainingDaysToDeadline + dayIndex;
+          const progressRatio = totalDays > 0 ? dayIndex / totalDays : 0;
+          const frontLoadMultiplier = 1.5 - progressRatio; // 1.5x đầu → 0.5x cuối
+          const adjustedMax = clamp(
+            roundToNearest5(
+              Math.max(baseMax * frontLoadMultiplier, teamMinDaily, baseMax),
+            ),
+            isTeamTask ? 60 : 30,
+            absoluteMax,
+          );
+          const adjustedMin = clamp(
+            roundToNearest5(Math.max(baseMin, isTeamTask ? 60 : 30)),
+            isTeamTask ? 60 : 30,
+            adjustedMax,
+          );
+          return { max: adjustedMax, min: adjustedMin };
+        }
+        // "even" - giữ nguyên nhưng vẫn ép minimum cho team task
+        const evenMax = clamp(
+          roundToNearest5(Math.max(baseMax, teamMinDaily)),
+          isTeamTask ? 60 : 30,
+          absoluteMax,
+        );
+        const evenMin = clamp(
+          roundToNearest5(Math.max(baseMin, isTeamTask ? 60 : 30)),
+          isTeamTask ? 60 : 30,
+          evenMax,
+        );
+        return { max: evenMax, min: evenMin };
+      };
+
       const scheduleTaskChunksForDay = async (
         task: any,
         mode: "reachMin" | "fillMax",
@@ -533,6 +719,12 @@ Format JSON:
         const remainingForTask =
           remainingMinutesByTaskId.get(String(task._id)) || 0;
         if (remainingForTask <= 0) return;
+
+        // Respect task-level startAt (bao gồm teamAssignment.startAt)
+        const taskStartDateStr = getTaskStartDateStr(task);
+        if (taskStartDateStr && dateStr < taskStartDateStr) {
+          return;
+        }
 
         // ✅ STRICT DEADLINE CHECK: Skip nếu đã qua deadline (không có allowAfterDeadline)
         if (
@@ -542,8 +734,9 @@ Format JSON:
           return;
         }
 
-        const dailyTargetMax = task.dailyTargetDuration ?? 180; // Mặc định 3h/ngày
-        const dailyTargetMin = task.dailyTargetMin ?? 60; // Mặc định 1h/ngày
+        // ── Adaptive daily target thay vì cố định ──
+        const { max: dailyTargetMax, min: dailyTargetMin } =
+          computeAdaptiveDailyTarget(task);
 
         const difficulty =
           aiAnalysis.difficultyAnalysis?.[String(task._id)] ||
@@ -696,18 +889,33 @@ Format JSON:
         }
       };
 
-      // Phase 1: reach min for each task (in priority order)
-      for (const taskId of sortedTaskIds) {
-        const task = tasks.find((t) => String(t._id) === taskId);
-        if (!task) continue;
-        await scheduleTaskChunksForDay(task, "reachMin");
-      }
+      if (strategy === "sequential") {
+        // Sequential: hoàn thành 1 task trước rồi mới đến task kế tiếp
+        // Chỉ schedule task đầu tiên chưa hoàn thành (theo priority order)
+        for (const taskId of sortedTaskIds) {
+          const remaining = remainingMinutesByTaskId.get(taskId) || 0;
+          if (remaining <= 0) continue;
+          const task = tasks.find((t) => String(t._id) === taskId);
+          if (!task) continue;
+          // Dồn hết thời gian cho task này trong ngày
+          await scheduleTaskChunksForDay(task, "fillMax");
+          break; // Chỉ 1 task/ngày trong sequential mode
+        }
+      } else {
+        // Parallel / Balanced: làm nhiều task trong ngày
+        // Phase 1: reach min for each task (in priority order)
+        for (const taskId of sortedTaskIds) {
+          const task = tasks.find((t) => String(t._id) === taskId);
+          if (!task) continue;
+          await scheduleTaskChunksForDay(task, "reachMin");
+        }
 
-      // Phase 2: fill toward max if still have time available
-      for (const taskId of sortedTaskIds) {
-        const task = tasks.find((t) => String(t._id) === taskId);
-        if (!task) continue;
-        await scheduleTaskChunksForDay(task, "fillMax");
+        // Phase 2: fill toward max if still have time available
+        for (const taskId of sortedTaskIds) {
+          const task = tasks.find((t) => String(t._id) === taskId);
+          if (!task) continue;
+          await scheduleTaskChunksForDay(task, "fillMax");
+        }
       }
 
       // Always push the day to avoid missing days in UI
@@ -800,11 +1008,18 @@ Format JSON:
       personalizationNote:
         (aiAnalysis.personalizationNote ||
           `Lịch trình được tối ưu với ${stats.productivityOptimized} tasks theo thói quen của bạn`) +
+        (estimationMetaMap.size > 0
+          ? ` | Đã tự động ước tính thời lượng cho ${estimationMetaMap.size} task thiếu dữ liệu.`
+          : "") +
         (remainingSummary
           ? ` | ⚠️ Không đủ thời gian trước deadline: ${remainingSummary}. Bạn nên tăng mục tiêu/ngày hoặc gia hạn deadline.`
           : ""),
       stats,
       warnings: warnings.length > 0 ? warnings : undefined,
+      estimationMetadata:
+        estimationMetaMap.size > 0
+          ? Array.from(estimationMetaMap.values())
+          : undefined,
     };
   },
 
@@ -913,4 +1128,302 @@ function toLocalDateStr(date: Date): string {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+function isValidDateValue(value: unknown): value is Date | string | number {
+  if (value === undefined || value === null) return false;
+  const date = new Date(value as any);
+  return !Number.isNaN(date.getTime());
+}
+
+function roundToNearest5(value: number): number {
+  return Math.round(value / 5) * 5;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getTaskStartDateStr(task: any): string | null {
+  const rawStartAt = task?.startAt ?? task?.teamAssignment?.startAt;
+  if (!isValidDateValue(rawStartAt)) return null;
+  return toLocalDateStr(new Date(rawStartAt));
+}
+
+// ───── Estimation cache helpers ─────
+function estimationCacheKey(
+  userId: string,
+  taskTitle: string,
+  deadline: string | null,
+  description: string,
+): string {
+  const raw = `${userId}|${taskTitle}|${deadline ?? ""}|${description}`;
+  return `est:${createHash("sha256").update(raw).digest("hex").slice(0, 24)}`;
+}
+
+async function getCachedEstimation(
+  key: string,
+): Promise<{ difficulty: string; multiplier: number } | null> {
+  try {
+    const redis = getRedis();
+    const raw = await redis.get(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedEstimation(
+  key: string,
+  data: { difficulty: string; multiplier: number },
+): Promise<void> {
+  try {
+    const redis = getRedis();
+    await redis.set(key, JSON.stringify(data), "EX", 86400); // 24h TTL
+  } catch {
+    // silently fail
+  }
+}
+
+// ───── AI difficulty estimator ─────
+async function aiEstimateDifficulty(
+  task: any,
+  userId: string,
+): Promise<{
+  difficulty: "easy" | "medium" | "hard";
+  multiplier: number;
+} | null> {
+  const title = String(task.title ?? "");
+  const description = String(task.description ?? "");
+  if (!title && !description) return null;
+
+  const deadlineStr = task.deadline
+    ? new Date(task.deadline).toISOString().split("T")[0]
+    : null;
+  const cacheKey = estimationCacheKey(userId, title, deadlineStr, description);
+
+  // Check cache first
+  const cached = await getCachedEstimation(cacheKey);
+  if (cached) {
+    return cached as {
+      difficulty: "easy" | "medium" | "hard";
+      multiplier: number;
+    };
+  }
+
+  try {
+    const prompt = `Phân tích độ phức tạp công việc này và trả về JSON duy nhất:
+
+Tiêu đề: ${title}
+${description ? `Mô tả: ${description}` : ""}
+${task.priority ? `Ưu tiên: ${task.priority}` : ""}
+${deadlineStr ? `Deadline: ${deadlineStr}` : ""}
+
+Trả về JSON (KHÔNG kèm text khác):
+{"difficulty":"easy|medium|hard","multiplier":0.7|1.0|1.5,"reasoning":"lý do ngắn"}`;
+
+    const result = await Promise.race([
+      aiProvider.chat({
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a task complexity analyzer. Output valid JSON only. No markdown.",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.2,
+        maxTokens: 200,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("AI_TIMEOUT")), 5000),
+      ),
+    ]);
+
+    const parsed = JSON.parse(extractJson(result.content || "{}"));
+    const difficulty = (
+      ["easy", "medium", "hard"].includes(parsed.difficulty)
+        ? parsed.difficulty
+        : "medium"
+    ) as "easy" | "medium" | "hard";
+    const multiplierMap: Record<string, number> = {
+      easy: 0.7,
+      medium: 1.0,
+      hard: 1.5,
+    };
+    const multiplier = multiplierMap[difficulty] ?? 1.0;
+
+    const estimation = { difficulty, multiplier };
+    await setCachedEstimation(cacheKey, estimation);
+    return estimation;
+  } catch (err: any) {
+    console.warn(
+      `[Estimation] AI difficulty analysis failed for "${title}": ${err.message}`,
+    );
+    return null;
+  }
+}
+
+// ───── Main estimation function (heuristic + AI hybrid) ─────
+async function ensureTaskPlanningInputsWithMeta(
+  task: any,
+  plannerStartDate: Date,
+  userId: string,
+): Promise<TaskEstimationMeta | null> {
+  const taskId = String(task._id);
+  const estimatedFields: string[] = [];
+  let method: EstimationMethod = "user";
+  let confidence = 1.0;
+  let heuristicDuration: number | undefined;
+  let aiDifficulty: "easy" | "medium" | "hard" | undefined;
+  let aiMultiplier: number | undefined;
+
+  // All fields already provided by user → no estimation needed
+  if (
+    task.estimatedDuration != null &&
+    task.dailyTargetDuration != null &&
+    task.dailyTargetMin != null
+  ) {
+    return null;
+  }
+
+  // ── Compute context ──
+  const startSource =
+    task?.startAt ?? task?.teamAssignment?.startAt ?? plannerStartDate;
+  const startAt = isValidDateValue(startSource)
+    ? new Date(startSource)
+    : new Date(plannerStartDate);
+
+  const deadlineSource = task?.deadline;
+  const fallbackDeadline = new Date(startAt);
+  fallbackDeadline.setDate(fallbackDeadline.getDate() + 7);
+  const deadline = isValidDateValue(deadlineSource)
+    ? new Date(deadlineSource)
+    : fallbackDeadline;
+
+  const startDateOnly = new Date(`${toLocalDateStr(startAt)}T00:00:00`);
+  const deadlineDateOnly = new Date(`${toLocalDateStr(deadline)}T00:00:00`);
+  const daysUntilDeadline = Math.max(
+    1,
+    Math.floor(
+      (deadlineDateOnly.getTime() - startDateOnly.getTime()) /
+        (1000 * 60 * 60 * 24),
+    ) + 1,
+  );
+
+  // ── estimatedDuration ──
+  if (task.estimatedDuration == null) {
+    // Step 1: Heuristic base
+    let baseEstimate: number;
+    if (daysUntilDeadline <= 1) baseEstimate = 60;
+    else if (daysUntilDeadline <= 3) baseEstimate = 120;
+    else if (daysUntilDeadline <= 7) baseEstimate = 300;
+    else if (daysUntilDeadline <= 14) baseEstimate = 600;
+    else baseEstimate = 900;
+
+    const priority = String(task.priority ?? "medium").toLowerCase();
+    const priorityMultiplier =
+      priority === "urgent" ? 1.3 : priority === "high" ? 1.2 : 1;
+
+    const text =
+      `${String(task.title ?? "")} ${String(task.description ?? "")}`.toLowerCase();
+    const complexKeywords =
+      /design|implement|refactor|research|architecture|optimize|integration|migrate|deploy|testing|security|analysis/;
+    const simpleKeywords =
+      /fix|update|change|rename|remove|delete|add|config|setup/;
+    let keywordMultiplier = 1.0;
+    if (complexKeywords.test(text)) keywordMultiplier = 1.3;
+    else if (simpleKeywords.test(text)) keywordMultiplier = 0.8;
+
+    heuristicDuration = clamp(
+      roundToNearest5(baseEstimate * priorityMultiplier * keywordMultiplier),
+      60,
+      1440,
+    );
+
+    // Step 2: Try AI estimation
+    const aiResult = await aiEstimateDifficulty(task, userId);
+    if (aiResult) {
+      aiDifficulty = aiResult.difficulty;
+      aiMultiplier = aiResult.multiplier;
+      // Hybrid: 60% AI-adjusted + 40% pure heuristic
+      const aiAdjusted = heuristicDuration * aiResult.multiplier;
+      const hybridDuration = aiAdjusted * 0.6 + heuristicDuration * 0.4;
+      task.estimatedDuration = clamp(roundToNearest5(hybridDuration), 60, 1440);
+      method = "hybrid";
+      confidence = aiResult.difficulty === "medium" ? 0.7 : 0.8;
+    } else {
+      // Pure heuristic fallback
+      task.estimatedDuration = heuristicDuration;
+      method = "heuristic";
+      confidence = 0.5;
+    }
+
+    estimatedFields.push("estimatedDuration");
+    console.log(
+      `[Estimation] Task "${task.title}": ${method} → ${task.estimatedDuration}min` +
+        (aiDifficulty ? ` (AI: ${aiDifficulty}, ×${aiMultiplier})` : "") +
+        ` | days=${daysUntilDeadline}, base=${heuristicDuration}min`,
+    );
+  }
+
+  // ── dailyTargetDuration ──
+  if (task.dailyTargetDuration == null) {
+    const estDuration = Math.max(30, Number(task.estimatedDuration ?? 120));
+    const isTeamTask = !!task.teamAssignment;
+    const hasHardDeadline = isValidDateValue(deadlineSource);
+
+    if (isTeamTask && hasHardDeadline) {
+      // Team task với deadline cứng → PHẢI hoàn thành trước deadline
+      // Dùng safety factor 80%: plan xong trong 80% số ngày, 20% buffer
+      const effectiveDays = Math.max(1, Math.floor(daysUntilDeadline * 0.8));
+      const rawTarget = estDuration / effectiveDays;
+      // Team tasks cho phép lên tới 480 phút/ngày (8h) vì phải hoàn thành bằng mọi giá
+      task.dailyTargetDuration = clamp(roundToNearest5(rawTarget), 60, 480);
+    } else {
+      // Task cá nhân hoặc không có hard deadline → chia đều bình thường
+      task.dailyTargetDuration = clamp(
+        roundToNearest5(estDuration / daysUntilDeadline),
+        30,
+        240,
+      );
+    }
+    estimatedFields.push("dailyTargetDuration");
+  }
+
+  // ── dailyTargetMin ──
+  if (task.dailyTargetMin == null) {
+    const isTeamTask = !!task.teamAssignment;
+    const minRatio = isTeamTask ? 0.7 : 0.5; // Team tasks: min = 70% of max
+    task.dailyTargetMin = Math.max(
+      15,
+      roundToNearest5(Number(task.dailyTargetDuration ?? 60) * minRatio),
+    );
+    estimatedFields.push("dailyTargetMin");
+  }
+
+  // ── Edge cases ──
+  // Nếu deadline đã quá hạn, đánh dấu confidence rất thấp
+  const now = new Date();
+  if (deadline < now) {
+    confidence = Math.min(confidence, 0.3);
+  }
+  // Nếu không có deadline gốc (dùng fallback 7 ngày), giảm confidence
+  if (!isValidDateValue(deadlineSource)) {
+    confidence = Math.min(confidence, 0.4);
+  }
+
+  return {
+    taskId,
+    method,
+    confidence: parseFloat(confidence.toFixed(2)),
+    estimatedFields,
+    heuristicDuration,
+    aiDifficulty,
+    aiMultiplier,
+    finalDuration: task.estimatedDuration,
+    finalDailyTarget: task.dailyTargetDuration,
+    finalDailyMin: task.dailyTargetMin,
+  };
 }

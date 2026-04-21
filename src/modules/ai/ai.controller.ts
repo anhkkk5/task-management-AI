@@ -585,6 +585,8 @@ export const schedulePlan = async (
 
     const taskIds = (req as any).body?.taskIds;
     const startDateRaw = (req as any).body?.startDate;
+    const schedulingStrategy = (req as any).body?.schedulingStrategy;
+    const distributionPattern = (req as any).body?.distributionPattern;
 
     if (!Array.isArray(taskIds) || taskIds.length === 0) {
       res.status(400).json({ message: "Danh sách taskIds không hợp lệ" });
@@ -603,7 +605,24 @@ export const schedulePlan = async (
       return;
     }
 
-    const result = await aiService.schedulePlan(userId, { taskIds, startDate });
+    // Validate strategy and distribution
+    const validStrategies = ["sequential", "parallel", "balanced"];
+    const validDistributions = ["front-load", "even", "adaptive"];
+    const strategy =
+      schedulingStrategy && validStrategies.includes(schedulingStrategy)
+        ? schedulingStrategy
+        : undefined;
+    const distribution =
+      distributionPattern && validDistributions.includes(distributionPattern)
+        ? distributionPattern
+        : undefined;
+
+    const result = await aiService.schedulePlan(userId, {
+      taskIds,
+      startDate,
+      schedulingStrategy: strategy,
+      distributionPattern: distribution,
+    });
     res.status(200).json(result);
   } catch (err) {
     console.error("schedulePlan error:", err);
