@@ -10,6 +10,9 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+const senderEmail = process.env.EMAIL_FROM || process.env.SMTP_USER;
+const senderName = process.env.EMAIL_FROM_NAME || "TaskMind AI";
+
 export interface InviteEmailData {
   to: string;
   teamName: string;
@@ -99,14 +102,16 @@ Email này được gửi từ TaskMind AI
     `;
 
     await transporter.sendMail({
-      from: `"TaskMind AI" <${process.env.SMTP_USER}>`,
+      from: `"${senderName}" <${senderEmail}>`,
       to,
       subject: `🎉 ${inviterName} mời bạn tham gia team "${teamName}"`,
       html,
       text,
     });
 
-    console.log(`[MailService] Invite email sent to ${to} for team ${teamName}`);
+    console.log(
+      `[MailService] Invite email sent to ${to} for team ${teamName}`,
+    );
   }
 }
 

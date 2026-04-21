@@ -11,6 +11,12 @@ export class InviteService {
     email: string,
     role: TeamRole,
   ): Promise<void> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!isValidEmail) {
+      throw { status: 400, message: "Email không hợp lệ" };
+    }
+
     const team = await Team.findById(teamId);
     if (!team) throw { status: 404, message: "Team không tồn tại" };
 
@@ -22,14 +28,14 @@ export class InviteService {
       throw { status: 400, message: "Không thể mời với role owner" };
 
     const alreadyMember = team.members.some(
-      (m) => m.email === email.toLowerCase(),
+      (m) => m.email.toLowerCase() === normalizedEmail,
     );
     if (alreadyMember)
       throw { status: 409, message: "Email này đã là thành viên của team" };
 
     const existingInvite = await TeamInvite.findOne({
       teamId,
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       status: "pending",
     });
     if (existingInvite)
@@ -38,29 +44,39 @@ export class InviteService {
     const token = uuidv4();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    await TeamInvite.create({
+    const invite = await TeamInvite.create({
       teamId: new Types.ObjectId(teamId),
       inviterId: new Types.ObjectId(inviterId),
-      email: email.toLowerCase(),
+      email: normalizedEmail,
       role,
       token,
       expiresAt,
       status: "pending",
     });
 
-    // Send invite email
-    const inviteUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/teams/invite?token=${token}`;
-    await mailService.sendTeamInvite({
-      to: email,
-      teamName: team.name,
-      inviterName: inviter.name || "Admin",
-      role,
-      inviteUrl,
-      expiresAt,
-    });
+    try {
+      // Send invite email
+      const inviteUrl = `${process.env.FRONTEND_URL || "http://localhost:5173"}/teams/invite/accept?token=${token}`;
+      await mailService.sendTeamInvite({
+        to: normalizedEmail,
+        teamName: team.name,
+        inviterName: inviter.name || "Admin",
+        role,
+        inviteUrl,
+        expiresAt,
+      });
+    } catch (error) {
+      await TeamInvite.findByIdAndDelete(invite._id);
+      console.error("[InviteService] Send invite mail failed:", error);
+      throw {
+        status: 500,
+        message:
+          "Không thể gửi email mời. Vui lòng kiểm tra cấu hình SMTP (SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS).",
+      };
+    }
 
     console.log(
-      `[InviteService] Invite sent to ${email} for team ${team.name}. Token: ${token}`,
+      `[InviteService] Invite sent to ${normalizedEmail} for team ${team.name}. Token: ${token}`,
     );
   }
 
@@ -81,6 +97,13 @@ export class InviteService {
 
     const team = await Team.findById(invite.teamId);
     if (!team) throw { status: 404, message: "Team không tồn tại" };
+
+    if (invite.email.toLowerCase() !== userInfo.email.toLowerCase()) {
+      throw {
+        status: 403,
+        message: "Email đăng nhập không khớp với email được mời",
+      };
+    }
 
     const alreadyMember = team.members.some(
       (m) => m.userId.toString() === userId,
@@ -142,14 +165,44 @@ export class InviteService {
   async getInviteInfo(token: string) {
     const invite = await TeamInvite.findOne({ token });
     if (!invite) throw { status: 404, message: "Lời mời không tồn tại" };
-    if (invite.expiresAt < new Date())
-      throw { status: 410, message: "Lời mời đã hết hạn" };
+
     const team = await Team.findById(invite.teamId);
     if (!team) throw { status: 404, message: "Team không tồn tại" };
+
+    if (invite.status === "accepted") {
+      return {
+        status: "accepted",
+        teamId: team._id.toString(),
+        teamName: team.name,
+      };
+    }
+
+    if (invite.status === "declined") {
+      return {
+        status: "declined",
+        teamId: team._id.toString(),
+        teamName: team.name,
+      };
+    }
+
+    if (invite.expiresAt < new Date()) {
+      if (invite.status === "pending") {
+        invite.status = "expired";
+        await invite.save();
+      }
+      return {
+        status: "expired",
+        teamId: team._id.toString(),
+        teamName: team.name,
+        expiresAt: invite.expiresAt,
+      };
+    }
+
     const inviter = team.members.find(
       (m) => m.userId.toString() === invite.inviterId.toString(),
     );
     return {
+      status: "pending",
       teamName: team.name,
       teamId: team._id.toString(),
       inviterName: inviter?.name || "Unknown",
