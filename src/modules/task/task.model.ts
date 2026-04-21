@@ -59,6 +59,7 @@ export type TaskAttrs = {
     assigneeName: string;
     assignedBy: Types.ObjectId;
     assignedAt: Date;
+    startAt?: Date;
   };
 };
 
@@ -109,6 +110,7 @@ export type TaskDoc = mongoose.Document & {
     assigneeName: string;
     assignedBy: Types.ObjectId;
     assignedAt: Date;
+    startAt?: Date;
   };
 };
 
@@ -232,6 +234,7 @@ const taskSchema = new Schema<TaskDoc>(
       assigneeName: { type: String },
       assignedBy: { type: Schema.Types.ObjectId },
       assignedAt: { type: Date },
+      startAt: { type: Date },
     },
   },
   { timestamps: true },

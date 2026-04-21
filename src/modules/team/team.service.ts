@@ -3,9 +3,17 @@ import { Team, TeamDoc, TeamMember, TeamRole } from "./team.model";
 import { TeamInvite } from "./team-invite.model";
 import { Task } from "../task/task.model";
 import { v4 as uuidv4 } from "uuid";
+import { getRedis } from "../../services/redis.service";
 
 export type CreateTeamDto = { name: string; description?: string };
 export type UpdateTeamDto = { name?: string; description?: string };
+export type CreateTeamTaskDto = {
+  title: string;
+  status?: "todo" | "in_progress" | "completed" | "cancelled";
+  assigneeId: string;
+  startAt?: Date;
+  deadline?: Date;
+};
 
 export type TeamPublic = {
   id: string;
@@ -44,6 +52,39 @@ function toPublic(doc: TeamDoc): TeamPublic {
     updatedAt: doc.updatedAt,
   };
 }
+
+const invalidateTaskListCacheForUser = async (
+  userId?: string,
+): Promise<void> => {
+  if (!userId) return;
+
+  try {
+    const redis = getRedis();
+    const prefix = `tasks:user:${userId}`;
+    const keys: string[] = [];
+
+    let cursor = "0";
+    do {
+      const [next, batch] = await redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        200,
+      );
+      cursor = next;
+      if (Array.isArray(batch) && batch.length) {
+        keys.push(...batch);
+      }
+    } while (cursor !== "0");
+
+    if (keys.length) {
+      await redis.del(...keys);
+    }
+  } catch (_err) {
+    return;
+  }
+};
 
 export class TeamService {
   async createTeam(
@@ -213,6 +254,7 @@ export class TeamService {
       };
     const task = await Task.findById(taskId);
     if (!task) throw { status: 404, message: "Task không tồn tại" };
+    const previousUserId = task.userId?.toString();
     task.teamAssignment = {
       teamId: new Types.ObjectId(teamId),
       assigneeId: new Types.ObjectId(assigneeId),
@@ -221,7 +263,66 @@ export class TeamService {
       assignedBy: new Types.ObjectId(assignerId),
       assignedAt: new Date(),
     };
+    task.userId = new Types.ObjectId(assigneeId);
     await task.save();
+    await Promise.all([
+      invalidateTaskListCacheForUser(previousUserId),
+      invalidateTaskListCacheForUser(assigneeId),
+    ]);
+    return task;
+  }
+
+  async createTeamTask(
+    teamId: string,
+    requesterId: string,
+    dto: CreateTeamTaskDto,
+  ) {
+    const team = await Team.findById(teamId);
+    if (!team || team.isArchived)
+      throw { status: 404, message: "Team không tồn tại" };
+
+    const requester = team.members.find(
+      (m) => m.userId.toString() === requesterId,
+    );
+    if (!requester)
+      throw { status: 403, message: "Bạn không phải thành viên của team này" };
+
+    const title = String(dto.title || "").trim();
+    if (!title) throw { status: 400, message: "Tên công việc không hợp lệ" };
+
+    if (!Types.ObjectId.isValid(dto.assigneeId)) {
+      throw { status: 400, message: "Người thực hiện không hợp lệ" };
+    }
+
+    const assignee = team.members.find(
+      (m) => m.userId.toString() === dto.assigneeId,
+    );
+    if (!assignee) {
+      throw {
+        status: 400,
+        message: "Người thực hiện không phải thành viên team",
+      };
+    }
+
+    const task = await Task.create({
+      title,
+      status: dto.status || "todo",
+      priority: "medium",
+      deadline: dto.deadline,
+      userId: new Types.ObjectId(dto.assigneeId),
+      teamAssignment: {
+        teamId: new Types.ObjectId(teamId),
+        assigneeId: new Types.ObjectId(dto.assigneeId),
+        assigneeEmail: assignee.email,
+        assigneeName: assignee.name,
+        assignedBy: new Types.ObjectId(requesterId),
+        assignedAt: new Date(),
+        startAt: dto.startAt,
+      },
+    });
+
+    await invalidateTaskListCacheForUser(dto.assigneeId);
+
     return task;
   }
 
@@ -230,12 +331,23 @@ export class TeamService {
     if (!task) throw { status: 404, message: "Task không tồn tại" };
     task.teamAssignment = undefined;
     await task.save();
+    await invalidateTaskListCacheForUser(task.userId?.toString());
     return task;
   }
 
   async getTeamTasks(
     teamId: string,
-    filters: { status?: string; assigneeId?: string; priority?: string },
+    filters: {
+      status?: string;
+      assigneeId?: string;
+      priority?: string;
+      reporterId?: string;
+      keyword?: string;
+      startFrom?: string;
+      startTo?: string;
+      deadlineFrom?: string;
+      deadlineTo?: string;
+    },
   ) {
     const query: any = {
       "teamAssignment.teamId": new Types.ObjectId(teamId),
@@ -247,6 +359,38 @@ export class TeamService {
         filters.assigneeId,
       );
     if (filters.priority) query.priority = filters.priority;
+
+    if (filters.reporterId) {
+      query["teamAssignment.assignedBy"] = new Types.ObjectId(
+        filters.reporterId,
+      );
+    }
+
+    if (filters.keyword) {
+      query.title = { $regex: filters.keyword.trim(), $options: "i" };
+    }
+
+    if (filters.startFrom || filters.startTo) {
+      const startRange = {
+        ...(filters.startFrom ? { $gte: new Date(filters.startFrom) } : {}),
+        ...(filters.startTo ? { $lte: new Date(filters.startTo) } : {}),
+      };
+
+      query.$or = [
+        { "teamAssignment.startAt": startRange },
+        { "scheduledTime.start": startRange },
+      ];
+    }
+
+    if (filters.deadlineFrom || filters.deadlineTo) {
+      query.deadline = {
+        ...(filters.deadlineFrom
+          ? { $gte: new Date(filters.deadlineFrom) }
+          : {}),
+        ...(filters.deadlineTo ? { $lte: new Date(filters.deadlineTo) } : {}),
+      };
+    }
+
     return Task.find(query).lean();
   }
 

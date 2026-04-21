@@ -87,6 +87,47 @@ router.delete(
   },
 );
 
+router.post(
+  "/:id/tasks",
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user.userId;
+      const startAtRaw = req.body?.startAt;
+      const deadlineRaw = req.body?.deadline;
+
+      const startAt = startAtRaw ? new Date(String(startAtRaw)) : undefined;
+      const deadline = deadlineRaw ? new Date(String(deadlineRaw)) : undefined;
+
+      if (startAtRaw && Number.isNaN(startAt?.getTime())) {
+        res.status(400).json({ message: "Thời gian bắt đầu không hợp lệ" });
+        return;
+      }
+
+      if (deadlineRaw && Number.isNaN(deadline?.getTime())) {
+        res.status(400).json({ message: "Deadline không hợp lệ" });
+        return;
+      }
+
+      const task = await teamService.createTeamTask(
+        req.params.id as string,
+        userId,
+        {
+          title: String(req.body?.title ?? ""),
+          status: req.body?.status,
+          assigneeId: String(req.body?.assigneeId ?? ""),
+          startAt,
+          deadline,
+        },
+      );
+
+      res.status(201).json(task);
+    } catch (err: any) {
+      res.status(err.status || 500).json({ message: err.message });
+    }
+  },
+);
+
 router.patch(
   "/:id/members/:memberId/role",
   authMiddleware,
