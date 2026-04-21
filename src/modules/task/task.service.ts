@@ -21,6 +21,7 @@ export type PublicTask = {
   description?: string;
   status: string;
   priority: string;
+  startAt?: Date;
   deadline?: Date;
   tags: string[];
   type?: "event" | "todo" | "appointment";
@@ -71,6 +72,7 @@ const toPublicTask = (t: any): PublicTask => {
     description: t.description,
     status: t.status,
     priority: t.priority,
+    startAt: t.startAt ?? t.teamAssignment?.startAt,
     deadline: t.deadline,
     tags: t.tags ?? [],
     type: t.type,
@@ -260,12 +262,14 @@ const parseCachedTaskList = (raw: string): TaskListResult => {
     items: (Omit<
       PublicTask,
       | "deadline"
+      | "startAt"
       | "reminderAt"
       | "createdAt"
       | "updatedAt"
       | "dailyTargetDuration"
       | "dailyTargetMin"
     > & {
+      startAt?: string;
       deadline?: string;
       reminderAt?: string;
       createdAt: string;
@@ -279,6 +283,7 @@ const parseCachedTaskList = (raw: string): TaskListResult => {
     ...obj,
     items: obj.items.map((t) => ({
       ...t,
+      startAt: t.startAt ? new Date(t.startAt) : undefined,
       deadline: t.deadline ? new Date(t.deadline) : undefined,
       reminderAt: t.reminderAt ? new Date(t.reminderAt) : undefined,
       createdAt: new Date(t.createdAt),
@@ -353,6 +358,7 @@ export const taskService = {
       reminderMinutes: dto.reminderMinutes,
       recurrence: dto.recurrence,
       meetingLink: dto.meetingLink,
+      startAt: dto.startAt,
       deadline: dto.deadline,
       priority: dto.priority,
       tags: dto.tags,
@@ -457,6 +463,7 @@ export const taskService = {
         meetingLink: dto.meetingLink,
         status: dto.status,
         priority: dto.priority,
+        startAt: dto.startAt,
         deadline: dto.deadline,
         tags: dto.tags,
         reminderAt: dto.reminderAt,

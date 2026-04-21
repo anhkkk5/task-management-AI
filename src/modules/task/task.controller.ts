@@ -257,6 +257,14 @@ export const createTask = async (
       return;
     }
 
+    const startAtRaw =
+      _req.body?.startAt !== undefined ? String(_req.body.startAt) : undefined;
+    const startAt = startAtRaw ? new Date(startAtRaw) : undefined;
+    if (startAtRaw && Number.isNaN(startAt?.getTime())) {
+      res.status(400).json({ message: "Ngày bắt đầu không hợp lệ" });
+      return;
+    }
+
     const reminderAtRaw =
       _req.body?.reminderAt !== undefined
         ? String(_req.body.reminderAt)
@@ -355,6 +363,7 @@ export const createTask = async (
         _req.body?.description !== undefined
           ? String(_req.body.description)
           : undefined,
+      startAt,
       deadline,
       priority: parsePriority(_req.body?.priority),
       tags,
@@ -519,6 +528,14 @@ export const updateTask = async (
     const deadline = deadlineRaw ? new Date(deadlineRaw) : undefined;
     if (deadlineRaw && Number.isNaN(deadline?.getTime())) {
       res.status(400).json({ message: "Deadline không hợp lệ" });
+      return;
+    }
+
+    const startAtRaw =
+      _req.body?.startAt !== undefined ? String(_req.body.startAt) : undefined;
+    const startAt = startAtRaw ? new Date(startAtRaw) : undefined;
+    if (startAtRaw && Number.isNaN(startAt?.getTime())) {
+      res.status(400).json({ message: "Ngày bắt đầu không hợp lệ" });
       return;
     }
 
@@ -688,6 +705,7 @@ export const updateTask = async (
           : undefined,
       status,
       priority,
+      startAt,
       deadline,
       tags,
       reminderAt,

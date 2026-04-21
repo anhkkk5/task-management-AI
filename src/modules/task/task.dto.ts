@@ -27,6 +27,7 @@ export type GuestSummaryDto = {
 export type CreateTaskDto = {
   title: string;
   description?: string;
+  startAt?: Date;
   deadline?: Date;
   priority?: TaskPriority;
   tags?: string[];
@@ -57,6 +58,7 @@ export type UpdateTaskDto = {
   description?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
+  startAt?: Date;
   deadline?: Date;
   tags?: string[];
   reminderAt?: Date;

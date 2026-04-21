@@ -18,6 +18,7 @@ export const taskRepository = {
       meetingLink: attrs.meetingLink,
       status: attrs.status ?? "todo",
       priority: attrs.priority ?? "medium",
+      startAt: attrs.startAt,
       deadline: attrs.deadline,
       tags: attrs.tags ?? [],
       userId: attrs.userId,
@@ -67,6 +68,7 @@ export const taskRepository = {
       meetingLink?: string;
       status?: TaskStatus;
       priority?: TaskPriority;
+      startAt?: Date;
       deadline?: Date;
       tags?: string[];
       reminderAt?: Date;
@@ -123,6 +125,7 @@ export const taskRepository = {
           ...(update.priority !== undefined
             ? { priority: update.priority }
             : {}),
+          ...(update.startAt !== undefined ? { startAt: update.startAt } : {}),
           ...(update.deadline !== undefined
             ? { deadline: update.deadline }
             : {}),
@@ -177,6 +180,7 @@ export const taskRepository = {
       meetingLink?: string;
       status?: TaskStatus;
       priority?: TaskPriority;
+      startAt?: Date;
       deadline?: Date;
       tags?: string[];
       reminderAt?: Date;
@@ -233,6 +237,7 @@ export const taskRepository = {
           ...(update.priority !== undefined
             ? { priority: update.priority }
             : {}),
+          ...(update.startAt !== undefined ? { startAt: update.startAt } : {}),
           ...(update.deadline !== undefined
             ? { deadline: update.deadline }
             : {}),

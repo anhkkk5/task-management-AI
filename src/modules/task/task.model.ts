@@ -19,6 +19,7 @@ export type TaskAttrs = {
   description?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
+  startAt?: Date;
   deadline?: Date;
   tags?: string[];
   type?: "event" | "todo" | "appointment";
@@ -68,6 +69,7 @@ export type TaskDoc = mongoose.Document & {
   description?: string;
   status: TaskStatus;
   priority: TaskPriority;
+  startAt?: Date;
   deadline?: Date;
   tags: string[];
   type?: "event" | "todo" | "appointment";
@@ -193,6 +195,7 @@ const taskSchema = new Schema<TaskDoc>(
       default: "medium",
       index: true,
     },
+    startAt: { type: Date, index: true },
     deadline: { type: Date, index: true },
     tags: { type: [String], default: [] },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
