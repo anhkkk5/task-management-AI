@@ -6,6 +6,7 @@ import {
   clearScheduledTime,
   createTask,
   deleteTask,
+  explainTaskEstimation,
   getTaskById,
   listTasks,
   listOverdueTasks,
@@ -25,6 +26,12 @@ taskRouter.get("/overdue", authMiddleware, listOverdueTasks);
 taskRouter.get("/:id", authMiddleware, getTaskById);
 
 taskRouter.post("/:id/ai-breakdown", authMiddleware, aiBreakdownTask);
+
+taskRouter.get(
+  "/:id/explain-estimation",
+  authMiddleware,
+  explainTaskEstimation,
+);
 
 taskRouter.patch("/:id", authMiddleware, updateTask);
 

@@ -32,6 +32,7 @@ export const aiCacheService = {
     deadline?: Date;
     description?: string;
     totalMinutes?: number;
+    profileKey?: string;
     model?: string;
   }): Promise<{ steps: { title: string; status: string }[] } | null> => {
     try {
@@ -45,7 +46,8 @@ export const aiCacheService = {
         .update(
           params.title +
             (params.description || "") +
-            (params.totalMinutes?.toString() || ""),
+            (params.totalMinutes?.toString() || "") +
+            (params.profileKey || ""),
         )
         .digest("hex")
         .slice(0, 16);
@@ -68,6 +70,7 @@ export const aiCacheService = {
       deadline?: Date;
       description?: string;
       totalMinutes?: number;
+      profileKey?: string;
       model?: string;
     },
     value: { steps: { title: string; status: string }[] },
@@ -84,7 +87,8 @@ export const aiCacheService = {
         .update(
           params.title +
             (params.description || "") +
-            (params.totalMinutes?.toString() || ""),
+            (params.totalMinutes?.toString() || "") +
+            (params.profileKey || ""),
         )
         .digest("hex")
         .slice(0, 16);

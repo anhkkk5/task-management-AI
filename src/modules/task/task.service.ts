@@ -15,6 +15,8 @@ import { notificationQueueService } from "../notification/notification.queue";
 import { userRepository } from "../user/user.repository";
 import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 import { hybridScheduleService } from "../scheduler/hybrid-schedule.service";
+import { Team } from "../team/team.model";
+import { getIndustry, getPosition, LEVELS } from "../catalog/catalog.data";
 
 export type PublicTask = {
   id: string;
@@ -110,6 +112,103 @@ const toPublicTask = (t: any): PublicTask => {
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
   };
+};
+
+type BreakdownProfile = {
+  industryCode?: string;
+  industryLabel?: string;
+  positionCode?: string;
+  positionLabel?: string;
+  levelCode?: string;
+  levelLabel?: string;
+};
+
+const LEVEL_SENIORITY: Record<string, number> = {
+  intern: 1,
+  student: 1,
+  fresher: 2,
+  junior: 3,
+  middle: 4,
+  senior: 5,
+  lead: 6,
+  manager: 6,
+  pm: 6,
+  lecturer: 6,
+};
+
+const buildProfileFromTeamMember = (
+  team: any,
+  member: any,
+): BreakdownProfile | undefined => {
+  if (!member) return undefined;
+  const industry = getIndustry(team?.industry);
+  const position = getPosition(team?.industry, member.position);
+  const levelInfo = member.level
+    ? LEVELS[member.level as keyof typeof LEVELS]
+    : undefined;
+  return {
+    industryCode: team?.industry,
+    industryLabel: industry?.label,
+    positionCode: member.position,
+    positionLabel: position?.label,
+    levelCode: member.level,
+    levelLabel: levelInfo?.label,
+  };
+};
+
+const resolveBreakdownProfile = async (
+  task: any,
+): Promise<BreakdownProfile | undefined> => {
+  // 1) Preferred: profile from explicit team assignment
+  const teamId = task?.teamAssignment?.teamId;
+  const assigneeId = task?.teamAssignment?.assigneeId;
+  if (teamId && assigneeId) {
+    try {
+      const team = await Team.findById(teamId).lean<any>().exec();
+      const member = team?.members?.find(
+        (m: any) => String(m.userId) === String(assigneeId),
+      );
+      const profile = buildProfileFromTeamMember(team, member);
+      if (profile) return profile;
+    } catch {
+      // fall through to fallback
+    }
+  }
+
+  // 2) Fallback: use the task owner's HIGHEST-seniority team membership
+  const ownerId = task?.userId;
+  if (!ownerId) return undefined;
+
+  try {
+    const teams = await Team.find({
+      "members.userId": new Types.ObjectId(String(ownerId)),
+      isArchived: false,
+    })
+      .lean<any[]>()
+      .exec();
+
+    let best: BreakdownProfile | undefined;
+    let bestScore = -1;
+    for (const team of teams || []) {
+      const member = team.members?.find(
+        (m: any) => String(m.userId) === String(ownerId),
+      );
+      if (!member) continue;
+      const score =
+        (LEVEL_SENIORITY[String(member.level || "")] || 0) +
+        (member.position ? 0.1 : 0);
+      if (score > bestScore) {
+        const profile = buildProfileFromTeamMember(team, member);
+        if (profile) {
+          best = profile;
+          bestScore = score;
+        }
+      }
+    }
+    return best;
+  } catch {
+    return undefined;
+  }
 };
 
 // Generate invite email HTML template
@@ -700,11 +799,14 @@ export const taskService = {
       (totalSlotMinutes > 0 ? totalSlotMinutes : undefined);
     const targetTotalMinutes = normalizedEstimatedDuration;
 
+    const profile = await resolveBreakdownProfile(task);
+
     const breakdown = await aiService.taskBreakdown(userId, {
       title: task.title,
       deadline: task.deadline,
       description: task.description,
       totalMinutes: targetTotalMinutes,
+      profile,
       slots: slots.length > 0 ? slots : undefined,
     });
 
@@ -786,6 +888,31 @@ export const taskService = {
     return toPublicTask(updated);
   },
 
+  explainEstimation: async (userId: string, taskId: string) => {
+    const task = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!task) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    const explanation = await hybridScheduleService.explainTaskEstimation(
+      userId,
+      task,
+      task.startAt ?? new Date(),
+    );
+
+    if (!explanation) {
+      return null;
+    }
+
+    return {
+      ...explanation,
+      task: toPublicTask(task),
+    };
+  },
+
   autoBreakdown: async (
     userId: string,
     taskId: string,
@@ -823,10 +950,23 @@ export const taskService = {
       return { breakdown: [], applied: false };
     }
 
+    if (task.estimatedDuration == null) {
+      await hybridScheduleService.estimateTaskPlanningInputs(
+        userId,
+        task,
+        task.startAt ?? new Date(),
+      );
+    }
+
+    const profile = await resolveBreakdownProfile(task);
+
     try {
       const breakdown = await aiService.taskBreakdown(userId, {
         title: task.title,
         deadline: task.deadline,
+        description: task.description,
+        totalMinutes: task.estimatedDuration,
+        profile,
       });
 
       await taskRepository.updateByIdForUser(

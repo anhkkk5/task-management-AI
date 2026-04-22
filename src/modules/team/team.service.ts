@@ -11,6 +11,7 @@ import {
   isValidPosition,
   getPosition,
 } from "../catalog/catalog.data";
+import { taskService } from "../task/task.service";
 
 export type CreateTeamDto = {
   name: string;
@@ -58,6 +59,35 @@ export type TeamPublic = {
   updatedAt: Date;
 };
 
+const STUDENT_MANAGER_ROLES: TeamRole[] = [
+  "owner",
+  "admin",
+  "student_leader",
+  "lecturer_leader",
+];
+
+const COMPANY_MANAGER_ROLES: TeamRole[] = ["owner", "admin"];
+
+function canManageTeam(teamType: TeamType, role: TeamRole): boolean {
+  const roles =
+    teamType === "student" ? STUDENT_MANAGER_ROLES : COMPANY_MANAGER_ROLES;
+  return roles.includes(role);
+}
+
+function isRoleAllowedForTeamType(teamType: TeamType, role: TeamRole): boolean {
+  if (role === "owner") return true;
+  if (teamType === "student") {
+    return [
+      "admin",
+      "student_leader",
+      "lecturer_leader",
+      "member",
+      "viewer",
+    ].includes(role);
+  }
+  return ["admin", "member", "viewer"].includes(role);
+}
+
 function toPublic(doc: TeamDoc): TeamPublic {
   return {
     id: doc._id.toString(),
@@ -80,6 +110,36 @@ function toPublic(doc: TeamDoc): TeamPublic {
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   };
+}
+
+async function regenerateAssigneeBreakdowns(
+  teamId: string,
+  assigneeId: string,
+): Promise<void> {
+  try {
+    const tasks = await Task.find({
+      "teamAssignment.teamId": new Types.ObjectId(teamId),
+      "teamAssignment.assigneeId": new Types.ObjectId(assigneeId),
+      isArchived: false,
+      status: { $in: ["todo", "scheduled", "in_progress"] },
+    })
+      .select({ _id: 1, userId: 1 })
+      .lean();
+
+    for (const t of tasks) {
+      try {
+        await taskService.aiBreakdown(String(t.userId), String(t._id));
+      } catch (err: any) {
+        console.warn(
+          `[Team] regenerate breakdown failed for task ${String(t._id)}: ${err?.message || err}`,
+        );
+      }
+    }
+  } catch (err: any) {
+    console.warn(
+      `[Team] regenerate assignee breakdowns failed: ${err?.message || err}`,
+    );
+  }
 }
 
 const invalidateTaskListCacheForUser = async (
@@ -174,7 +234,7 @@ export class TeamService {
     const team = await Team.findById(teamId);
     if (!team) throw { status: 404, message: "Team không tồn tại" };
     const member = team.members.find((m) => m.userId.toString() === userId);
-    if (!member || !["owner", "admin"].includes(member.role)) {
+    if (!member || !canManageTeam(team.teamType, member.role)) {
       throw { status: 403, message: "Không có quyền chỉnh sửa team" };
     }
     if (dto.name) team.name = dto.name;
@@ -213,7 +273,7 @@ export class TeamService {
     }
 
     const isSelf = requesterId === memberId;
-    const isAdminLike = ["owner", "admin"].includes(requester.role);
+    const isAdminLike = canManageTeam(team.teamType, requester.role);
     if (!isSelf && !isAdminLike) {
       throw {
         status: 403,
@@ -226,6 +286,9 @@ export class TeamService {
     if (!target) throw { status: 404, message: "Thành viên không tồn tại" };
 
     const industry = team.industry;
+
+    const beforePosition = target.position;
+    const beforeLevel = target.level;
 
     if (dto.position !== undefined) {
       if (dto.position === null || dto.position === "") {
@@ -268,6 +331,13 @@ export class TeamService {
 
     team.markModified("members");
     await team.save();
+
+    const profileChanged =
+      beforePosition !== target.position || beforeLevel !== target.level;
+    if (profileChanged) {
+      void regenerateAssigneeBreakdowns(teamId, memberId);
+    }
+
     return toPublic(team);
   }
 
@@ -290,7 +360,7 @@ export class TeamService {
     const requester = team.members.find(
       (m) => m.userId.toString() === requesterId,
     );
-    if (!requester || !["owner", "admin"].includes(requester.role)) {
+    if (!requester || !canManageTeam(team.teamType, requester.role)) {
       throw { status: 403, message: "Không có quyền xóa thành viên" };
     }
     const target = team.members.find((m) => m.userId.toString() === memberId);
@@ -314,6 +384,15 @@ export class TeamService {
       throw { status: 403, message: "Chỉ owner mới có thể đổi role" };
     if (role === "owner")
       throw { status: 400, message: "Không thể đặt role owner" };
+    if (!isRoleAllowedForTeamType(team.teamType, role)) {
+      throw {
+        status: 400,
+        message:
+          team.teamType === "student"
+            ? "Role không hợp lệ cho nhóm sinh viên"
+            : "Role không hợp lệ cho nhóm công ty",
+      };
+    }
     const member = team.members.find((m) => m.userId.toString() === memberId);
     if (!member) throw { status: 404, message: "Thành viên không tồn tại" };
     if (member.role === "owner")

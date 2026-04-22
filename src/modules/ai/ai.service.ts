@@ -78,6 +78,14 @@ export const aiService = {
       deadline?: Date;
       description?: string;
       totalMinutes?: number;
+      profile?: {
+        industryCode?: string;
+        industryLabel?: string;
+        positionCode?: string;
+        positionLabel?: string;
+        levelCode?: string;
+        levelLabel?: string;
+      };
       slots?: {
         date: string;
         day: string;
@@ -99,12 +107,21 @@ export const aiService = {
       throw new Error("USER_ID_INVALID");
     }
 
+    const profileKey = input.profile
+      ? [
+          input.profile.industryCode ?? "",
+          input.profile.positionCode ?? "",
+          input.profile.levelCode ?? "",
+        ].join("|")
+      : "";
+
     const cached = await aiCacheService.getTaskBreakdown({
       userId,
       title: input.title,
       deadline: input.deadline,
       description: input.description,
       totalMinutes: input.totalMinutes,
+      profileKey,
     });
     if (cached) {
       // Nếu cached nhưng totalMinutes khác → bỏ qua cache, tính lại
@@ -129,24 +146,65 @@ export const aiService = {
       ? `Mô tả: ${input.description}`
       : "";
 
-    const prompt = `Hãy breakdown công việc sau thành các bước nhỏ, cụ thể, mỗi bước là MỘT đơn vị học tập riêng biệt.
+    const profileLines: string[] = [];
+    if (input.profile?.industryLabel)
+      profileLines.push(`Ngành: ${input.profile.industryLabel}`);
+    if (input.profile?.positionLabel)
+      profileLines.push(`Vị trí: ${input.profile.positionLabel}`);
+    if (input.profile?.levelLabel)
+      profileLines.push(`Level: ${input.profile.levelLabel}`);
+
+    const levelCode = input.profile?.levelCode;
+    const isBeginner =
+      levelCode === "intern" ||
+      levelCode === "fresher" ||
+      levelCode === "student";
+    const isProfessional =
+      levelCode === "junior" ||
+      levelCode === "middle" ||
+      levelCode === "senior" ||
+      levelCode === "lead" ||
+      levelCode === "manager" ||
+      levelCode === "pm";
+
+    const totalHint =
+      input.totalMinutes && input.totalMinutes > 0
+        ? `Tổng thời gian mục tiêu cho task: ${input.totalMinutes} phút. Tổng estimatedDuration của tất cả bước PHẢI bằng đúng ${input.totalMinutes} phút (±5).`
+        : "";
+
+    const levelGuidance = isProfessional
+      ? `\nNgười thực hiện là ${input.profile?.levelLabel} (${input.profile?.positionLabel ?? "chuyên môn"}), đang làm việc trong thời đại có AI hỗ trợ viết code (Cursor, Copilot, v.v.).
+QUY TẮC BẮT BUỘC:
+- CẤM tạo các bước kiểu "Tìm hiểu X", "Học về Y", "Nghiên cứu khái niệm Z" cho khái niệm cơ bản mà level này PHẢI biết rồi (VD: với Senior Backend thì JWT, OAuth, bcrypt, session, middleware, REST, DB index... là kiến thức nền, KHÔNG được tạo bước học lại).
+- Breakdown phải là MỘT QUY TRÌNH TRIỂN KHAI thực tế end-to-end, gồm các giai đoạn như: phân tích yêu cầu & threat model → thiết kế schema/API/flow → implement từng thành phần cụ thể → tích hợp → viết test → review bảo mật → deploy/rollout.
+- Tên mỗi bước phải ở dạng hành động cụ thể (VD: "Thiết kế schema user + refresh_token", "Implement endpoint /auth/login với rate-limit", "Viết unit test cho JWT service", "Tích hợp 2FA qua TOTP", "Thêm audit log & lockout policy").
+- Mỗi bước nên có description nói RÕ input/output hoặc acceptance criteria (VD: "Trả về access token 15 phút + refresh token 7 ngày, lưu hash refresh trong DB").
+- Thời lượng tính theo tốc độ làm thực tế của level này CÓ AI hỗ trợ sinh code: phần lớn bước coding chỉ 20-60 phút, bước thiết kế 30-90 phút, tránh phóng đại.`
+      : isBeginner
+        ? `\nNgười thực hiện là ${input.profile?.levelLabel ?? "người mới"}. Có thể thêm 1-2 bước tìm hiểu nền tảng nếu thực sự cần, nhưng phần chính vẫn phải là các bước triển khai cụ thể.`
+        : "";
+
+    const prompt = `Hãy breakdown công việc sau thành một QUY TRÌNH LÀM VIỆC (workflow) có thứ tự, mỗi bước là MỘT hành động/deliverable cụ thể.
 Công việc: ${input.title}
 ${descriptionText}
 ${deadlineText}
-
-Ví dụ: nếu công việc là "Học tiếng Anh 12 thì" thì phải tạo ĐÚNG 12 bước, mỗi bước là 1 thì (Present Simple, Present Continuous, Present Perfect, ...).
-Nếu công việc là "Học lập trình Python cơ bản" thì tạo các bước như: Biến và kiểu dữ liệu, Câu lệnh điều kiện, Vòng lặp, Hàm, ...
+${profileLines.join("\n")}
+${totalHint}
 
 Yêu cầu bắt buộc:
-- KHÔNG gộp nhiều chủ đề vào 1 bước. Mỗi bước = 1 chủ đề cụ thể.
-- Số bước phải phản ánh đúng số lượng thực tế trong công việc (VD: 12 thì = 12 bước).
+- Breakdown phải như cách một người thực sự làm công việc đó ngoài thực tế, KHÔNG phải giáo trình.
+- Mỗi bước = 1 hành động cụ thể, có thể bắt tay làm ngay (actionable), có output rõ ràng.
+- KHÔNG dùng tiêu đề chung chung kiểu "Tìm hiểu...", "Học...", "Khái niệm..." trừ khi level là intern/fresher/student.
+- Số bước hợp lý theo quy mô công việc (đa số 5-12 bước; chỉ liệt kê 1 bước / 1 chủ đề).
+- Sắp xếp theo thứ tự thực hiện thực tế (phân tích → thiết kế → triển khai → test → review/deploy).
 - Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích).
 - Format: { "steps": [ { "title": string, "status": "todo", "estimatedDuration": number (phút), "difficulty": "easy"|"medium"|"hard", "description": string } ], "totalEstimatedDuration": number (phút) }
 - status luôn là "todo".
-- estimatedDuration là thời gian ước tính để hoàn thành bước đó (tính bằng phút).
-- difficulty là độ khó: "easy", "medium", hoặc "hard".
-- description là mô tả ngắn gọn (1-2 câu) về nội dung cần học/làm trong bước đó.
-- totalEstimatedDuration là tổng thời gian ước tính cho cả công việc.`;
+- estimatedDuration là thời gian thực tế để HOÀN THÀNH bước đó (phút), theo tốc độ của level đã nêu.
+- difficulty: "easy" / "medium" / "hard" theo mức phức tạp kỹ thuật của bước đó.
+- description: 1-2 câu mô tả output / acceptance criteria của bước.
+- totalEstimatedDuration = tổng estimatedDuration của tất cả bước.
+${levelGuidance}`;
 
     const result = await aiProvider.chat({
       messages: [
@@ -304,6 +362,7 @@ Yêu cầu bắt buộc:
         deadline: input.deadline,
         description: input.description,
         totalMinutes: input.totalMinutes,
+        profileKey,
       },
       response,
     );

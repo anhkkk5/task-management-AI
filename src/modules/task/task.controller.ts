@@ -65,6 +65,47 @@ export const aiBreakdownTask = async (
   }
 };
 
+export const explainTaskEstimation = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const taskId = String(_req.params.id ?? "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Task id không hợp lệ" });
+      return;
+    }
+
+    const explanation = await taskService.explainEstimation(userId, taskId);
+    if (!explanation) {
+      res
+        .status(404)
+        .json({ message: "Không thể giải thích ước lượng cho task" });
+      return;
+    }
+
+    res.status(200).json({ explanation });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền truy cập task này" });
+      return;
+    }
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "User ID không hợp lệ" });
+      return;
+    }
+
+    res.status(500).json({ message: "Lỗi hệ thống", error: message });
+  }
+};
+
 const parseStatus = (value: unknown): TaskStatus | undefined => {
   if (value === undefined || value === null) return undefined;
   const v = String(value);

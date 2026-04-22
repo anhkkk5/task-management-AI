@@ -4,6 +4,41 @@ import { Team, TeamRole } from "./team.model";
 import { TeamInvite, TeamInviteDoc } from "./team-invite.model";
 import { mailService } from "../../services/mail.service";
 
+const STUDENT_MANAGER_ROLES: TeamRole[] = [
+  "owner",
+  "admin",
+  "student_leader",
+  "lecturer_leader",
+];
+
+const COMPANY_MANAGER_ROLES: TeamRole[] = ["owner", "admin"];
+
+function canManageInvites(
+  teamType: "student" | "company",
+  role: TeamRole,
+): boolean {
+  const roles =
+    teamType === "student" ? STUDENT_MANAGER_ROLES : COMPANY_MANAGER_ROLES;
+  return roles.includes(role);
+}
+
+function isRoleAllowedForTeamType(
+  teamType: "student" | "company",
+  role: TeamRole,
+): boolean {
+  if (role === "owner") return false;
+  if (teamType === "student") {
+    return [
+      "admin",
+      "student_leader",
+      "lecturer_leader",
+      "member",
+      "viewer",
+    ].includes(role);
+  }
+  return ["admin", "member", "viewer"].includes(role);
+}
+
 export class InviteService {
   async inviteMember(
     teamId: string,
@@ -21,11 +56,18 @@ export class InviteService {
     if (!team) throw { status: 404, message: "Team không tồn tại" };
 
     const inviter = team.members.find((m) => m.userId.toString() === inviterId);
-    if (!inviter || !["owner", "admin"].includes(inviter.role)) {
+    if (!inviter || !canManageInvites(team.teamType, inviter.role)) {
       throw { status: 403, message: "Không có quyền mời thành viên" };
     }
-    if (role === "owner")
-      throw { status: 400, message: "Không thể mời với role owner" };
+    if (!isRoleAllowedForTeamType(team.teamType, role)) {
+      throw {
+        status: 400,
+        message:
+          team.teamType === "student"
+            ? "Role không hợp lệ cho nhóm sinh viên"
+            : "Role không hợp lệ cho nhóm công ty",
+      };
+    }
 
     const alreadyMember = team.members.some(
       (m) => m.email.toLowerCase() === normalizedEmail,
@@ -144,7 +186,7 @@ export class InviteService {
     const requester = team.members.find(
       (m) => m.userId.toString() === requesterId,
     );
-    if (!requester || !["owner", "admin"].includes(requester.role)) {
+    if (!requester || !canManageInvites(team.teamType, requester.role)) {
       throw { status: 403, message: "Không có quyền thu hồi lời mời" };
     }
     await TeamInvite.findByIdAndDelete(inviteId);
@@ -156,7 +198,7 @@ export class InviteService {
     const requester = team.members.find(
       (m) => m.userId.toString() === requesterId,
     );
-    if (!requester || !["owner", "admin"].includes(requester.role)) {
+    if (!requester || !canManageInvites(team.teamType, requester.role)) {
       throw { status: 403, message: "Không có quyền xem lời mời" };
     }
     return TeamInvite.find({ teamId, status: "pending" }).lean();

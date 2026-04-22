@@ -32,6 +32,13 @@ interface TaskEstimationMeta {
   heuristicDuration?: number;
   aiDifficulty?: "easy" | "medium" | "hard";
   aiMultiplier?: number;
+  factors?: {
+    baseEstimate?: number;
+    priorityMultiplier?: number;
+    keywordMultiplier?: number;
+    levelMultiplier?: number;
+    historyMultiplier?: number;
+  };
   finalDuration: number;
   finalDailyTarget: number;
   finalDailyMin: number;
@@ -112,6 +119,96 @@ export const hybridScheduleService = {
   ): Promise<TaskEstimationMeta | null> => {
     if (!task) return null;
     return ensureTaskPlanningInputsWithMeta(task, plannerStartDate, userId);
+  },
+
+  explainTaskEstimation: async (
+    userId: string,
+    task: any,
+    plannerStartDate: Date = new Date(),
+  ): Promise<{
+    taskId: string;
+    title: string;
+    method: EstimationMethod;
+    confidence: number;
+    estimatedFields: string[];
+    difficulty?: "easy" | "medium" | "hard";
+    factors: {
+      baseEstimate?: number;
+      priorityMultiplier?: number;
+      keywordMultiplier?: number;
+      aiMultiplier?: number;
+      levelMultiplier?: number;
+      historyMultiplier?: number;
+    };
+    result: {
+      estimatedDuration: number;
+      dailyTargetDuration: number;
+      dailyTargetMin: number;
+    };
+  } | null> => {
+    if (!task) return null;
+
+    const sourceTask: any =
+      typeof task?.toObject === "function" ? task.toObject() : task;
+
+    const clone: any = {
+      ...sourceTask,
+      teamAssignment: sourceTask?.teamAssignment
+        ? { ...sourceTask.teamAssignment }
+        : undefined,
+    };
+
+    const taskIdForFallback = String(
+      clone?._id ?? sourceTask?._id ?? sourceTask?.id ?? "",
+    );
+    const titleForFallback = String(clone?.title ?? sourceTask?.title ?? "");
+
+    const meta = await ensureTaskPlanningInputsWithMeta(
+      clone,
+      plannerStartDate,
+      userId,
+    );
+
+    const outputMeta: TaskEstimationMeta = meta ?? {
+      taskId: taskIdForFallback,
+      method: "user",
+      confidence: 1,
+      estimatedFields: [],
+      aiDifficulty: undefined,
+      aiMultiplier: undefined,
+      factors: {
+        baseEstimate: undefined,
+        priorityMultiplier: undefined,
+        keywordMultiplier: undefined,
+        levelMultiplier: undefined,
+        historyMultiplier: undefined,
+      },
+      finalDuration: Number(clone.estimatedDuration ?? 0),
+      finalDailyTarget: Number(clone.dailyTargetDuration ?? 0),
+      finalDailyMin: Number(clone.dailyTargetMin ?? 0),
+    };
+
+    return {
+      taskId: outputMeta.taskId,
+      title: titleForFallback,
+      method: outputMeta.method,
+      confidence: outputMeta.confidence,
+      estimatedFields: outputMeta.estimatedFields,
+      difficulty: outputMeta.aiDifficulty,
+      factors: {
+        baseEstimate: outputMeta.factors?.baseEstimate,
+        priorityMultiplier: outputMeta.factors?.priorityMultiplier,
+        keywordMultiplier: outputMeta.factors?.keywordMultiplier,
+        aiMultiplier: outputMeta.aiMultiplier,
+        levelMultiplier: outputMeta.factors?.levelMultiplier,
+        historyMultiplier: outputMeta.factors?.historyMultiplier,
+      },
+      result: {
+        estimatedDuration: outputMeta.finalDuration,
+        dailyTargetDuration: outputMeta.finalDailyTarget,
+        dailyTargetMin: outputMeta.finalDailyMin,
+      },
+    };
   },
 
   /**
@@ -1326,6 +1423,139 @@ interface AssigneeProfile {
   levelMultiplier: number;
 }
 
+type PersonalizationInsight = {
+  multiplier: number;
+  sampleSize: number;
+  avgRatio: number;
+};
+
+const HISTORY_ADJUSTMENT_WEIGHT = 0.35;
+const HISTORY_MIN_MULTIPLIER = 0.85;
+const HISTORY_MAX_MULTIPLIER = 1.2;
+
+const INDUSTRY_COMPLEX_KEYWORDS: Record<string, RegExp> = {
+  it_software:
+    /design|implement|refactor|research|architecture|optimize|integration|migrate|deploy|testing|security|analysis|database|api|microservice|scalability/,
+  marketing:
+    /campaign|branding|funnel|ab testing|performance ads|insight|positioning|kpi|strategy|influencer/,
+  design:
+    /wireframe|prototype|user flow|design system|accessibility|interaction|usability|visual identity|journey/,
+  finance:
+    /forecast|audit|compliance|reconciliation|cash flow|budgeting|risk model|tax|financial model/,
+  sales:
+    /pipeline|negotiation|proposal|enterprise deal|quarterly target|territory plan|upsell|cross-sell/,
+  hr: /org design|competency framework|performance review|retention plan|workforce planning|policy design/,
+  education:
+    /curriculum|assessment rubric|learning outcome|research methodology|accreditation|thesis|pedagogy/,
+  healthcare:
+    /clinical protocol|diagnostic|treatment plan|compliance|patient safety|evidence review|triage/,
+  engineering:
+    /structural analysis|simulation|cad|quality assurance|safety standard|integration test|commissioning/,
+  content_media:
+    /editorial plan|storyboard|long-form|fact-check|content strategy|series production|media plan/,
+  legal:
+    /contract review|litigation|compliance|legal research|due diligence|regulatory|dispute resolution/,
+};
+
+const INDUSTRY_SIMPLE_KEYWORDS: Record<string, RegExp> = {
+  it_software: /fix|update|change|rename|remove|delete|add|config|setup/,
+  marketing:
+    /caption|post|hashtag|asset resize|brief update|report export|schedule post/,
+  design: /resize|export|color tweak|font change|crop|minor edit/,
+  finance: /data entry|invoice update|voucher|statement upload|format sheet/,
+  sales: /follow up|lead import|crm update|meeting note|quote update/,
+  hr: /cv screening|interview note|attendance update|policy reminder/,
+  education: /slide update|quiz upload|assignment post|class note/,
+  healthcare: /appointment update|record update|form submit|follow up call/,
+  engineering: /drawing update|material list|site note|checklist update/,
+  content_media: /proofread|thumbnail change|caption edit|publish update/,
+  legal: /document format|clause update|template fill|filing update/,
+};
+
+function getKeywordMultiplier(text: string, industryCode?: string): number {
+  const genericComplex =
+    /design|implement|refactor|research|architecture|optimize|integration|migrate|deploy|testing|security|analysis/;
+  const genericSimple =
+    /fix|update|change|rename|remove|delete|add|config|setup/;
+
+  const industryComplex = industryCode
+    ? INDUSTRY_COMPLEX_KEYWORDS[industryCode]
+    : undefined;
+  const industrySimple = industryCode
+    ? INDUSTRY_SIMPLE_KEYWORDS[industryCode]
+    : undefined;
+
+  if (industryComplex?.test(text) || genericComplex.test(text)) return 1.3;
+  if (industrySimple?.test(text) || genericSimple.test(text)) return 0.8;
+  return 1.0;
+}
+
+async function getPersonalizationInsight(
+  assigneeId?: string,
+): Promise<PersonalizationInsight | null> {
+  if (!assigneeId || !Types.ObjectId.isValid(assigneeId)) return null;
+
+  try {
+    const history = await taskRepository.listByUser({
+      userId: new Types.ObjectId(assigneeId),
+      status: "completed",
+      page: 1,
+      limit: 50,
+    });
+
+    const completedTasks = [...history.items]
+      .filter(
+        (t: any) =>
+          Number(t.estimatedDuration) > 0 &&
+          t.createdAt &&
+          t.updatedAt &&
+          !t.isArchived,
+      )
+      .sort(
+        (a: any, b: any) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+
+    const ratios: number[] = [];
+    for (const t of completedTasks) {
+      const estimated = Number(t.estimatedDuration || 0);
+      if (estimated < 30) continue;
+
+      const actualMinutes = Math.max(
+        5,
+        Math.floor(
+          (new Date(t.updatedAt).getTime() - new Date(t.createdAt).getTime()) /
+            (1000 * 60),
+        ),
+      );
+
+      const ratio = clamp(actualMinutes / estimated, 0.6, 1.8);
+      ratios.push(ratio);
+      if (ratios.length >= 10) break;
+    }
+
+    if (ratios.length < 5) return null;
+
+    const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+    const multiplier = clamp(
+      1 + (avgRatio - 1) * HISTORY_ADJUSTMENT_WEIGHT,
+      HISTORY_MIN_MULTIPLIER,
+      HISTORY_MAX_MULTIPLIER,
+    );
+
+    return {
+      multiplier,
+      sampleSize: ratios.length,
+      avgRatio: parseFloat(avgRatio.toFixed(2)),
+    };
+  } catch (err: any) {
+    console.warn(
+      `[Estimation] personalization insight failed: ${err?.message || err}`,
+    );
+    return null;
+  }
+}
+
 async function resolveAssigneeProfile(task: any): Promise<AssigneeProfile> {
   const teamId = task?.teamAssignment?.teamId;
   const assigneeId = task?.teamAssignment?.assigneeId;
@@ -1482,6 +1712,11 @@ async function ensureTaskPlanningInputsWithMeta(
   let heuristicDuration: number | undefined;
   let aiDifficulty: "easy" | "medium" | "hard" | undefined;
   let aiMultiplier: number | undefined;
+  let baseEstimateValue: number | undefined;
+  let priorityMultiplierValue: number | undefined;
+  let keywordMultiplierValue: number | undefined;
+  let levelMultiplierValue: number | undefined;
+  let historyMultiplierValue: number | undefined;
 
   // All fields already provided by user → no estimation needed
   if (
@@ -1518,6 +1753,11 @@ async function ensureTaskPlanningInputsWithMeta(
 
   // Resolve assignee profile (team industry/position/level) once
   const assigneeProfile = await resolveAssigneeProfile(task);
+  const assigneeIdForHistory = task?.teamAssignment?.assigneeId
+    ? String(task.teamAssignment.assigneeId)
+    : undefined;
+  const personalizationInsight =
+    await getPersonalizationInsight(assigneeIdForHistory);
 
   // ── estimatedDuration ──
   if (task.estimatedDuration == null) {
@@ -1528,20 +1768,20 @@ async function ensureTaskPlanningInputsWithMeta(
     else if (daysUntilDeadline <= 7) baseEstimate = 300;
     else if (daysUntilDeadline <= 14) baseEstimate = 600;
     else baseEstimate = 900;
+    baseEstimateValue = baseEstimate;
 
     const priority = String(task.priority ?? "medium").toLowerCase();
     const priorityMultiplier =
       priority === "urgent" ? 1.3 : priority === "high" ? 1.2 : 1;
+    priorityMultiplierValue = priorityMultiplier;
 
     const text =
       `${String(task.title ?? "")} ${String(task.description ?? "")}`.toLowerCase();
-    const complexKeywords =
-      /design|implement|refactor|research|architecture|optimize|integration|migrate|deploy|testing|security|analysis/;
-    const simpleKeywords =
-      /fix|update|change|rename|remove|delete|add|config|setup/;
-    let keywordMultiplier = 1.0;
-    if (complexKeywords.test(text)) keywordMultiplier = 1.3;
-    else if (simpleKeywords.test(text)) keywordMultiplier = 0.8;
+    const keywordMultiplier = getKeywordMultiplier(
+      text,
+      assigneeProfile.industryCode,
+    );
+    keywordMultiplierValue = keywordMultiplier;
 
     heuristicDuration = clamp(
       roundToNearest5(baseEstimate * priorityMultiplier * keywordMultiplier),
@@ -1568,7 +1808,11 @@ async function ensureTaskPlanningInputsWithMeta(
 
     // Step 3: Apply level multiplier (intern chậm hơn, senior nhanh hơn)
     const levelMultiplier = assigneeProfile.levelMultiplier || 1.0;
-    const finalDuration = preLevelDuration * levelMultiplier;
+    levelMultiplierValue = levelMultiplier;
+    const personalizationMultiplier = personalizationInsight?.multiplier ?? 1.0;
+    historyMultiplierValue = personalizationMultiplier;
+    const finalDuration =
+      preLevelDuration * levelMultiplier * personalizationMultiplier;
 
     task.estimatedDuration = clamp(roundToNearest5(finalDuration), 60, 1440);
 
@@ -1578,6 +1822,9 @@ async function ensureTaskPlanningInputsWithMeta(
         (aiDifficulty ? ` (AI: ${aiDifficulty}, ×${aiMultiplier})` : "") +
         (assigneeProfile.levelCode
           ? ` (level: ${assigneeProfile.levelCode}, ×${levelMultiplier})`
+          : "") +
+        (personalizationInsight
+          ? ` (history: n=${personalizationInsight.sampleSize}, avg=${personalizationInsight.avgRatio}, ×${personalizationMultiplier.toFixed(2)})`
           : "") +
         ` | days=${daysUntilDeadline}, base=${heuristicDuration}min`,
     );
@@ -1637,6 +1884,13 @@ async function ensureTaskPlanningInputsWithMeta(
     heuristicDuration,
     aiDifficulty,
     aiMultiplier,
+    factors: {
+      baseEstimate: baseEstimateValue,
+      priorityMultiplier: priorityMultiplierValue,
+      keywordMultiplier: keywordMultiplierValue,
+      levelMultiplier: levelMultiplierValue,
+      historyMultiplier: historyMultiplierValue,
+    },
     finalDuration: task.estimatedDuration,
     finalDailyTarget: task.dailyTargetDuration,
     finalDailyMin: task.dailyTargetMin,

@@ -1,6 +1,12 @@
 import mongoose, { Schema, Types } from "mongoose";
 
-export type TeamRole = "owner" | "admin" | "member" | "viewer";
+export type TeamRole =
+  | "owner"
+  | "admin"
+  | "student_leader"
+  | "lecturer_leader"
+  | "member"
+  | "viewer";
 
 export type TeamType = "student" | "company";
 
@@ -49,7 +55,14 @@ const teamMemberSchema = new Schema<TeamMember>(
     avatar: { type: String },
     role: {
       type: String,
-      enum: ["owner", "admin", "member", "viewer"],
+      enum: [
+        "owner",
+        "admin",
+        "student_leader",
+        "lecturer_leader",
+        "member",
+        "viewer",
+      ],
       default: "member",
     },
     position: { type: String, trim: true },
