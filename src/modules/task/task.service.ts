@@ -16,7 +16,11 @@ import { userRepository } from "../user/user.repository";
 import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 import { hybridScheduleService } from "../scheduler/hybrid-schedule.service";
 import { Team } from "../team/team.model";
-import { getIndustry, getPosition, LEVELS } from "../catalog/catalog.data";
+import {
+  getIndustry,
+  getPosition,
+  getLevelInfoForIndustry,
+} from "../catalog/catalog.data";
 
 export type PublicTask = {
   id: string;
@@ -143,9 +147,7 @@ const buildProfileFromTeamMember = (
   if (!member) return undefined;
   const industry = getIndustry(team?.industry);
   const position = getPosition(team?.industry, member.position);
-  const levelInfo = member.level
-    ? LEVELS[member.level as keyof typeof LEVELS]
-    : undefined;
+  const levelInfo = getLevelInfoForIndustry(team?.industry, member.level);
   return {
     industryCode: team?.industry,
     industryLabel: industry?.label,

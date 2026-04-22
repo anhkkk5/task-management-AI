@@ -114,7 +114,12 @@ router.post(
         userId,
         {
           title: String(req.body?.title ?? ""),
+          description:
+            req.body?.description === undefined
+              ? undefined
+              : String(req.body.description),
           status: req.body?.status,
+          priority: req.body?.priority,
           assigneeId: String(req.body?.assigneeId ?? ""),
           startAt,
           deadline,

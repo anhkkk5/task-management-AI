@@ -1485,9 +1485,39 @@ function getKeywordMultiplier(text: string, industryCode?: string): number {
     ? INDUSTRY_SIMPLE_KEYWORDS[industryCode]
     : undefined;
 
-  if (industryComplex?.test(text) || genericComplex.test(text)) return 1.3;
-  if (industrySimple?.test(text) || genericSimple.test(text)) return 0.8;
+  if (industryComplex?.test(text) || genericComplex.test(text)) return 1.15;
+  if (industrySimple?.test(text) || genericSimple.test(text)) return 0.85;
   return 1.0;
+}
+
+/**
+ * Các ngành có tỷ trọng việc tay/gặp mặt trực tiếp cao → AI hỗ trợ ít hơn.
+ * Các ngành khác mặc định được coi là knowledge work trên máy tính,
+ * thời gian hoàn thành giảm nhờ AI (Cursor/Copilot/ChatGPT/Gemini...).
+ */
+const MANUAL_INTENSIVE_INDUSTRIES = new Set<string>([
+  "construction",
+  "manufacturing",
+  "logistics",
+  "retail_store",
+  "food_service",
+  "agriculture",
+  "beauty",
+  "driver",
+]);
+
+/**
+ * Hệ số điều chỉnh thời đại AI.
+ * - Công việc knowledge work (code/thiết kế/viết/phân tích/marketing/finance/hr/legal/
+ *   design/content...) được AI tăng tốc đáng kể → nhân 0.6.
+ * - Công việc chân tay / gặp mặt trực tiếp → giữ 1.0 (AI không thay thế được).
+ * Có thể override bằng env AI_ERA_KNOWLEDGE_FACTOR (0.3 - 1.0).
+ */
+function getAiEraMultiplier(industryCode?: string): number {
+  if (industryCode && MANUAL_INTENSIVE_INDUSTRIES.has(industryCode)) return 1.0;
+  const raw = Number(process.env.AI_ERA_KNOWLEDGE_FACTOR);
+  if (Number.isFinite(raw) && raw >= 0.3 && raw <= 1.0) return raw;
+  return 0.6;
 }
 
 async function getPersonalizationInsight(
@@ -1648,14 +1678,19 @@ ${task.priority ? `Ưu tiên: ${task.priority}` : ""}
 ${deadlineStr ? `Deadline: ${deadlineStr}` : ""}
 ${profileLines.join("\n")}
 
-Hướng dẫn:
-- "easy": công việc đơn giản, ít suy nghĩ, dưới 1-2 giờ với người trung bình.
-- "medium": công việc tiêu chuẩn, cần tập trung nhưng không phức tạp cao.
-- "hard": phức tạp, nhiều bước, cần research, integration, hoặc rủi ro cao.
-- KHÔNG nhân thêm theo level ở đây (level sẽ được hệ thống nhân ngoài), chỉ đánh giá độ khó nội tại của task.
+Bối cảnh THỜI ĐẠI AI (bắt buộc áp dụng khi ước lượng):
+- Người làm có công cụ AI (Cursor, Copilot, ChatGPT, Gemini) hỗ trợ viết code, soạn thảo, phân tích, viết test, tối ưu, nghiên cứu.
+- Rất nhiều bước trước đây tốn nhiều giờ nay chỉ còn 20-60 phút.
+- KHÔNG ước lượng theo thời gian thời đại chưa có AI.
+
+Hướng dẫn phân loại:
+- "easy": công việc đơn giản / quen thuộc / AI làm hộ gần hết, thường ≤ 45 phút.
+- "medium": công việc tiêu chuẩn, cần tập trung nhưng AI hỗ trợ tốt, thường 45-120 phút.
+- "hard": thật sự phức tạp (research chuyên sâu, tích hợp nhiều hệ thống, rủi ro cao), thường 2-4 giờ.
+- KHÔNG nhân thêm theo level ở đây (level sẽ được hệ thống nhân ngoài), chỉ đánh giá độ khó nội tại trong thời đại AI.
 
 Trả về JSON (KHÔNG kèm text khác):
-{"difficulty":"easy|medium|hard","multiplier":0.7|1.0|1.5,"reasoning":"lý do ngắn"}`;
+{"difficulty":"easy|medium|hard","multiplier":0.7|1.0|1.25,"reasoning":"lý do ngắn"}`;
 
     const result = await Promise.race([
       aiProvider.chat({
@@ -1684,7 +1719,7 @@ Trả về JSON (KHÔNG kèm text khác):
     const multiplierMap: Record<string, number> = {
       easy: 0.7,
       medium: 1.0,
-      hard: 1.5,
+      hard: 1.25,
     };
     const multiplier = multiplierMap[difficulty] ?? 1.0;
 
@@ -1761,13 +1796,13 @@ async function ensureTaskPlanningInputsWithMeta(
 
   // ── estimatedDuration ──
   if (task.estimatedDuration == null) {
-    // Step 1: Heuristic base
+    // Step 1: Heuristic base (AI-era: công việc knowledge work bị AI rút ngắn rất nhiều).
     let baseEstimate: number;
-    if (daysUntilDeadline <= 1) baseEstimate = 60;
-    else if (daysUntilDeadline <= 3) baseEstimate = 120;
-    else if (daysUntilDeadline <= 7) baseEstimate = 300;
-    else if (daysUntilDeadline <= 14) baseEstimate = 600;
-    else baseEstimate = 900;
+    if (daysUntilDeadline <= 1) baseEstimate = 45;
+    else if (daysUntilDeadline <= 3) baseEstimate = 90;
+    else if (daysUntilDeadline <= 7) baseEstimate = 180;
+    else if (daysUntilDeadline <= 14) baseEstimate = 360;
+    else baseEstimate = 540;
     baseEstimateValue = baseEstimate;
 
     const priority = String(task.priority ?? "medium").toLowerCase();
@@ -1811,10 +1846,17 @@ async function ensureTaskPlanningInputsWithMeta(
     levelMultiplierValue = levelMultiplier;
     const personalizationMultiplier = personalizationInsight?.multiplier ?? 1.0;
     historyMultiplierValue = personalizationMultiplier;
-    const finalDuration =
-      preLevelDuration * levelMultiplier * personalizationMultiplier;
 
-    task.estimatedDuration = clamp(roundToNearest5(finalDuration), 60, 1440);
+    // Step 4: AI-era multiplier (AI rút ngắn đáng kể knowledge-work)
+    const aiEraMultiplier = getAiEraMultiplier(assigneeProfile.industryCode);
+
+    const finalDuration =
+      preLevelDuration *
+      levelMultiplier *
+      personalizationMultiplier *
+      aiEraMultiplier;
+
+    task.estimatedDuration = clamp(roundToNearest5(finalDuration), 30, 1440);
 
     estimatedFields.push("estimatedDuration");
     console.log(

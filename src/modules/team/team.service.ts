@@ -31,7 +31,9 @@ export type UpdateMemberProfileDto = {
 };
 export type CreateTeamTaskDto = {
   title: string;
+  description?: string;
   status?: "todo" | "in_progress" | "completed" | "cancelled";
+  priority?: "low" | "medium" | "high" | "urgent";
   assigneeId: string;
   startAt?: Date;
   deadline?: Date;
@@ -494,7 +496,14 @@ export class TeamService {
       throw { status: 403, message: "Bạn không phải thành viên của team này" };
 
     const title = String(dto.title || "").trim();
+    const description = dto.description
+      ? String(dto.description).trim() || undefined
+      : undefined;
+    const priority = dto.priority || "medium";
     if (!title) throw { status: 400, message: "Tên công việc không hợp lệ" };
+    if (!["low", "medium", "high", "urgent"].includes(priority)) {
+      throw { status: 400, message: "Độ ưu tiên không hợp lệ" };
+    }
 
     if (!Types.ObjectId.isValid(dto.assigneeId)) {
       throw { status: 400, message: "Người thực hiện không hợp lệ" };
@@ -512,8 +521,9 @@ export class TeamService {
 
     const task = await Task.create({
       title,
+      description,
       status: dto.status || "todo",
-      priority: "medium",
+      priority,
       deadline: dto.deadline,
       userId: new Types.ObjectId(dto.assigneeId),
       teamAssignment: {

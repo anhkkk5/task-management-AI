@@ -119,6 +119,7 @@ export const aiChatService = {
         : [];
 
     const result = await aiProvider.chat({
+      purpose: "chat",
       messages: [
         { role: "system", content: systemContent },
         ...fewShot,
@@ -199,10 +200,12 @@ export const aiChatService = {
     yield { type: "meta", conversationId: String(conversationObjectId) };
 
     const stream = aiProvider.chatStream({
+      purpose: "chat",
       messages: [
         {
           role: "system",
-          content: "You are a productivity assistant. Reply in Vietnamese.",
+          content:
+            "Bạn là trợ lý AI cho ứng dụng quản lý công việc. Luôn trả lời ngắn gọn, bám đúng câu hỏi, đề xuất bước hành động cụ thể khi phù hợp. Không bịa thông tin, không tự mở rộng ngoài phạm vi câu hỏi. Trả lời bằng tiếng Việt trừ khi người dùng viết bằng ngôn ngữ khác.",
         },
         {
           role: "user",
