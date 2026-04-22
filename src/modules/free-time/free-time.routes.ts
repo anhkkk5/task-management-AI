@@ -11,7 +11,9 @@ const freeTimeRouter = Router();
 
 freeTimeRouter.get("/me", authMiddleware, getMyAvailability);
 freeTimeRouter.put("/weekly", authMiddleware, updateWeeklyPattern);
+freeTimeRouter.patch("/weekly", authMiddleware, updateWeeklyPattern);
 freeTimeRouter.put("/custom-dates/:date", authMiddleware, setCustomDate);
+freeTimeRouter.patch("/custom-dates/:date", authMiddleware, setCustomDate);
 freeTimeRouter.delete("/custom-dates/:date", authMiddleware, deleteCustomDate);
 
 export default freeTimeRouter;

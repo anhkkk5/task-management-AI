@@ -56,7 +56,9 @@ function normalizeSlots(input: any): AvailableTimeSlot[] {
     }
   }
 
-  const sorted = normalized.sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+  const sorted = normalized.sort(
+    (a, b) => toMinutes(a.start) - toMinutes(b.start),
+  );
   for (let i = 0; i < sorted.length - 1; i++) {
     if (toMinutes(sorted[i].end) > toMinutes(sorted[i + 1].start)) {
       throw new Error("SLOTS_OVERLAP");
@@ -131,7 +133,8 @@ export const freeTimeService = {
     timezone?: string,
   ) => {
     if (!Types.ObjectId.isValid(userId)) throw new Error("INVALID_ID");
-    if (timezone && !isValidTimezone(timezone)) throw new Error("INVALID_TIMEZONE");
+    if (timezone && !isValidTimezone(timezone))
+      throw new Error("INVALID_TIMEZONE");
 
     const weeklyPattern = normalizeWeeklyPattern(weeklyPatternInput);
     const doc = await freeTimeRepository.upsertWeeklyPattern(
@@ -139,6 +142,7 @@ export const freeTimeService = {
       weeklyPattern,
       timezone,
     );
+    if (!doc) throw new Error("UPDATE_FAILED");
     return toPublic(doc);
   },
 

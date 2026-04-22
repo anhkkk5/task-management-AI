@@ -216,8 +216,13 @@ const sendGuestInvites = async (params: {
 
 const removeTaskSessionsFromActiveSchedules = async (
   userId: string,
-  taskId: string,
+  taskIds: string | string[],
 ): Promise<void> => {
+  const ids = Array.isArray(taskIds)
+    ? taskIds.map((id) => String(id))
+    : [String(taskIds)];
+  const idSet = new Set(ids);
+
   const { AISchedule } = await import("../ai-schedule/ai-schedule.model");
   const schedules = await AISchedule.find({
     userId: new Types.ObjectId(userId),
@@ -228,11 +233,21 @@ const removeTaskSessionsFromActiveSchedules = async (
     let modified = false;
     for (const day of schedule.schedule) {
       const before = day.tasks.length;
-      day.tasks = day.tasks.filter((s) => String(s.taskId) !== taskId);
+      day.tasks = day.tasks.filter((s) => !idSet.has(String(s.taskId)));
       if (day.tasks.length !== before) modified = true;
     }
+
     if (modified) {
-      schedule.sourceTasks = schedule.sourceTasks.filter((id) => id !== taskId);
+      schedule.schedule = schedule.schedule.filter(
+        (day) => day.tasks.length > 0,
+      );
+      schedule.sourceTasks = schedule.sourceTasks.filter(
+        (id) => !idSet.has(id),
+      );
+      if (schedule.schedule.length === 0) {
+        schedule.isActive = false;
+        schedule.markModified("isActive");
+      }
       schedule.markModified("schedule");
       schedule.markModified("sourceTasks");
       await schedule.save();
@@ -580,9 +595,15 @@ export const taskService = {
     userId: string,
     taskId: string,
   ): Promise<{ message: string }> => {
+    const userObjectId = new Types.ObjectId(userId);
+    const childTaskIds = await taskRepository.findTaskIdsByParentTaskId({
+      parentTaskId: taskId,
+      userId: userObjectId,
+    });
+
     const deleted = await taskRepository.deleteByIdForUser({
       taskId,
-      userId: new Types.ObjectId(userId),
+      userId: userObjectId,
     });
     if (!deleted) {
       throw new Error("TASK_FORBIDDEN");
@@ -591,7 +612,7 @@ export const taskService = {
     // Cascade delete: Xóa tất cả task con có parentTaskId trỏ đến task vừa xóa
     const deletedChildrenCount = await taskRepository.deleteManyByParentTaskId({
       parentTaskId: taskId,
-      userId: new Types.ObjectId(userId),
+      userId: userObjectId,
     });
 
     if (deletedChildrenCount > 0) {
@@ -600,8 +621,11 @@ export const taskService = {
       );
     }
 
-    // Xóa sessions của taskId này khỏi tất cả AI schedules đang active
-    await removeTaskSessionsFromActiveSchedules(userId, taskId);
+    // Xóa sessions AI liên quan tới task chính + toàn bộ task con đã bị xóa
+    await removeTaskSessionsFromActiveSchedules(userId, [
+      taskId,
+      ...childTaskIds,
+    ]);
 
     await invalidateTasksCache(userId);
     return { message: "Xóa task thành công" };

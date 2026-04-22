@@ -11,6 +11,65 @@ import { Task } from "../task/task.model";
 import { Types } from "mongoose";
 
 export class AIScheduleService {
+  private async loadExistingTaskIds(userId: string): Promise<Set<string>> {
+    const tasks = await Task.find(
+      { userId: new Types.ObjectId(userId) },
+      { _id: 1 },
+    ).lean();
+
+    return new Set(tasks.map((t: any) => String(t._id)));
+  }
+
+  private pruneScheduleOrphans(
+    schedule: AIScheduleDoc,
+    existingTaskIds: Set<string>,
+  ): boolean {
+    let modified = false;
+
+    const nextDays = schedule.schedule
+      .map((day) => {
+        const beforeCount = day.tasks.length;
+        const keptTasks = day.tasks.filter((session) =>
+          existingTaskIds.has(String(session.taskId)),
+        );
+        if (keptTasks.length !== beforeCount) {
+          modified = true;
+        }
+        return {
+          ...day,
+          tasks: keptTasks,
+        };
+      })
+      .filter((day) => day.tasks.length > 0);
+
+    if (nextDays.length !== schedule.schedule.length) {
+      modified = true;
+    }
+
+    const nextSourceTasks = (schedule.sourceTasks || []).filter((taskId) =>
+      existingTaskIds.has(String(taskId)),
+    );
+    if (nextSourceTasks.length !== (schedule.sourceTasks || []).length) {
+      modified = true;
+    }
+
+    if (!modified) return false;
+
+    (schedule as any).schedule = nextDays as any;
+    schedule.sourceTasks = nextSourceTasks;
+
+    if (nextDays.length === 0 && schedule.isActive) {
+      schedule.isActive = false;
+    }
+
+    schedule.markModified("schedule");
+    schedule.markModified("sourceTasks");
+    if (!schedule.isActive) {
+      schedule.markModified("isActive");
+    }
+    return true;
+  }
+
   private parseTimeRange(timeRange: string): {
     startHour: number;
     startMinute: number;
@@ -79,14 +138,34 @@ export class AIScheduleService {
   async getActiveSchedule(userId: string): Promise<ScheduleResponse | null> {
     const schedules = await aiScheduleRepository.findAllActiveByUserId(userId);
     if (schedules.length === 0) return null;
-    if (schedules.length === 1) return this.toResponse(schedules[0]);
+
+    const existingTaskIds = await this.loadExistingTaskIds(userId);
+    const activeSchedules: AIScheduleDoc[] = [];
+
+    for (const schedule of schedules) {
+      const changed = this.pruneScheduleOrphans(schedule, existingTaskIds);
+      if (changed) {
+        await schedule.save();
+      }
+      if (
+        schedule.isActive &&
+        Array.isArray(schedule.schedule) &&
+        schedule.schedule.length > 0
+      ) {
+        activeSchedules.push(schedule);
+      }
+    }
+
+    if (activeSchedules.length === 0) return null;
+    if (activeSchedules.length === 1)
+      return this.toResponse(activeSchedules[0]);
 
     const dayMap = new Map<string, ScheduleDayResponse>();
 
     const allSuggestedOrder: string[] = [];
     const allSourceTasks: string[] = [];
 
-    for (const s of schedules) {
+    for (const s of activeSchedules) {
       const res = this.toResponse(s);
 
       if (Array.isArray(res.suggestedOrder)) {
@@ -116,7 +195,7 @@ export class AIScheduleService {
       a.date.localeCompare(b.date),
     );
 
-    const base = this.toResponse(schedules[0]);
+    const base = this.toResponse(activeSchedules[0]);
 
     return {
       ...base,

@@ -293,6 +293,23 @@ export const taskRepository = {
     return result.deletedCount || 0;
   },
 
+  findTaskIdsByParentTaskId: async (params: {
+    parentTaskId: string | Types.ObjectId;
+    userId: string | Types.ObjectId;
+  }): Promise<string[]> => {
+    const children = await Task.find(
+      {
+        parentTaskId: params.parentTaskId,
+        userId: params.userId,
+      },
+      { _id: 1 },
+    )
+      .lean()
+      .exec();
+
+    return children.map((child: any) => String(child._id));
+  },
+
   listByUser: async (params: {
     userId: string | Types.ObjectId;
     status?: TaskStatus;

@@ -1,5 +1,10 @@
 import { Types } from "mongoose";
-import { FreeTime, FreeTimeDoc, WeeklyPattern, AvailableTimeSlot } from "./free-time.model";
+import {
+  FreeTime,
+  FreeTimeDoc,
+  WeeklyPattern,
+  AvailableTimeSlot,
+} from "./free-time.model";
 
 export class FreeTimeRepository {
   async findByUserId(userId: string): Promise<FreeTimeDoc | null> {
@@ -10,8 +15,8 @@ export class FreeTimeRepository {
     userId: string,
     weeklyPattern: WeeklyPattern,
     timezone?: string,
-  ): Promise<FreeTimeDoc> {
-    return FreeTime.findOneAndUpdate(
+  ): Promise<FreeTimeDoc | null> {
+    const updated = await FreeTime.findOneAndUpdate(
       { userId: new Types.ObjectId(userId) },
       {
         $set: {
@@ -20,11 +25,13 @@ export class FreeTimeRepository {
         },
         $setOnInsert: {
           customDates: [],
-          timezone: timezone || "Asia/Ho_Chi_Minh",
         },
       },
       { new: true, upsert: true },
-    ).exec() as Promise<FreeTimeDoc>;
+    ).exec();
+
+    if (updated) return updated;
+    return this.findByUserId(userId);
   }
 
   async upsertCustomDate(
@@ -62,7 +69,10 @@ export class FreeTimeRepository {
     return base;
   }
 
-  async deleteCustomDate(userId: string, date: string): Promise<FreeTimeDoc | null> {
+  async deleteCustomDate(
+    userId: string,
+    date: string,
+  ): Promise<FreeTimeDoc | null> {
     return FreeTime.findOneAndUpdate(
       { userId: new Types.ObjectId(userId) },
       { $pull: { customDates: { date } } },
