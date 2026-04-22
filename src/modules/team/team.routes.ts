@@ -147,6 +147,38 @@ router.patch(
   },
 );
 
+router.patch(
+  "/:id/members/:memberId/profile",
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user.userId;
+      const team = await teamService.updateMemberProfile(
+        req.params.id as string,
+        userId,
+        req.params.memberId as string,
+        {
+          position:
+            req.body?.position === undefined
+              ? undefined
+              : req.body.position === null
+                ? null
+                : String(req.body.position),
+          level:
+            req.body?.level === undefined
+              ? undefined
+              : req.body.level === null
+                ? null
+                : String(req.body.level),
+        },
+      );
+      res.json(team);
+    } catch (err: any) {
+      res.status(err.status || 500).json({ message: err.message });
+    }
+  },
+);
+
 // ─── Invites ──────────────────────────────────────────────────────────────────
 
 router.post(

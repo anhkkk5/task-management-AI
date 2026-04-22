@@ -16,6 +16,7 @@ import freeTimeRouter from "./modules/free-time/free-time.routes";
 import guestRouter from "./modules/guest/routes/guest.routes";
 import colorsRouter from "./modules/colors/colors.routes";
 import teamRouter from "./modules/team/team.routes";
+import catalogRouter from "./modules/catalog/catalog.routes";
 import { setupPassport } from "./config/passport";
 
 export const createApp = (): Express => {
@@ -63,6 +64,7 @@ export const createApp = (): Express => {
   app.use("/guests", guestRouter);
   app.use("/colors", colorsRouter);
   app.use("/teams", teamRouter);
+  app.use("/catalog", catalogRouter);
 
   return app;
 };

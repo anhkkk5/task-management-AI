@@ -2,12 +2,18 @@ import mongoose, { Schema, Types } from "mongoose";
 
 export type TeamRole = "owner" | "admin" | "member" | "viewer";
 
+export type TeamType = "student" | "company";
+
 export type TeamMember = {
   userId: Types.ObjectId;
   email: string;
   name: string;
   avatar?: string;
   role: TeamRole;
+  /** Vị trí công việc, ví dụ "backend", "content" (tham chiếu catalog) */
+  position?: string;
+  /** Level năng lực, ví dụ "intern", "middle" (tham chiếu catalog) */
+  level?: string;
   joinedAt: Date;
 };
 
@@ -17,6 +23,8 @@ export type TeamAttrs = {
   ownerId: Types.ObjectId;
   members: TeamMember[];
   isArchived?: boolean;
+  teamType?: TeamType;
+  industry?: string;
 };
 
 export type TeamDoc = mongoose.Document & {
@@ -25,6 +33,8 @@ export type TeamDoc = mongoose.Document & {
   ownerId: Types.ObjectId;
   members: TeamMember[];
   isArchived: boolean;
+  teamType: TeamType;
+  industry?: string;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -42,6 +52,8 @@ const teamMemberSchema = new Schema<TeamMember>(
       enum: ["owner", "admin", "member", "viewer"],
       default: "member",
     },
+    position: { type: String, trim: true },
+    level: { type: String, trim: true },
     joinedAt: { type: Date, default: Date.now },
   },
   { _id: false },
@@ -60,6 +72,13 @@ const teamSchema = new Schema<TeamDoc>(
     ownerId: { type: Schema.Types.ObjectId, required: true, index: true },
     members: { type: [teamMemberSchema], default: [] },
     isArchived: { type: Boolean, default: false, index: true },
+    teamType: {
+      type: String,
+      enum: ["student", "company"],
+      default: "company",
+      index: true,
+    },
+    industry: { type: String, trim: true },
   },
   { timestamps: true },
 );

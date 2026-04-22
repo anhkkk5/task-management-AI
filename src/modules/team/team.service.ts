@@ -1,12 +1,33 @@
 import { Types } from "mongoose";
-import { Team, TeamDoc, TeamMember, TeamRole } from "./team.model";
+import { Team, TeamDoc, TeamMember, TeamRole, TeamType } from "./team.model";
 import { TeamInvite } from "./team-invite.model";
 import { Task } from "../task/task.model";
 import { v4 as uuidv4 } from "uuid";
 import { getRedis } from "../../services/redis.service";
+import {
+  getIndustry,
+  isValidIndustry,
+  isValidLevelForIndustry,
+  isValidPosition,
+  getPosition,
+} from "../catalog/catalog.data";
 
-export type CreateTeamDto = { name: string; description?: string };
-export type UpdateTeamDto = { name?: string; description?: string };
+export type CreateTeamDto = {
+  name: string;
+  description?: string;
+  teamType?: TeamType;
+  industry?: string;
+};
+export type UpdateTeamDto = {
+  name?: string;
+  description?: string;
+  teamType?: TeamType;
+  industry?: string;
+};
+export type UpdateMemberProfileDto = {
+  position?: string | null;
+  level?: string | null;
+};
 export type CreateTeamTaskDto = {
   title: string;
   status?: "todo" | "in_progress" | "completed" | "cancelled";
@@ -20,12 +41,16 @@ export type TeamPublic = {
   name: string;
   description?: string;
   ownerId: string;
+  teamType: TeamType;
+  industry?: string;
   members: {
     userId: string;
     email: string;
     name: string;
     avatar?: string;
     role: TeamRole;
+    position?: string;
+    level?: string;
     joinedAt: Date;
   }[];
   isArchived: boolean;
@@ -39,12 +64,16 @@ function toPublic(doc: TeamDoc): TeamPublic {
     name: doc.name,
     description: doc.description,
     ownerId: doc.ownerId.toString(),
+    teamType: doc.teamType,
+    industry: doc.industry,
     members: doc.members.map((m) => ({
       userId: m.userId.toString(),
       email: m.email,
       name: m.name,
       avatar: m.avatar,
       role: m.role,
+      position: m.position,
+      level: m.level,
       joinedAt: m.joinedAt,
     })),
     isArchived: doc.isArchived,
@@ -92,6 +121,14 @@ export class TeamService {
     userInfo: { email: string; name: string; avatar?: string },
     dto: CreateTeamDto,
   ): Promise<TeamPublic> {
+    const teamType: TeamType =
+      dto.teamType === "student" ? "student" : "company";
+
+    let industry = dto.industry?.trim() || undefined;
+    if (industry && !isValidIndustry(industry)) {
+      throw { status: 400, message: "Ngành nghề không hợp lệ" };
+    }
+
     const ownerMember: TeamMember = {
       userId: new Types.ObjectId(userId),
       email: userInfo.email,
@@ -105,6 +142,8 @@ export class TeamService {
       description: dto.description,
       ownerId: new Types.ObjectId(userId),
       members: [ownerMember],
+      teamType,
+      industry,
     });
     return toPublic(team);
   }
@@ -140,6 +179,94 @@ export class TeamService {
     }
     if (dto.name) team.name = dto.name;
     if (dto.description !== undefined) team.description = dto.description;
+    if (dto.teamType) {
+      if (dto.teamType !== "student" && dto.teamType !== "company") {
+        throw { status: 400, message: "Loại nhóm không hợp lệ" };
+      }
+      team.teamType = dto.teamType;
+    }
+    if (dto.industry !== undefined) {
+      const ind = dto.industry?.trim();
+      if (ind && !isValidIndustry(ind)) {
+        throw { status: 400, message: "Ngành nghề không hợp lệ" };
+      }
+      team.industry = ind || undefined;
+    }
+    await team.save();
+    return toPublic(team);
+  }
+
+  async updateMemberProfile(
+    teamId: string,
+    requesterId: string,
+    memberId: string,
+    dto: UpdateMemberProfileDto,
+  ): Promise<TeamPublic> {
+    const team = await Team.findById(teamId);
+    if (!team) throw { status: 404, message: "Team không tồn tại" };
+
+    const requester = team.members.find(
+      (m) => m.userId.toString() === requesterId,
+    );
+    if (!requester) {
+      throw { status: 403, message: "Bạn không phải thành viên của team này" };
+    }
+
+    const isSelf = requesterId === memberId;
+    const isAdminLike = ["owner", "admin"].includes(requester.role);
+    if (!isSelf && !isAdminLike) {
+      throw {
+        status: 403,
+        message:
+          "Chỉ quản trị viên hoặc chính người đó mới được cập nhật vị trí / level",
+      };
+    }
+
+    const target = team.members.find((m) => m.userId.toString() === memberId);
+    if (!target) throw { status: 404, message: "Thành viên không tồn tại" };
+
+    const industry = team.industry;
+
+    if (dto.position !== undefined) {
+      if (dto.position === null || dto.position === "") {
+        target.position = undefined;
+      } else {
+        if (!industry) {
+          throw {
+            status: 400,
+            message: "Team chưa chọn ngành nghề, không thể gán vị trí",
+          };
+        }
+        if (!isValidPosition(industry, dto.position)) {
+          throw {
+            status: 400,
+            message: "Vị trí không hợp lệ với ngành của team",
+          };
+        }
+        target.position = dto.position;
+        // Auto set level if missing
+        if (!target.level) {
+          const pos = getPosition(industry, dto.position);
+          if (pos) target.level = pos.defaultLevel;
+        }
+      }
+    }
+
+    if (dto.level !== undefined) {
+      if (dto.level === null || dto.level === "") {
+        target.level = undefined;
+      } else {
+        if (!isValidLevelForIndustry(industry, dto.level)) {
+          throw {
+            status: 400,
+            message: "Level không hợp lệ với ngành của team",
+          };
+        }
+        target.level = dto.level;
+      }
+    }
+
+    team.markModified("members");
     await team.save();
     return toPublic(team);
   }

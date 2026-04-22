@@ -7,6 +7,13 @@ import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 import { freeTimeService } from "../free-time/free-time.service";
 import { extractJson } from "../ai/ai-utils";
 import { getRedis } from "../../services/redis.service";
+import { Team } from "../team/team.model";
+import {
+  getIndustry,
+  getLevelMultiplier,
+  LEVELS,
+  getPosition,
+} from "../catalog/catalog.data";
 import {
   intervalScheduler,
   slotFinder,
@@ -1306,10 +1313,64 @@ async function setCachedEstimation(
   }
 }
 
+// ───── Team assignee profile resolver ─────
+interface AssigneeProfile {
+  teamType?: "student" | "company";
+  industryCode?: string;
+  industryLabel?: string;
+  positionCode?: string;
+  positionLabel?: string;
+  levelCode?: string;
+  levelLabel?: string;
+  /** Hệ số năng lực: <1 nhanh hơn, >1 chậm hơn middle=1 */
+  levelMultiplier: number;
+}
+
+async function resolveAssigneeProfile(task: any): Promise<AssigneeProfile> {
+  const teamId = task?.teamAssignment?.teamId;
+  const assigneeId = task?.teamAssignment?.assigneeId;
+  if (!teamId || !assigneeId) {
+    return { levelMultiplier: 1.0 };
+  }
+
+  try {
+    const team = await Team.findById(teamId).lean<any>().exec();
+    if (!team) return { levelMultiplier: 1.0 };
+
+    const member = (team.members || []).find(
+      (m: any) => String(m.userId) === String(assigneeId),
+    );
+    if (!member) return { levelMultiplier: 1.0 };
+
+    const industry = getIndustry(team.industry);
+    const position = getPosition(team.industry, member.position);
+    const levelInfo = member.level
+      ? LEVELS[member.level as keyof typeof LEVELS]
+      : undefined;
+
+    return {
+      teamType: team.teamType,
+      industryCode: team.industry,
+      industryLabel: industry?.label,
+      positionCode: member.position,
+      positionLabel: position?.label,
+      levelCode: member.level,
+      levelLabel: levelInfo?.label,
+      levelMultiplier: getLevelMultiplier(member.level),
+    };
+  } catch (err: any) {
+    console.warn(
+      `[Estimation] resolveAssigneeProfile failed: ${err?.message || err}`,
+    );
+    return { levelMultiplier: 1.0 };
+  }
+}
+
 // ───── AI difficulty estimator ─────
 async function aiEstimateDifficulty(
   task: any,
   userId: string,
+  profile?: AssigneeProfile,
 ): Promise<{
   difficulty: "easy" | "medium" | "hard";
   multiplier: number;
@@ -1321,7 +1382,15 @@ async function aiEstimateDifficulty(
   const deadlineStr = task.deadline
     ? new Date(task.deadline).toISOString().split("T")[0]
     : null;
-  const cacheKey = estimationCacheKey(userId, title, deadlineStr, description);
+  const profileKey = profile
+    ? `${profile.industryCode ?? ""}|${profile.positionCode ?? ""}|${profile.levelCode ?? ""}`
+    : "";
+  const cacheKey = estimationCacheKey(
+    userId,
+    title,
+    deadlineStr,
+    `${description}||${profileKey}`,
+  );
 
   // Check cache first
   const cached = await getCachedEstimation(cacheKey);
@@ -1333,12 +1402,27 @@ async function aiEstimateDifficulty(
   }
 
   try {
-    const prompt = `Phân tích độ phức tạp công việc này và trả về JSON duy nhất:
+    const profileLines: string[] = [];
+    if (profile?.industryLabel)
+      profileLines.push(`Ngành nghề: ${profile.industryLabel}`);
+    if (profile?.positionLabel)
+      profileLines.push(`Vị trí người thực hiện: ${profile.positionLabel}`);
+    if (profile?.levelLabel)
+      profileLines.push(`Level người thực hiện: ${profile.levelLabel}`);
+
+    const prompt = `Phân tích độ phức tạp công việc này, có cân nhắc vai trò người thực hiện (nếu có), và trả về JSON duy nhất.
 
 Tiêu đề: ${title}
 ${description ? `Mô tả: ${description}` : ""}
 ${task.priority ? `Ưu tiên: ${task.priority}` : ""}
 ${deadlineStr ? `Deadline: ${deadlineStr}` : ""}
+${profileLines.join("\n")}
+
+Hướng dẫn:
+- "easy": công việc đơn giản, ít suy nghĩ, dưới 1-2 giờ với người trung bình.
+- "medium": công việc tiêu chuẩn, cần tập trung nhưng không phức tạp cao.
+- "hard": phức tạp, nhiều bước, cần research, integration, hoặc rủi ro cao.
+- KHÔNG nhân thêm theo level ở đây (level sẽ được hệ thống nhân ngoài), chỉ đánh giá độ khó nội tại của task.
 
 Trả về JSON (KHÔNG kèm text khác):
 {"difficulty":"easy|medium|hard","multiplier":0.7|1.0|1.5,"reasoning":"lý do ngắn"}`;
@@ -1432,6 +1516,9 @@ async function ensureTaskPlanningInputsWithMeta(
     ) + 1,
   );
 
+  // Resolve assignee profile (team industry/position/level) once
+  const assigneeProfile = await resolveAssigneeProfile(task);
+
   // ── estimatedDuration ──
   if (task.estimatedDuration == null) {
     // Step 1: Heuristic base
@@ -1462,28 +1549,36 @@ async function ensureTaskPlanningInputsWithMeta(
       1440,
     );
 
-    // Step 2: Try AI estimation
-    const aiResult = await aiEstimateDifficulty(task, userId);
+    // Step 2: Try AI estimation (có context vị trí/level người làm)
+    const aiResult = await aiEstimateDifficulty(task, userId, assigneeProfile);
+    let preLevelDuration: number;
     if (aiResult) {
       aiDifficulty = aiResult.difficulty;
       aiMultiplier = aiResult.multiplier;
-      // Hybrid: 60% AI-adjusted + 40% pure heuristic
       const aiAdjusted = heuristicDuration * aiResult.multiplier;
       const hybridDuration = aiAdjusted * 0.6 + heuristicDuration * 0.4;
-      task.estimatedDuration = clamp(roundToNearest5(hybridDuration), 60, 1440);
+      preLevelDuration = hybridDuration;
       method = "hybrid";
       confidence = aiResult.difficulty === "medium" ? 0.7 : 0.8;
     } else {
-      // Pure heuristic fallback
-      task.estimatedDuration = heuristicDuration;
+      preLevelDuration = heuristicDuration;
       method = "heuristic";
       confidence = 0.5;
     }
+
+    // Step 3: Apply level multiplier (intern chậm hơn, senior nhanh hơn)
+    const levelMultiplier = assigneeProfile.levelMultiplier || 1.0;
+    const finalDuration = preLevelDuration * levelMultiplier;
+
+    task.estimatedDuration = clamp(roundToNearest5(finalDuration), 60, 1440);
 
     estimatedFields.push("estimatedDuration");
     console.log(
       `[Estimation] Task "${task.title}": ${method} → ${task.estimatedDuration}min` +
         (aiDifficulty ? ` (AI: ${aiDifficulty}, ×${aiMultiplier})` : "") +
+        (assigneeProfile.levelCode
+          ? ` (level: ${assigneeProfile.levelCode}, ×${levelMultiplier})`
+          : "") +
         ` | days=${daysUntilDeadline}, base=${heuristicDuration}min`,
     );
   }
