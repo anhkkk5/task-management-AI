@@ -4,6 +4,7 @@ import { aiProvider } from "../ai/ai.provider";
 import { taskRepository } from "../task/task.repository";
 import { userHabitRepository } from "../user/user-habit.repository";
 import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
+import { freeTimeService } from "../free-time/free-time.service";
 import { extractJson } from "../ai/ai-utils";
 import { getRedis } from "../../services/redis.service";
 import {
@@ -29,11 +30,83 @@ interface TaskEstimationMeta {
   finalDailyMin: number;
 }
 
+function parseHHMMToMinutes(time: string): number {
+  const [h, m] = String(time)
+    .split(":")
+    .map((x) => parseInt(x, 10));
+  if (Number.isNaN(h) || Number.isNaN(m)) return -1;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
+  return h * 60 + m;
+}
+
+function buildOutsideAvailabilityBusySlots(
+  date: Date,
+  availableSlots: Array<{ start: string; end: string }>,
+): TimeInterval[] {
+  const normalized = (Array.isArray(availableSlots) ? availableSlots : [])
+    .map((slot) => ({
+      start: parseHHMMToMinutes(slot.start),
+      end: parseHHMMToMinutes(slot.end),
+    }))
+    .filter((slot) => slot.start >= 0 && slot.end > slot.start)
+    .sort((a, b) => a.start - b.start);
+
+  // Nếu không có slot rảnh => block toàn bộ ngày
+  if (normalized.length === 0) {
+    const dayStart = new Date(date);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(date);
+    dayEnd.setHours(24, 0, 0, 0);
+    return [{ start: dayStart, end: dayEnd, taskId: "UNAVAILABLE" }];
+  }
+
+  const blocked: TimeInterval[] = [];
+  let cursor = 0;
+
+  const toDateAtMinute = (baseDate: Date, minute: number): Date => {
+    const d = new Date(baseDate);
+    const h = Math.floor(minute / 60);
+    const m = minute % 60;
+    d.setHours(h, m, 0, 0);
+    return d;
+  };
+
+  for (const slot of normalized) {
+    if (slot.start > cursor) {
+      blocked.push({
+        start: toDateAtMinute(date, cursor),
+        end: toDateAtMinute(date, slot.start),
+        taskId: "UNAVAILABLE",
+      });
+    }
+    cursor = Math.max(cursor, slot.end);
+  }
+
+  if (cursor < 24 * 60) {
+    blocked.push({
+      start: toDateAtMinute(date, cursor),
+      end: toDateAtMinute(date, 24 * 60),
+      taskId: "UNAVAILABLE",
+    });
+  }
+
+  return blocked;
+}
+
 /**
  * HYBRID AI + Algorithm Schedule Service
  * AI chỉ phân tích high-level, backend algorithm chọn giờ cụ thể
  */
 export const hybridScheduleService = {
+  estimateTaskPlanningInputs: async (
+    userId: string,
+    task: any,
+    plannerStartDate: Date = new Date(),
+  ): Promise<TaskEstimationMeta | null> => {
+    if (!task) return null;
+    return ensureTaskPlanningInputsWithMeta(task, plannerStartDate, userId);
+  },
+
   /**
    * Main: Tạo schedule kết hợp AI + Algorithms
    * - AI: Phân tích difficulty, priority, suggested order
@@ -195,9 +268,14 @@ export const hybridScheduleService = {
         }
       }
 
-      // Tính thời gian tối đa có thể xếp (daysLeft × dailyTargetMax)
+      // Tính thời gian tối đa có thể xếp theo năng lực thực tế/ngày
+      // (không chỉ bám dailyTarget hiện tại để tránh warning giả)
       const dailyTargetMax = task.dailyTargetDuration ?? 120;
-      const maxPossibleMinutes = daysLeft * dailyTargetMax;
+      const potentialDailyMax = Math.max(
+        dailyTargetMax,
+        task.teamAssignment ? 480 : 360,
+      );
+      const maxPossibleMinutes = daysLeft * potentialDailyMax;
 
       if (requiredMinutes > maxPossibleMinutes) {
         const shortfallMinutes = requiredMinutes - maxPossibleMinutes;
@@ -591,7 +669,26 @@ Format JSON:
       };
 
       // Lấy busy slots của ngày này (từ các ngày trước đã schedule)
-      const existingBusySlots = busySlotsByDate.get(dateStr) || [];
+      // + block toàn bộ thời gian ngoài availability của user trong ngày
+      const baseBusySlots = busySlotsByDate.get(dateStr) || [];
+      const availableSlots = await freeTimeService.getAvailableSlotsForDate(
+        userId,
+        new Date(currentDate),
+      );
+      const outsideAvailabilityBusySlots = buildOutsideAvailabilityBusySlots(
+        new Date(currentDate),
+        availableSlots,
+      );
+      const existingBusySlots = [
+        ...baseBusySlots,
+        ...outsideAvailabilityBusySlots,
+      ];
+      busySlotsByDate.set(dateStr, existingBusySlots);
+
+      const dynamicWorkHours = {
+        start: 0,
+        end: 24,
+      };
 
       // Sort tasks: deadline gần hơn trước, sau đó priority cao hơn
       const baseOrder = (
@@ -714,7 +811,7 @@ Format JSON:
 
       const scheduleTaskChunksForDay = async (
         task: any,
-        mode: "reachMin" | "fillMax",
+        mode: "reachMin" | "fillMax" | "fillAvailable",
       ): Promise<void> => {
         const remainingForTask =
           remainingMinutesByTaskId.get(String(task._id)) || 0;
@@ -758,16 +855,26 @@ Format JSON:
             new Map<string, number>();
           const scheduledToday = mapForDay.get(String(task._id)) || 0;
 
+          const hardDailyCap = Math.max(
+            dailyTargetMax,
+            task.teamAssignment ? 480 : 360,
+          );
+          const effectiveDailyMax =
+            mode === "fillAvailable" ? hardDailyCap : dailyTargetMax;
+
           if (mode === "reachMin" && scheduledToday >= dailyTargetMin) {
             break;
           }
-          if (mode === "fillMax" && scheduledToday >= dailyTargetMax) {
+          if (
+            (mode === "fillMax" || mode === "fillAvailable") &&
+            scheduledToday >= effectiveDailyMax
+          ) {
             break;
           }
 
           const remainingToMaxToday = Math.max(
             0,
-            dailyTargetMax - scheduledToday,
+            effectiveDailyMax - scheduledToday,
           );
           if (remainingToMaxToday <= 0) break;
 
@@ -793,14 +900,7 @@ Format JSON:
               productivityScores,
               busySlots: existingBusySlots,
               date: new Date(currentDate),
-              workHours: {
-                start: 8,
-                end: 23, // Tối đa 23h
-                breaks: [
-                  { start: 11.5, end: 14 }, // 11:30-14:00 nghỉ trưa
-                  { start: 17.5, end: 19 }, // ✅ 17:30-19:00 nghỉ tối (sửa từ 19.5 → 19)
-                ],
-              },
+              workHours: dynamicWorkHours,
               bufferMinutes: 15, // 15 phút nghỉ giữa các task
               currentTime: now, // ✅ Pass current time to skip past slots
             });
@@ -915,6 +1015,14 @@ Format JSON:
           const task = tasks.find((t) => String(t._id) === taskId);
           if (!task) continue;
           await scheduleTaskChunksForDay(task, "fillMax");
+        }
+
+        // Phase 3: nếu trong ngày vẫn còn khoảng trống, dồn thêm task để lấp ngày
+        // trước khi chuyển sang ngày tiếp theo (không vượt hard cap/ngày của task)
+        for (const taskId of sortedTaskIds) {
+          const task = tasks.find((t) => String(t._id) === taskId);
+          if (!task) continue;
+          await scheduleTaskChunksForDay(task, "fillAvailable");
         }
       }
 
@@ -1056,12 +1164,24 @@ Format JSON:
     while (currentDate <= deadline && freeSlots.length < 5) {
       // TODO: Get actual busy slots from repository
       const busySlots: TimeInterval[] = []; // Placeholder
+      const availableSlots = await freeTimeService.getAvailableSlotsForDate(
+        userId,
+        new Date(currentDate),
+      );
+      const outsideAvailabilityBusySlots = buildOutsideAvailabilityBusySlots(
+        new Date(currentDate),
+        availableSlots,
+      );
+      const constrainedBusySlots = [
+        ...busySlots,
+        ...outsideAvailabilityBusySlots,
+      ];
 
       const slots = slotFinder.findFreeSlots({
-        busySlots,
+        busySlots: constrainedBusySlots,
         date: new Date(currentDate),
         minDuration: task.estimatedDuration || 60,
-        workHours: { start: 8, end: 22 },
+        workHours: { start: 0, end: 24 },
       });
 
       freeSlots.push(...slots);

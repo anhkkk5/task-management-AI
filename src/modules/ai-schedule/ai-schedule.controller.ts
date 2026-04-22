@@ -160,7 +160,7 @@ export class AIScheduleController {
     try {
       const userId = req.user?.userId;
       const scheduleId = req.params.scheduleId as string;
-      const { sessionId, suggestedTime } = req.body;
+      const { sessionId, suggestedTime, targetDate } = req.body;
 
       if (!userId) {
         res.status(401).json({ message: "Unauthorized" });
@@ -179,6 +179,7 @@ export class AIScheduleController {
         userId,
         sessionId,
         suggestedTime,
+        targetDate,
       );
 
       if (!updated) {
@@ -188,6 +189,32 @@ export class AIScheduleController {
 
       res.json({ success: true, data: updated });
     } catch (error: any) {
+      const message = String(error?.message || "");
+      if (message === "SESSION_ALREADY_STARTED") {
+        res.status(409).json({
+          success: false,
+          message:
+            "Không thể di chuyển: phiên làm việc đã bắt đầu hoặc đã qua.",
+        });
+        return;
+      }
+      if (message === "TARGET_TIME_IN_PAST") {
+        res.status(400).json({
+          success: false,
+          message: "Không thể di chuyển về thời gian trong quá khứ.",
+        });
+        return;
+      }
+      if (
+        message === "INVALID_SUGGESTED_TIME" ||
+        message === "INVALID_TARGET_DATE"
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "Thời gian hoặc ngày di chuyển không hợp lệ.",
+        });
+        return;
+      }
       res.status(500).json({
         success: false,
         message: error.message || "Failed to update session time",

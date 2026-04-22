@@ -12,6 +12,7 @@ import adminRouter from "./modules/admin/admin.routes";
 import scheduleTemplateRouter from "./modules/schedule-template/schedule-template.routes";
 import aiScheduleRouter from "./modules/ai-schedule/ai-schedule.routes";
 import schedulerRouter from "./modules/scheduler/scheduler.routes";
+import freeTimeRouter from "./modules/free-time/free-time.routes";
 import guestRouter from "./modules/guest/routes/guest.routes";
 import colorsRouter from "./modules/colors/colors.routes";
 import teamRouter from "./modules/team/team.routes";
@@ -58,6 +59,7 @@ export const createApp = (): Express => {
   app.use("/schedule-templates", scheduleTemplateRouter);
   app.use("/ai-schedules", aiScheduleRouter);
   app.use("/scheduler", schedulerRouter);
+  app.use("/free-time", freeTimeRouter);
   app.use("/guests", guestRouter);
   app.use("/colors", colorsRouter);
   app.use("/teams", teamRouter);

@@ -14,6 +14,7 @@ import { NotificationType } from "../notification/notification.model";
 import { notificationQueueService } from "../notification/notification.queue";
 import { userRepository } from "../user/user.repository";
 import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
+import { hybridScheduleService } from "../scheduler/hybrid-schedule.service";
 
 export type PublicTask = {
   id: string;
@@ -210,6 +211,32 @@ const sendGuestInvites = async (params: {
       taskTitle: task.title,
       organizerEmail,
     });
+  }
+};
+
+const removeTaskSessionsFromActiveSchedules = async (
+  userId: string,
+  taskId: string,
+): Promise<void> => {
+  const { AISchedule } = await import("../ai-schedule/ai-schedule.model");
+  const schedules = await AISchedule.find({
+    userId: new Types.ObjectId(userId),
+    isActive: true,
+  }).exec();
+
+  for (const schedule of schedules) {
+    let modified = false;
+    for (const day of schedule.schedule) {
+      const before = day.tasks.length;
+      day.tasks = day.tasks.filter((s) => String(s.taskId) !== taskId);
+      if (day.tasks.length !== before) modified = true;
+    }
+    if (modified) {
+      schedule.sourceTasks = schedule.sourceTasks.filter((id) => id !== taskId);
+      schedule.markModified("schedule");
+      schedule.markModified("sourceTasks");
+      await schedule.save();
+    }
   }
 };
 
@@ -503,6 +530,12 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
+    // Khi đưa task về "todo" thì xóa toàn bộ AI sessions cũ của task này
+    // để tránh apply optimize lần sau bị dư lịch/dư phiên.
+    if (dto.status === "todo") {
+      await removeTaskSessionsFromActiveSchedules(userId, taskId);
+    }
+
     // Track completion history when task is marked as completed
     if (dto.status === "completed" && currentTask.status !== "completed") {
       const completedAt = new Date();
@@ -567,32 +600,8 @@ export const taskService = {
       );
     }
 
-    // Xóa sessions của taskId này khỏi tất cả AISchedule
-    const { AISchedule } = await import("../ai-schedule/ai-schedule.model");
-    const schedules = await AISchedule.find({
-      userId: new Types.ObjectId(userId),
-      isActive: true,
-    }).exec();
-
-    for (const schedule of schedules) {
-      let modified = false;
-      for (const day of schedule.schedule) {
-        const before = day.tasks.length;
-        day.tasks = day.tasks.filter((s) => String(s.taskId) !== taskId);
-        if (day.tasks.length !== before) modified = true;
-      }
-      if (modified) {
-        schedule.sourceTasks = schedule.sourceTasks.filter(
-          (id) => id !== taskId,
-        );
-        schedule.markModified("schedule");
-        schedule.markModified("sourceTasks");
-        await schedule.save();
-        console.log(
-          `[TaskDelete] Đã xóa sessions của task ${taskId} khỏi schedule ${schedule._id}`,
-        );
-      }
-    }
+    // Xóa sessions của taskId này khỏi tất cả AI schedules đang active
+    await removeTaskSessionsFromActiveSchedules(userId, taskId);
 
     await invalidateTasksCache(userId);
     return { message: "Xóa task thành công" };
@@ -605,6 +614,14 @@ export const taskService = {
     });
     if (!task) {
       throw new Error("TASK_FORBIDDEN");
+    }
+
+    if (task.estimatedDuration == null) {
+      await hybridScheduleService.estimateTaskPlanningInputs(
+        userId,
+        task,
+        task.startAt ?? new Date(),
+      );
     }
 
     // Đọc sessions từ AISchedule
@@ -654,8 +671,10 @@ export const taskService = {
       (sum, s) => sum + s.durationMinutes,
       0,
     );
-    const targetTotalMinutes =
-      task.estimatedDuration || totalSlotMinutes || undefined;
+    const normalizedEstimatedDuration =
+      task.estimatedDuration ??
+      (totalSlotMinutes > 0 ? totalSlotMinutes : undefined);
+    const targetTotalMinutes = normalizedEstimatedDuration;
 
     const breakdown = await aiService.taskBreakdown(userId, {
       title: task.title,
@@ -715,12 +734,16 @@ export const taskService = {
       };
     });
 
+    const updatePayload: any = {
+      aiBreakdown: stepsWithSlot,
+    };
+    if (task.estimatedDuration == null && normalizedEstimatedDuration != null) {
+      updatePayload.estimatedDuration = normalizedEstimatedDuration;
+    }
+
     const updated = await taskRepository.updateByIdForUser(
       { taskId, userId: new Types.ObjectId(userId) },
-      {
-        aiBreakdown: stepsWithSlot,
-        // KHÔNG ghi đè estimatedDuration
-      },
+      updatePayload,
     );
 
     if (!updated) {
@@ -1070,6 +1093,10 @@ export const taskService = {
 
     if (!updated) {
       throw new Error("TASK_FORBIDDEN");
+    }
+
+    if (status === "todo") {
+      await removeTaskSessionsFromActiveSchedules(userId, taskId);
     }
 
     // Track completion history when task is marked as completed

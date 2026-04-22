@@ -11,6 +11,66 @@ import { Task } from "../task/task.model";
 import { Types } from "mongoose";
 
 export class AIScheduleService {
+  private parseTimeRange(timeRange: string): {
+    startHour: number;
+    startMinute: number;
+    endHour: number;
+    endMinute: number;
+  } | null {
+    const m = String(timeRange)
+      .trim()
+      .match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+
+    const [, sh, sm, eh, em] = m;
+    const startHour = parseInt(sh, 10);
+    const startMinute = parseInt(sm, 10);
+    const endHour = parseInt(eh, 10);
+    const endMinute = parseInt(em, 10);
+
+    if (
+      Number.isNaN(startHour) ||
+      Number.isNaN(startMinute) ||
+      Number.isNaN(endHour) ||
+      Number.isNaN(endMinute) ||
+      startHour < 0 ||
+      startHour > 23 ||
+      endHour < 0 ||
+      endHour > 23 ||
+      startMinute < 0 ||
+      startMinute > 59 ||
+      endMinute < 0 ||
+      endMinute > 59
+    ) {
+      return null;
+    }
+
+    const startTotal = startHour * 60 + startMinute;
+    const endTotal = endHour * 60 + endMinute;
+    if (endTotal <= startTotal) return null;
+
+    return { startHour, startMinute, endHour, endMinute };
+  }
+
+  private buildDateTime(dateStr: string, hour: number, minute: number): Date {
+    const d = new Date(`${dateStr}T00:00:00`);
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  }
+
+  private dayLabelVi(date: Date): string {
+    const labels = [
+      "Chủ Nhật",
+      "Thứ Hai",
+      "Thứ Ba",
+      "Thứ Tư",
+      "Thứ Năm",
+      "Thứ Sáu",
+      "Thứ Bảy",
+    ];
+    return labels[date.getDay()] || "";
+  }
+
   async getUserSchedules(userId: string): Promise<ScheduleResponse[]> {
     const schedules = await aiScheduleRepository.findByUserId(userId);
     return schedules.map((s) => this.toResponse(s));
@@ -113,14 +173,125 @@ export class AIScheduleService {
     userId: string,
     sessionId: string,
     suggestedTime: string,
+    targetDate?: string,
   ): Promise<ScheduleResponse | null> {
-    const updated = await aiScheduleRepository.updateSessionTime(
+    const parsedNew = this.parseTimeRange(suggestedTime);
+    if (!parsedNew) {
+      throw new Error("INVALID_SUGGESTED_TIME");
+    }
+
+    const schedule = await aiScheduleRepository.findByIdAndUserId(
       scheduleId,
       userId,
-      sessionId,
-      suggestedTime,
     );
-    return updated ? this.toResponse(updated) : null;
+    if (!schedule) return null;
+
+    let fromDayIndex = -1;
+    let fromTaskIndex = -1;
+
+    for (let i = 0; i < schedule.schedule.length; i++) {
+      const taskIdx = schedule.schedule[i].tasks.findIndex(
+        (t) => t.sessionId === sessionId,
+      );
+      if (taskIdx >= 0) {
+        fromDayIndex = i;
+        fromTaskIndex = taskIdx;
+        break;
+      }
+    }
+
+    if (fromDayIndex < 0 || fromTaskIndex < 0) {
+      return null;
+    }
+
+    const fromDay = schedule.schedule[fromDayIndex];
+    if (!fromDay) {
+      return null;
+    }
+    const originalSession = fromDay.tasks[fromTaskIndex];
+    if (!originalSession) {
+      return null;
+    }
+    const originalParsed = this.parseTimeRange(originalSession.suggestedTime);
+    if (!originalParsed) {
+      throw new Error("INVALID_ORIGINAL_SESSION_TIME");
+    }
+
+    const originalStart = this.buildDateTime(
+      fromDay.date,
+      originalParsed.startHour,
+      originalParsed.startMinute,
+    );
+    const now = new Date();
+
+    // Chỉ cho move session chưa tới giờ bắt đầu
+    if (originalStart.getTime() <= now.getTime()) {
+      throw new Error("SESSION_ALREADY_STARTED");
+    }
+
+    const moveDate = String(targetDate || fromDay.date).trim();
+    const dayDate = new Date(`${moveDate}T00:00:00`);
+    if (Number.isNaN(dayDate.getTime())) {
+      throw new Error("INVALID_TARGET_DATE");
+    }
+
+    const nextStart = this.buildDateTime(
+      moveDate,
+      parsedNew.startHour,
+      parsedNew.startMinute,
+    );
+
+    // Không cho move về quá khứ so với thời gian thực
+    if (nextStart.getTime() < now.getTime()) {
+      throw new Error("TARGET_TIME_IN_PAST");
+    }
+
+    if (moveDate === fromDay.date) {
+      schedule.schedule[fromDayIndex].tasks[fromTaskIndex].suggestedTime =
+        suggestedTime;
+    } else {
+      // Remove from old day
+      schedule.schedule[fromDayIndex].tasks.splice(fromTaskIndex, 1);
+
+      // Add to target day (create if missing)
+      let targetDay = schedule.schedule.find((d) => d.date === moveDate);
+      if (!targetDay) {
+        const newTargetDay = {
+          day: this.dayLabelVi(dayDate),
+          date: moveDate,
+          tasks: [],
+        } as any;
+        schedule.schedule.push(newTargetDay);
+        targetDay = newTargetDay;
+      }
+      if (!targetDay) {
+        return null;
+      }
+
+      targetDay.tasks.push({
+        ...originalSession,
+        suggestedTime,
+      } as any);
+    }
+
+    // Keep day tasks sorted by start time
+    schedule.schedule.forEach((day) => {
+      day.tasks.sort((a, b) => {
+        const ta = this.parseTimeRange(a.suggestedTime);
+        const tb = this.parseTimeRange(b.suggestedTime);
+        const ma = ta ? ta.startHour * 60 + ta.startMinute : 0;
+        const mb = tb ? tb.startHour * 60 + tb.startMinute : 0;
+        return ma - mb;
+      });
+    });
+
+    schedule.schedule.sort((a, b) =>
+      String(a.date).localeCompare(String(b.date)),
+    );
+    schedule.markModified("schedule");
+    await schedule.save();
+
+    return this.toResponse(schedule);
   }
 
   async deleteSession(
@@ -145,12 +316,12 @@ export class AIScheduleService {
         parentTaskId: { $exists: true },
       });
       await Task.updateMany(
-        { 
-          userId: new Types.ObjectId(userId), 
+        {
+          userId: new Types.ObjectId(userId),
           status: "scheduled",
-          "scheduledTime.start": { $exists: false }
+          "scheduledTime.start": { $exists: false },
         },
-        { $set: { status: "todo" } }
+        { $set: { status: "todo" } },
       );
     }
     return deleted;
@@ -164,12 +335,12 @@ export class AIScheduleService {
       parentTaskId: { $exists: true },
     });
     await Task.updateMany(
-      { 
-        userId: new Types.ObjectId(userId), 
+      {
+        userId: new Types.ObjectId(userId),
         status: "scheduled",
-        "scheduledTime.start": { $exists: false }
+        "scheduledTime.start": { $exists: false },
       },
-      { $set: { status: "todo" } }
+      { $set: { status: "todo" } },
     );
   }
 
