@@ -791,6 +791,16 @@ export const updateTask = async (
       return;
     }
 
+    if (message.startsWith("TEAM_TASK_EDIT_RESTRICTED:")) {
+      const teamId = message.split(":")[1];
+      res.status(403).json({
+        message:
+          "Đây là công việc trong team. Vui lòng vào trang Team để chỉnh sửa.",
+        teamId,
+      });
+      return;
+    }
+
     res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
@@ -813,6 +823,16 @@ export const deleteTask = async (
 
     if (message === "TASK_FORBIDDEN") {
       res.status(403).json({ message: "Không có quyền xóa task này" });
+      return;
+    }
+
+    if (message.startsWith("TEAM_TASK_DELETE_RESTRICTED:")) {
+      const teamId = message.split(":")[1];
+      res.status(403).json({
+        message:
+          "Không thể xóa tại đây. Vui lòng vào Team để xóa công việc nhóm.",
+        teamId,
+      });
       return;
     }
 
@@ -861,6 +881,16 @@ export const updateTaskStatus = async (
 
     if (message === "TASK_FORBIDDEN") {
       res.status(403).json({ message: "Không có quyền cập nhật task này" });
+      return;
+    }
+
+    if (message.startsWith("TEAM_TASK_STATUS_RESTRICTED:")) {
+      const teamId = message.split(":")[1];
+      res.status(403).json({
+        message:
+          "Đây là công việc trong team. Hãy cập nhật trạng thái trong trang Team.",
+        teamId,
+      });
       return;
     }
 

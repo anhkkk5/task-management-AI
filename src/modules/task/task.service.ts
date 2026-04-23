@@ -49,6 +49,15 @@ export type PublicTask = {
   meetingLink?: string;
   userId: string;
   parentTaskId?: string;
+  teamAssignment?: {
+    teamId: string;
+    assigneeId: string;
+    assigneeEmail?: string;
+    assigneeName?: string;
+    assignedBy?: string;
+    assignedAt?: Date;
+    startAt?: Date;
+  };
   aiBreakdown: {
     title: string;
     status: string;
@@ -102,6 +111,19 @@ const toPublicTask = (t: any): PublicTask => {
     meetingLink: t.meetingLink,
     userId: String(t.userId),
     parentTaskId: t.parentTaskId ? String(t.parentTaskId) : undefined,
+    teamAssignment: t.teamAssignment
+      ? {
+          teamId: String(t.teamAssignment.teamId),
+          assigneeId: String(t.teamAssignment.assigneeId),
+          assigneeEmail: t.teamAssignment.assigneeEmail,
+          assigneeName: t.teamAssignment.assigneeName,
+          assignedBy: t.teamAssignment.assignedBy
+            ? String(t.teamAssignment.assignedBy)
+            : undefined,
+          assignedAt: t.teamAssignment.assignedAt,
+          startAt: t.teamAssignment.startAt,
+        }
+      : undefined,
     aiBreakdown: (t.aiBreakdown ?? []).map((x: any) => ({
       title: x.title,
       status: x.status,
@@ -575,6 +597,11 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
+    if (currentTask.teamAssignment?.teamId) {
+      const teamId = String(currentTask.teamAssignment.teamId);
+      throw new Error(`TEAM_TASK_EDIT_RESTRICTED:${teamId}`);
+    }
+
     // Convert guestDetails guestId strings to ObjectId
     const guestDetails = dto.guestDetails
       ? dto.guestDetails.map((g) => ({
@@ -697,6 +724,19 @@ export const taskService = {
     taskId: string,
   ): Promise<{ message: string }> => {
     const userObjectId = new Types.ObjectId(userId);
+
+    const currentTask = await taskRepository.findByIdForUser({
+      taskId,
+      userId: userObjectId,
+    });
+    if (!currentTask) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+    if (currentTask.teamAssignment?.teamId) {
+      const teamId = String(currentTask.teamAssignment.teamId);
+      throw new Error(`TEAM_TASK_DELETE_RESTRICTED:${teamId}`);
+    }
+
     const childTaskIds = await taskRepository.findTaskIdsByParentTaskId({
       parentTaskId: taskId,
       userId: userObjectId,
@@ -1244,6 +1284,11 @@ export const taskService = {
 
     if (!currentTask) {
       throw new Error("TASK_FORBIDDEN");
+    }
+
+    if (currentTask.teamAssignment?.teamId) {
+      const teamId = String(currentTask.teamAssignment.teamId);
+      throw new Error(`TEAM_TASK_STATUS_RESTRICTED:${teamId}`);
     }
 
     const updated = await taskRepository.updateByIdForUser(

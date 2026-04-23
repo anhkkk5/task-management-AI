@@ -39,6 +39,16 @@ export type CreateTeamTaskDto = {
   deadline?: Date;
 };
 
+export type UpdateTeamTaskDto = {
+  title?: string;
+  description?: string;
+  status?: "todo" | "in_progress" | "completed" | "cancelled";
+  priority?: "low" | "medium" | "high" | "urgent";
+  assigneeId?: string;
+  startAt?: Date;
+  deadline?: Date;
+};
+
 export type TeamPublic = {
   id: string;
   name: string;
@@ -178,6 +188,31 @@ const invalidateTaskListCacheForUser = async (
 };
 
 export class TeamService {
+  private async getTeamAndMember(teamId: string, userId: string) {
+    const team = await Team.findById(teamId);
+    if (!team || team.isArchived) {
+      throw { status: 404, message: "Team không tồn tại" };
+    }
+
+    const member = team.members.find((m) => m.userId.toString() === userId);
+    if (!member) {
+      throw { status: 403, message: "Bạn không phải thành viên của team này" };
+    }
+
+    return { team, member };
+  }
+
+  private canManageTeamTask(
+    task: any,
+    team: TeamDoc,
+    requesterId: string,
+  ): boolean {
+    const assignedBy = String(task?.teamAssignment?.assignedBy ?? "");
+    return (
+      team.ownerId.toString() === requesterId || assignedBy === requesterId
+    );
+  }
+
   async createTeam(
     userId: string,
     userInfo: { email: string; name: string; avatar?: string },
@@ -235,9 +270,8 @@ export class TeamService {
   ): Promise<TeamPublic> {
     const team = await Team.findById(teamId);
     if (!team) throw { status: 404, message: "Team không tồn tại" };
-    const member = team.members.find((m) => m.userId.toString() === userId);
-    if (!member || !canManageTeam(team.teamType, member.role)) {
-      throw { status: 403, message: "Không có quyền chỉnh sửa team" };
+    if (team.ownerId.toString() !== userId) {
+      throw { status: 403, message: "Chỉ owner mới có quyền chỉnh sửa team" };
     }
     if (dto.name) team.name = dto.name;
     if (dto.description !== undefined) team.description = dto.description;
@@ -433,6 +467,10 @@ export class TeamService {
   }
 
   async getTeamBoard(teamId: string) {
+    const team = await Team.findById(teamId);
+    if (!team || team.isArchived)
+      throw { status: 404, message: "Team không tồn tại" };
+
     const tasks = await Task.find({
       "teamAssignment.teamId": new Types.ObjectId(teamId),
       isArchived: false,
@@ -450,8 +488,7 @@ export class TeamService {
     assigneeId: string,
     assignerId: string,
   ) {
-    const team = await Team.findById(teamId);
-    if (!team) throw { status: 404, message: "Team không tồn tại" };
+    const { team } = await this.getTeamAndMember(teamId, assignerId);
     const assignee = team.members.find(
       (m) => m.userId.toString() === assigneeId,
     );
@@ -542,9 +579,19 @@ export class TeamService {
     return task;
   }
 
-  async unassignTask(taskId: string) {
+  async unassignTask(teamId: string, taskId: string, requesterId: string) {
+    const { team } = await this.getTeamAndMember(teamId, requesterId);
     const task = await Task.findById(taskId);
     if (!task) throw { status: 404, message: "Task không tồn tại" };
+    if (String(task?.teamAssignment?.teamId ?? "") !== String(teamId)) {
+      throw { status: 400, message: "Task không thuộc team này" };
+    }
+    if (!this.canManageTeamTask(task, team, requesterId)) {
+      throw {
+        status: 403,
+        message: "Chỉ người giao việc hoặc owner mới có thể bỏ phân công",
+      };
+    }
     task.teamAssignment = undefined;
     await task.save();
     await invalidateTaskListCacheForUser(task.userId?.toString());
@@ -553,6 +600,7 @@ export class TeamService {
 
   async getTeamTasks(
     teamId: string,
+    requesterId: string,
     filters: {
       status?: string;
       assigneeId?: string;
@@ -565,6 +613,8 @@ export class TeamService {
       deadlineTo?: string;
     },
   ) {
+    await this.getTeamAndMember(teamId, requesterId);
+
     const query: any = {
       "teamAssignment.teamId": new Types.ObjectId(teamId),
       isArchived: false,
@@ -610,7 +660,156 @@ export class TeamService {
     return Task.find(query).lean();
   }
 
+  async updateTeamTask(
+    teamId: string,
+    taskId: string,
+    requesterId: string,
+    dto: UpdateTeamTaskDto,
+  ) {
+    const { team } = await this.getTeamAndMember(teamId, requesterId);
+
+    const task = await Task.findById(taskId);
+    if (!task || task.isArchived) {
+      throw { status: 404, message: "Task không tồn tại" };
+    }
+    if (String(task?.teamAssignment?.teamId ?? "") !== String(teamId)) {
+      throw { status: 400, message: "Task không thuộc team này" };
+    }
+    if (!this.canManageTeamTask(task, team, requesterId)) {
+      throw {
+        status: 403,
+        message: "Chỉ người giao việc hoặc owner mới có thể sửa task",
+      };
+    }
+
+    if (dto.title !== undefined) {
+      const title = String(dto.title).trim();
+      if (!title) throw { status: 400, message: "Tên công việc không hợp lệ" };
+      task.title = title;
+    }
+
+    if (dto.description !== undefined) {
+      const desc = String(dto.description).trim();
+      task.description = desc || undefined;
+    }
+
+    if (dto.priority !== undefined) {
+      if (!["low", "medium", "high", "urgent"].includes(dto.priority)) {
+        throw { status: 400, message: "Độ ưu tiên không hợp lệ" };
+      }
+      task.priority = dto.priority;
+    }
+
+    if (dto.status !== undefined) {
+      task.status = dto.status;
+    }
+
+    if (dto.deadline !== undefined) {
+      task.deadline = dto.deadline;
+    }
+
+    if (dto.startAt !== undefined && task.teamAssignment) {
+      task.teamAssignment.startAt = dto.startAt;
+    }
+
+    if (dto.assigneeId !== undefined) {
+      if (!Types.ObjectId.isValid(dto.assigneeId)) {
+        throw { status: 400, message: "Người thực hiện không hợp lệ" };
+      }
+      const assignee = team.members.find(
+        (m) => m.userId.toString() === dto.assigneeId,
+      );
+      if (!assignee) {
+        throw {
+          status: 400,
+          message: "Người thực hiện không phải thành viên team",
+        };
+      }
+
+      const previousUserId = task.userId?.toString();
+      task.userId = new Types.ObjectId(dto.assigneeId);
+      if (task.teamAssignment) {
+        task.teamAssignment.assigneeId = new Types.ObjectId(dto.assigneeId);
+        task.teamAssignment.assigneeEmail = assignee.email;
+        task.teamAssignment.assigneeName = assignee.name;
+      }
+
+      await Promise.all([
+        invalidateTaskListCacheForUser(previousUserId),
+        invalidateTaskListCacheForUser(dto.assigneeId),
+      ]);
+    }
+
+    await task.save();
+    await invalidateTaskListCacheForUser(task.userId?.toString());
+    return task;
+  }
+
+  async updateTeamTaskStatus(
+    teamId: string,
+    taskId: string,
+    requesterId: string,
+    status: "todo" | "in_progress" | "completed" | "cancelled" | "scheduled",
+  ) {
+    const { team } = await this.getTeamAndMember(teamId, requesterId);
+
+    const task = await Task.findById(taskId);
+    if (!task || task.isArchived) {
+      throw { status: 404, message: "Task không tồn tại" };
+    }
+    if (String(task?.teamAssignment?.teamId ?? "") !== String(teamId)) {
+      throw { status: 400, message: "Task không thuộc team này" };
+    }
+
+    const assigneeId = String(task?.teamAssignment?.assigneeId ?? "");
+    const assignedBy = String(task?.teamAssignment?.assignedBy ?? "");
+    const isOwner = team.ownerId.toString() === requesterId;
+    const canUpdateStatus =
+      isOwner || assigneeId === requesterId || assignedBy === requesterId;
+
+    if (!canUpdateStatus) {
+      throw {
+        status: 403,
+        message:
+          "Bạn không có quyền cập nhật trạng thái task này (chỉ người làm, người giao hoặc owner)",
+      };
+    }
+
+    task.status = status;
+    await task.save();
+    await invalidateTaskListCacheForUser(task.userId?.toString());
+    return task;
+  }
+
+  async deleteTeamTask(teamId: string, taskId: string, requesterId: string) {
+    const { team } = await this.getTeamAndMember(teamId, requesterId);
+
+    const task = await Task.findById(taskId);
+    if (!task || task.isArchived) {
+      throw { status: 404, message: "Task không tồn tại" };
+    }
+    if (String(task?.teamAssignment?.teamId ?? "") !== String(teamId)) {
+      throw { status: 400, message: "Task không thuộc team này" };
+    }
+    if (!this.canManageTeamTask(task, team, requesterId)) {
+      throw {
+        status: 403,
+        message: "Chỉ người giao việc hoặc owner mới có thể xóa task",
+      };
+    }
+
+    const deletedUserId = task.userId?.toString();
+    await Task.deleteOne({ _id: task._id });
+    await invalidateTaskListCacheForUser(deletedUserId);
+
+    return { message: "Đã xóa công việc nhóm" };
+  }
+
   async getTeamCalendar(teamId: string, from: Date, to: Date) {
+    const team = await Team.findById(teamId);
+    if (!team || team.isArchived)
+      throw { status: 404, message: "Team không tồn tại" };
+
     const tasks = await Task.find({
       "teamAssignment.teamId": new Types.ObjectId(teamId),
       "scheduledTime.start": { $gte: from, $lte: to },
@@ -626,6 +825,10 @@ export class TeamService {
   }
 
   async detectConflicts(teamId: string, from: Date, to: Date) {
+    const team = await Team.findById(teamId);
+    if (!team || team.isArchived)
+      throw { status: 404, message: "Team không tồn tại" };
+
     const tasks = await Task.find({
       "teamAssignment.teamId": new Types.ObjectId(teamId),
       "scheduledTime.start": { $gte: from, $lte: to },
