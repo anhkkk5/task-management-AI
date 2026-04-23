@@ -4,6 +4,7 @@ import {
   chat,
   chatStream,
   getConversationById,
+  getOrCreateConversationByParent,
   listConversations,
   prioritySuggest,
   schedulePlan,
@@ -18,6 +19,11 @@ const aiRouter = Router();
 aiRouter.post("/chat", authMiddleware, chat);
 aiRouter.post("/chat/stream", authMiddleware, chatStream);
 aiRouter.get("/conversations", authMiddleware, listConversations);
+aiRouter.get(
+  "/conversations/by-parent/:parentTaskId",
+  authMiddleware,
+  getOrCreateConversationByParent,
+);
 aiRouter.get("/conversations/:id", authMiddleware, getConversationById);
 aiRouter.delete("/conversations/:id", authMiddleware, deleteConversation);
 aiRouter.patch("/conversations/:id", authMiddleware, renameConversation);

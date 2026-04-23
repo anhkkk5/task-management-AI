@@ -150,7 +150,22 @@ export function detectIntent(message: string): ChatIntent {
   return "CHAT";
 }
 
-// ─── Build system prompt (2-layer language system) ────────────────────────────
+// ─── Build system prompt (multi-layer) ────────────────────────────────────────
+export type MemoryHint = {
+  key: string;
+  value: string;
+  scope?: string;
+  domain?: string;
+  occurrences?: number;
+  lastSeenAt?: Date;
+};
+
+export type DiscussedSubtask = {
+  title: string;
+  index?: number;
+  lastDiscussedAt?: Date;
+};
+
 export function buildSystemPrompt(params: {
   userLang: Lang;
   targetLang: Lang;
@@ -167,9 +182,20 @@ export function buildSystemPrompt(params: {
     description?: string;
   };
   customSystemPrompt?: string;
+  memoryHints?: MemoryHint[];
+  discussedSubtasks?: DiscussedSubtask[];
+  pendingSlots?: string[];
 }): string {
-  const { userLang, targetLang, intent, subtaskContext, customSystemPrompt } =
-    params;
+  const {
+    userLang,
+    targetLang,
+    intent,
+    subtaskContext,
+    customSystemPrompt,
+    memoryHints,
+    discussedSubtasks,
+    pendingSlots,
+  } = params;
   const userLangName = LANG_NAMES[userLang];
   const targetLangName = LANG_NAMES[targetLang];
 
@@ -321,11 +347,11 @@ CURRENT MODE: ASSISTANT
         : "";
 
     prompt +=
-      `\n\n=====================\nLEARNING CONTEXT:\n` +
-      `- Topic: "${subtaskContext.subtaskTitle}"\n` +
-      `- Learning path: "${subtaskContext.parentTaskTitle}"\n` +
+      `\n\n=====================\nCURRENT FOCUS (active subtask):\n` +
+      `- Subtask: "${subtaskContext.subtaskTitle}"\n` +
+      `- Parent task: "${subtaskContext.parentTaskTitle}"\n` +
       (subtaskContext.parentTaskDescription
-        ? `- Description: ${subtaskContext.parentTaskDescription}\n`
+        ? `- Parent description: ${subtaskContext.parentTaskDescription}\n`
         : "") +
       (durationStr ? `- Time for this step: ${durationStr}\n` : "") +
       (totalStr ? `- Total path duration: ${totalStr}\n` : "") +
@@ -337,6 +363,65 @@ CURRENT MODE: ASSISTANT
         ? `- Step content: ${subtaskContext.description}\n`
         : "");
   }
+
+  // Prior subtasks discussed in this conversation (shared thread per parent task)
+  if (discussedSubtasks && discussedSubtasks.length > 0) {
+    const lines = discussedSubtasks
+      .slice(-8)
+      .map(
+        (s, i) =>
+          `  ${i + 1}. "${s.title}"` +
+          (s.index !== undefined ? ` (step #${s.index + 1})` : ""),
+      )
+      .join("\n");
+    prompt +=
+      `\n\n=====================\nPREVIOUSLY DISCUSSED SUBTASKS (same parent task thread):\n` +
+      lines +
+      `\n\nIMPORTANT: This is a SHARED conversation across all subtasks of the same parent task.\n` +
+      `- When switching to a new subtask, build on what was already agreed (tech, tools, approach) instead of re-asking.\n` +
+      `- If current subtask depends on a previous one (e.g. register form after login form), reference it explicitly.\n` +
+      `- Only re-ask a preference if the new subtask truly requires a different choice.`;
+  }
+
+  // Long-term user memory (cross-session preferences/facts)
+  if (memoryHints && memoryHints.length > 0) {
+    const top = memoryHints.slice(0, 12);
+    const lines = top
+      .map(
+        (m) =>
+          `  - ${m.key}: ${m.value}` +
+          (m.domain ? ` [${m.domain}]` : "") +
+          (m.occurrences && m.occurrences > 1
+            ? ` (seen ${m.occurrences}×)`
+            : ""),
+      )
+      .join("\n");
+    prompt +=
+      `\n\n=====================\nUSER LONG-TERM MEMORY (from previous conversations):\n` +
+      lines +
+      `\n\nUSAGE:\n` +
+      `- Treat these as defaults, NOT facts. Always confirm before heavy work ("Bạn vẫn dùng <value> chứ, hay đổi?").\n` +
+      `- When a preference is relevant to the current subtask, mention it naturally: "Mình thấy trước đây bạn dùng <value>, mình sẽ tiếp tục hướng đó nhé?".\n` +
+      `- NEVER fabricate memory that isn't listed here.`;
+  }
+
+  // Slot-filling hints - what critical info is still missing
+  if (pendingSlots && pendingSlots.length > 0) {
+    const lines = pendingSlots.map((s) => `  - ${s}`).join("\n");
+    prompt +=
+      `\n\n=====================\nSLOTS STILL MISSING (ask ONE at a time):\n` +
+      lines +
+      `\n\nBefore giving a full answer, ask ONE concise question to clarify the most important missing slot, and provide 2-3 likely options as quick suggestions.`;
+  }
+
+  // Response framing (domain-agnostic)
+  prompt +=
+    `\n\n=====================\nRESPONSE FRAMING (ALWAYS FOLLOW):\n` +
+    `1. Be concise. No filler.\n` +
+    `2. If user asks for something ambiguous, ask ONE clarifying question first (e.g. công nghệ/ngôn ngữ/mục tiêu) with 2-3 suggested answers.\n` +
+    `3. After your main answer, ALWAYS end with a short "Gợi ý tiếp theo:" section offering 2-3 concrete next steps the user can click (e.g. "Muốn tôi code hộ phần này?", "Xem ví dụ thực tế", "Giải thích sâu hơn về X").\n` +
+    `4. NEVER repeat setup questions already answered earlier in this conversation or found in USER LONG-TERM MEMORY.\n` +
+    `5. Stay domain-agnostic. Apply the same pattern to IT, language learning, design, business, cooking, fitness, etc.`;
 
   return prompt;
 }

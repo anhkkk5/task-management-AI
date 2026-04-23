@@ -2,12 +2,20 @@ import mongoose, { Schema, Types } from "mongoose";
 
 export type AiMessageRole = "user" | "assistant" | "system";
 
+export type AiMessageMeta = {
+  kind?: "chat" | "transition" | "summary";
+  subtaskKey?: string;
+  subtaskTitle?: string;
+  subtaskIndex?: number;
+};
+
 export type AiMessageAttrs = {
   conversationId: Types.ObjectId;
   userId: Types.ObjectId;
   role: AiMessageRole;
   content: string;
   tokens?: number;
+  meta?: AiMessageMeta;
 };
 
 export type AiMessageDoc = mongoose.Document & {
@@ -16,6 +24,7 @@ export type AiMessageDoc = mongoose.Document & {
   role: AiMessageRole;
   content: string;
   tokens?: number;
+  meta?: AiMessageMeta;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -38,6 +47,16 @@ const aiMessageSchema = new Schema<AiMessageDoc>(
     },
     content: { type: String, required: true },
     tokens: { type: Number },
+    meta: {
+      kind: {
+        type: String,
+        enum: ["chat", "transition", "summary"],
+        default: "chat",
+      },
+      subtaskKey: String,
+      subtaskTitle: String,
+      subtaskIndex: Number,
+    },
   },
   { timestamps: true },
 );

@@ -60,6 +60,12 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
         ? String(conversationIdRaw).trim()
         : undefined;
 
+    const parentTaskIdRaw = body?.parentTaskId;
+    const parentTaskId =
+      parentTaskIdRaw !== undefined && parentTaskIdRaw !== null
+        ? String(parentTaskIdRaw).trim()
+        : undefined;
+
     const systemPromptRaw = body?.systemPrompt;
     const systemPrompt =
       systemPromptRaw !== undefined && systemPromptRaw !== null
@@ -110,12 +116,21 @@ export const chat = async (req: Request, res: Response): Promise<void> => {
             description: subtaskContextRaw.description
               ? String(subtaskContextRaw.description)
               : undefined,
+            subtaskKey: subtaskContextRaw.subtaskKey
+              ? String(subtaskContextRaw.subtaskKey)
+              : undefined,
+            subtaskIndex:
+              subtaskContextRaw.subtaskIndex !== undefined &&
+              subtaskContextRaw.subtaskIndex !== null
+                ? Number(subtaskContextRaw.subtaskIndex)
+                : undefined,
           }
         : undefined;
 
     const result = await aiService.chat(userId, {
       message,
       conversationId,
+      parentTaskId,
       systemPrompt,
       subtaskContext,
       fewShotMessages,
@@ -442,6 +457,50 @@ export const getConversationById = async (
         .json({ message: "Không có quyền truy cập conversation này" });
       return;
     }
+    res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const getOrCreateConversationByParent = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const parentTaskId = String((req as any).params?.parentTaskId ?? "").trim();
+    if (!parentTaskId) {
+      res.status(400).json({ message: "parentTaskId không hợp lệ" });
+      return;
+    }
+
+    const titleRaw = (req as any).query?.title;
+    const title =
+      titleRaw !== undefined && titleRaw !== null
+        ? String(titleRaw).trim()
+        : undefined;
+
+    const { aiChatService } = await import("./ai-chat.service");
+    const result = await aiChatService.getOrCreateConversationByParentTask(
+      userId,
+      { parentTaskId, title },
+    );
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "PARENT_TASK_ID_INVALID") {
+      res.status(400).json({ message: "parentTaskId không hợp lệ" });
+      return;
+    }
+    if (message === "USER_ID_INVALID") {
+      res.status(400).json({ message: "UserId không hợp lệ" });
+      return;
+    }
+    console.error("[AI_GET_OR_CREATE_BY_PARENT_ERROR]", err);
     res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
