@@ -107,7 +107,7 @@ export const aiService = {
       throw new Error("USER_ID_INVALID");
     }
 
-    const breakdownPromptVersion = "task-breakdown-v5-ai-era-speed";
+    const breakdownPromptVersion = "task-breakdown-v6-desc-relevance";
 
     const profileKey = input.profile
       ? [
@@ -145,9 +145,7 @@ export const aiService = {
       ? `Hạn chót: ${input.deadline.toISOString()}`
       : "";
 
-    const descriptionText = input.description
-      ? `Mô tả: ${input.description}`
-      : "";
+    const descriptionRaw = String(input.description ?? "").trim();
 
     const profileLines: string[] = [];
     if (input.profile?.industryLabel)
@@ -345,20 +343,78 @@ QUY TẮC BẮT BUỘC:
       "va",
     ]);
 
+    // ─── Description relevance check ───
+    // Chỉ inject mô tả vào breakdown khi mô tả THỰC SỰ liên quan đến title.
+    // Tránh trường hợp user nhập mô tả linh tinh (abc, copy-paste lệch chủ đề).
+    const titleTokens = new Set(
+      tokenize(input.title).filter((t) => t.length >= 3 && !stopWords.has(t)),
+    );
+    const descTokensList = tokenize(descriptionRaw).filter(
+      (t) => t.length >= 3 && !stopWords.has(t),
+    );
+    const descTokens = new Set(descTokensList);
+    const descWordCount = descriptionRaw
+      ? descriptionRaw.split(/\s+/).filter(Boolean).length
+      : 0;
+
+    let sharedTokenCount = 0;
+    for (const t of descTokens) if (titleTokens.has(t)) sharedTokenCount += 1;
+
+    const descHasFrontendHint = frontendHints.some((k) =>
+      descriptionRaw.toLowerCase().includes(k),
+    );
+    const descHasBackendHint = backendHints.some((k) =>
+      descriptionRaw.toLowerCase().includes(k),
+    );
+    const domainMatchesTitle =
+      (hasFrontendHint && descHasFrontendHint) ||
+      (hasBackendHint && descHasBackendHint);
+
+    const specHintRegex =
+      /(acceptance|tiêu chí|input|output|payload|endpoint|schema|field|trường|response|status|validate|kpi|deliverable|yêu cầu|ràng buộc|api|jwt|token|oauth|refresh|login|register)/i;
+    const descHasSpecHints = specHintRegex.test(descriptionRaw);
+
+    const descriptionRelevant =
+      descWordCount >= 4 &&
+      (sharedTokenCount >= 1 || domainMatchesTitle || descHasSpecHints);
+
+    if (descriptionRaw && !descriptionRelevant) {
+      console.log(
+        `[aiBreakdown] Description bị bỏ qua vì không liên quan title "${input.title}" (words=${descWordCount}, shared=${sharedTokenCount})`,
+      );
+    }
+
+    const descriptionText = descriptionRelevant
+      ? `Mô tả (SPEC ĐÁNG TIN của task, BẮT BUỘC bám theo): ${descriptionRaw}`
+      : "";
+
     const anchorKeywords = Array.from(
       new Set(
-        tokenize(`${input.title} ${input.description ?? ""}`).filter(
-          (t) => t.length >= 3 && !stopWords.has(t),
-        ),
+        descriptionRelevant
+          ? [...titleTokens, ...descTokensList]
+          : Array.from(titleTokens),
       ),
-    ).slice(0, 12);
+    ).slice(0, descriptionRelevant ? 20 : 12);
     const anchorSet = new Set(anchorKeywords);
     const groundingGuidance =
       anchorKeywords.length > 0
         ? `\nRÀNG BUỘC BÁM SÁT NGỮ CẢNH:
-- Tự xác định domain chính từ title/description rồi bám chặt domain đó.
+- Tự xác định domain chính từ title${descriptionRelevant ? "/description" : ""} rồi bám chặt domain đó.
 - Mỗi bước phải đóng góp trực tiếp vào output của task, dùng ngôn ngữ bám theo các từ khóa sau: ${anchorKeywords.join(", ")}.
 - Không tự mở rộng sang domain khác nếu không có tín hiệu rõ trong task.`
+        : "";
+
+    // Ép AI trích xuất MỌI yêu cầu/criteria từ mô tả khi mô tả liên quan.
+    const descriptionSpecGuidance = descriptionRelevant
+      ? `\nSỬ DỤNG MÔ TẢ NHƯ SPEC (QUAN TRỌNG):
+- Trích xuất MỌI yêu cầu / acceptance criteria / ràng buộc / con số / tên endpoint / tên field xuất hiện trong mô tả và PHẢI phản ánh vào các bước tương ứng.
+- Mọi con số cụ thể trong mô tả (VD: "access_token 15 phút", "refresh_token 7 ngày", "password >= 8 ký tự") PHẢI được nhắc đúng trong description của bước có liên quan, không diễn đạt mơ hồ.
+- Mọi endpoint cụ thể (VD: "POST /auth/register", "POST /auth/login") PHẢI xuất hiện nguyên văn trong title hoặc description của bước tương ứng.
+- Mọi field / shape response cụ thể (VD: "{ user, access_token, refresh_token }") PHẢI xuất hiện trong description của bước tương ứng.
+- Nếu mô tả nêu N yêu cầu rõ ràng, breakdown PHẢI có đủ các bước phủ toàn bộ N yêu cầu đó, không được bỏ sót.
+- KHÔNG bịa chi tiết ngoài mô tả; nếu mô tả không nêu, chỉ bổ sung bước tiêu chuẩn tối thiểu (thiết kế schema, test, review).`
+      : descriptionRaw
+        ? `\nLƯU Ý: Mô tả người dùng nhập có vẻ không liên quan trực tiếp tới title. Bỏ qua mô tả, chỉ breakdown dựa trên title và profile.`
         : "";
 
     const buildPrompt = (
@@ -384,6 +440,7 @@ Yêu cầu bắt buộc:
 - description: 1-2 câu mô tả output / acceptance criteria của bước.
 - totalEstimatedDuration = tổng estimatedDuration của tất cả bước.
 ${groundingGuidance}
+${descriptionSpecGuidance}
 ${domainGuidance}
 ${scopeGuidance}
 ${negativeGuidance}
@@ -524,16 +581,104 @@ ${extraGuidance}`;
         return forbiddenWhenNotExplicit.some((k) => text.includes(k));
       });
 
-    if (
+    // ─── Coverage check: literal quan trọng từ description ───
+    // Khi mô tả liên quan, trích các literal bắt buộc (endpoint, số+đơn vị,
+    // identifier kỹ thuật, JSON shape) và bắt buộc phải xuất hiện trong breakdown.
+    const breakdownJoinedText = steps
+      .map(
+        (s: { title: string; description?: string }) =>
+          `${s.title} ${s.description ?? ""}`,
+      )
+      .join("\n")
+      .toLowerCase();
+
+    const criticalLiterals: string[] = [];
+    if (descriptionRelevant && descriptionRaw) {
+      const descLower = descriptionRaw.toLowerCase();
+
+      // 1) HTTP endpoints: VD "POST /auth/register"
+      const endpointRe = /\b(?:get|post|put|patch|delete)\s+\/[\w\/\-:{}]+/gi;
+      const endpoints = descriptionRaw.match(endpointRe) ?? [];
+      for (const e of endpoints) criticalLiterals.push(e.trim());
+
+      // 2) Số + đơn vị: "15 phút", "7 ngày", "8 ký tự", "10 giây"
+      const numUnitRe =
+        /\d+\s*(?:phút|giây|ngày|tuần|tháng|giờ|ký tự|characters?|bytes?|mb|kb)/gi;
+      const numUnits = descriptionRaw.match(numUnitRe) ?? [];
+      for (const n of numUnits) criticalLiterals.push(n.trim());
+
+      // 3) Identifier snake_case: access_token, refresh_token, user_id
+      const idRe = /\b[a-z][a-z0-9]*_[a-z0-9_]+\b/g;
+      const ids = descLower.match(idRe) ?? [];
+      for (const id of ids) criticalLiterals.push(id);
+
+      // 4) JSON shape: { ... , ... } có ít nhất 2 phần
+      const shapeRe = /\{[^{}\n]{3,}\}/g;
+      const shapes = descriptionRaw.match(shapeRe) ?? [];
+      for (const sh of shapes) criticalLiterals.push(sh.trim());
+    }
+
+    // Dedupe + giữ thứ tự xuất hiện
+    const uniqueLiterals = Array.from(new Set(criticalLiterals)).filter(
+      (s) => s.length > 0,
+    );
+
+    const missingLiterals = uniqueLiterals.filter((lit) => {
+      const needle = lit.toLowerCase();
+      if (needle.startsWith("{")) {
+        // shape → check có ≥ 80% identifier con xuất hiện
+        const ids = (needle.match(/[a-z_][a-z0-9_]+/g) ?? []).filter(
+          (x) => x.length >= 3,
+        );
+        if (ids.length === 0) return !breakdownJoinedText.includes(needle);
+        const present = ids.filter((x) => breakdownJoinedText.includes(x));
+        return present.length < Math.ceil(ids.length * 0.8);
+      }
+      return !breakdownJoinedText.includes(needle);
+    });
+
+    const needsRetry =
       (hasTaskAnchors && ungroundedCount > Math.floor(steps.length / 2)) ||
       hasCrossDomainMismatch ||
-      hasOutOfScopeAdvancedOps
-    ) {
-      const retryGuidance = `\nSELF-CHECK BẮT BUỘC: Bản breakdown trước có bước lệch ngữ cảnh.
-- Viết lại breakdown bám sát mục tiêu task.
-- Loại bỏ mọi bước ngoài phạm vi.
-- Tập trung theo các từ khóa chính: ${anchorKeywords.join(", ") || input.title}.
-- TUYỆT ĐỐI không thêm deploy/production/2FA/audit/lockout nếu task không yêu cầu.`;
+      hasOutOfScopeAdvancedOps ||
+      missingLiterals.length > 0;
+
+    if (needsRetry) {
+      const parts: string[] = [];
+      parts.push("SELF-CHECK BẮT BUỘC: Bản breakdown trước chưa đạt.");
+      if (
+        (hasTaskAnchors && ungroundedCount > Math.floor(steps.length / 2)) ||
+        hasCrossDomainMismatch ||
+        hasOutOfScopeAdvancedOps
+      ) {
+        parts.push(
+          `- Viết lại breakdown bám sát mục tiêu task, loại bỏ mọi bước ngoài phạm vi.`,
+        );
+        parts.push(
+          `- Tập trung theo các từ khóa chính: ${anchorKeywords.join(", ") || input.title}.`,
+        );
+        parts.push(
+          `- TUYỆT ĐỐI không thêm deploy/production/2FA/audit/lockout nếu task không yêu cầu.`,
+        );
+      }
+      if (missingLiterals.length > 0) {
+        parts.push(
+          `- BẮT BUỘC phản ánh ĐẦY ĐỦ các chi tiết sau từ mô tả (đưa nguyên văn vào title/description của bước phù hợp, KHÔNG diễn đạt lại mơ hồ):`,
+        );
+        for (const lit of missingLiterals) {
+          parts.push(`  • ${lit}`);
+        }
+        parts.push(
+          `- Nếu có response shape JSON, ghi nguyên văn shape đó trong description của bước tương ứng.`,
+        );
+        parts.push(
+          `- Nếu có endpoint cụ thể, ĐƯA NGUYÊN VĂN endpoint vào title của bước implement API đó.`,
+        );
+      }
+      const retryGuidance = "\n" + parts.join("\n");
+      console.log(
+        `[aiBreakdown] Retry due to ${missingLiterals.length > 0 ? `missing literals: ${missingLiterals.join(" | ")}` : "grounding issue"}`,
+      );
       steps = await generateSteps(retryGuidance);
     }
 
