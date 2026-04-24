@@ -333,11 +333,13 @@ QUAN TRỌNG:
 ${isStartDateToday ? `- TUYỆT ĐỐI task đầu tiên phải bắt đầu từ HÔM NAY ${currentDateStr}, không được bỏ qua` : "Tôn trọng khung giờ làm việc 08:00-17:00"}`;
 
     const result = await aiProvider.chat({
+      purpose: "schedule",
+      responseFormat: "json_object",
       messages: [
         {
           role: "system",
           content:
-            "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+            "You are a productivity assistant. Reply in Vietnamese. You MUST respond with valid JSON only, no markdown, no explanation.",
         },
         {
           role: "user",

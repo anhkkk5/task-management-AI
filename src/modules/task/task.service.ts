@@ -111,19 +111,20 @@ const toPublicTask = (t: any): PublicTask => {
     meetingLink: t.meetingLink,
     userId: String(t.userId),
     parentTaskId: t.parentTaskId ? String(t.parentTaskId) : undefined,
-    teamAssignment: t.teamAssignment
-      ? {
-          teamId: String(t.teamAssignment.teamId),
-          assigneeId: String(t.teamAssignment.assigneeId),
-          assigneeEmail: t.teamAssignment.assigneeEmail,
-          assigneeName: t.teamAssignment.assigneeName,
-          assignedBy: t.teamAssignment.assignedBy
-            ? String(t.teamAssignment.assignedBy)
-            : undefined,
-          assignedAt: t.teamAssignment.assignedAt,
-          startAt: t.teamAssignment.startAt,
-        }
-      : undefined,
+    teamAssignment:
+      t.teamAssignment && t.teamAssignment.teamId
+        ? {
+            teamId: String(t.teamAssignment.teamId),
+            assigneeId: String(t.teamAssignment.assigneeId),
+            assigneeEmail: t.teamAssignment.assigneeEmail,
+            assigneeName: t.teamAssignment.assigneeName,
+            assignedBy: t.teamAssignment.assignedBy
+              ? String(t.teamAssignment.assignedBy)
+              : undefined,
+            assignedAt: t.teamAssignment.assignedAt,
+            startAt: t.teamAssignment.startAt,
+          }
+        : undefined,
     aiBreakdown: (t.aiBreakdown ?? []).map((x: any) => ({
       title: x.title,
       status: x.status,

@@ -60,8 +60,61 @@ export const aiBreakdownTask = async (
       });
       return;
     }
+    if (message === "GEMINI_RATE_LIMIT") {
+      res.status(429).json({
+        message:
+          "Gemini đã đạt giới hạn request trong ngày. Vui lòng thử lại sau hoặc dùng Groq.",
+      });
+      return;
+    }
+    if (message === "GEMINI_API_KEY_MISSING") {
+      res.status(500).json({ message: "Thiếu GEMINI_API_KEY trong env" });
+      return;
+    }
+    if (message === "GEMINI_UNAUTHORIZED") {
+      res.status(500).json({
+        message:
+          "Gemini bị từ chối (API key không hợp lệ hoặc không có quyền).",
+      });
+      return;
+    }
+    if (message === "AI_PROVIDER_FAILED") {
+      res.status(503).json({
+        message:
+          "Tất cả nhà cung cấp AI đang không khả dụng (rate limit/lỗi). Vui lòng thử lại sau.",
+      });
+      return;
+    }
 
-    res.status(500).json({ message: "Lỗi hệ thống" });
+    // Catch raw Gemini/Groq SDK errors that might slip through
+    const rawMsg = String(
+      err instanceof Error ? err.message : JSON.stringify(err),
+    ).toLowerCase();
+    if (
+      rawMsg.includes("429") ||
+      rawMsg.includes("resource_exhausted") ||
+      rawMsg.includes("quota") ||
+      rawMsg.includes("rate limit") ||
+      rawMsg.includes("too many requests")
+    ) {
+      console.warn("[aiBreakdownTask] Detected raw rate-limit error:", rawMsg);
+      res.status(429).json({
+        message:
+          "AI đang bị giới hạn request (rate limit). Vui lòng thử lại sau.",
+      });
+      return;
+    }
+
+    console.error("[aiBreakdownTask] Unhandled error:", err);
+    const detail =
+      process.env.NODE_ENV !== "production" && err instanceof Error
+        ? err.message
+        : undefined;
+    res.status(500).json({
+      message: detail
+        ? `Lỗi AI Breakdown: ${detail}`
+        : "Lỗi hệ thống khi tạo AI Breakdown. Vui lòng thử lại.",
+    });
   }
 };
 

@@ -8,7 +8,7 @@ import {
   toPublicMessage,
 } from "./ai.mapper";
 import { aiCacheService } from "./ai.cache.service";
-import { extractJson } from "./ai-utils";
+import { extractJson, repairTruncatedJson } from "./ai-utils";
 
 // Re-export từ các service đã tách
 export { aiChatService } from "./ai-chat.service";
@@ -450,11 +450,12 @@ ${extraGuidance}`;
     const generateSteps = async (extraGuidance = "") => {
       const result = await aiProvider.chat({
         purpose: "breakdown",
+        responseFormat: "json_object",
         messages: [
           {
             role: "system",
             content:
-              "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+              "You are a productivity assistant. Reply in Vietnamese. You MUST respond with valid JSON only, no markdown, no explanation.",
           },
           {
             role: "user",
@@ -465,13 +466,29 @@ ${extraGuidance}`;
         maxTokens: 2000,
       });
 
-      const raw = (result.content || "").trim();
+      let raw = (result.content || "").trim();
+
+      // Strip markdown code fences (```json ... ``` hoặc ``` ... ```)
+      raw = raw
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/\s*```\s*$/, "")
+        .trim();
 
       let parsed: any;
       try {
         parsed = JSON.parse(extractJson(raw));
       } catch {
-        throw new Error("AI_JSON_INVALID");
+        // Fallback: try repairing truncated JSON
+        try {
+          parsed = JSON.parse(repairTruncatedJson(raw));
+          console.warn("[aiBreakdown] JSON repaired via repairTruncatedJson");
+        } catch {
+          console.error(
+            "[aiBreakdown] AI_JSON_INVALID. Raw response (first 500 chars):",
+            raw.slice(0, 500),
+          );
+          throw new Error("AI_JSON_INVALID");
+        }
       }
 
       const rawSteps = Array.isArray(parsed?.steps) ? parsed.steps : null;
@@ -515,7 +532,21 @@ ${extraGuidance}`;
       }));
     };
 
-    let steps = await generateSteps();
+    let steps: Awaited<ReturnType<typeof generateSteps>>;
+    try {
+      steps = await generateSteps();
+    } catch (firstErr: any) {
+      if (firstErr?.message === "AI_JSON_INVALID") {
+        console.warn(
+          "[aiBreakdown] First attempt failed (AI_JSON_INVALID). Retrying with stricter prompt...",
+        );
+        steps = await generateSteps(
+          "\n⚠️ LẦN TRƯỚC BẠN TRẢ VỀ JSON KHÔNG HỢP LỆ. LẦN NÀY BẮT BUỘC:\n- Chỉ trả JSON thuần, KHÔNG markdown, KHÔNG giải thích, KHÔNG ```.\n- Bắt đầu bằng { và kết thúc bằng }.\n- Kiểm tra JSON hợp lệ trước khi trả.",
+        );
+      } else {
+        throw firstErr;
+      }
+    }
 
     const strongBackendHints = [
       "schema",
@@ -812,11 +843,12 @@ Yêu cầu bắt buộc:
 - Format: { "priority": "low"|"medium"|"high"|"urgent", "reason": string }`;
 
     const result = await aiProvider.chat({
+      responseFormat: "json_object",
       messages: [
         {
           role: "system",
           content:
-            "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+            "You are a productivity assistant. Reply in Vietnamese. You MUST respond with valid JSON only, no markdown, no explanation.",
         },
         {
           role: "user",

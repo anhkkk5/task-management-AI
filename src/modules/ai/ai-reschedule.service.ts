@@ -115,11 +115,12 @@ Format JSON:
 }`;
 
     const result = await aiProvider.chat({
+      responseFormat: "json_object",
       messages: [
         {
           role: "system",
           content:
-            "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+            "You are a productivity assistant. Reply in Vietnamese. You MUST respond with valid JSON only, no markdown, no explanation.",
         },
         {
           role: "user",

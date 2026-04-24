@@ -830,6 +830,18 @@ Format JSON:
 
         if (remaining <= 0) return { max: 0, min: 0 };
 
+        // ✅ Tôn trọng tuyệt đối mục tiêu user đã đặt cho task cá nhân.
+        // Khi user nhập rõ estimatedDuration + dailyTargetDuration thì không boost/adaptive.
+        const meta = estimationMetaMap.get(String(task._id));
+        const isTeamTaskEarly = !!task.teamAssignment?.teamId;
+        const dailyTargetIsUserDefined =
+          !isTeamTaskEarly &&
+          Number(task.dailyTargetDuration) > 0 &&
+          !(meta?.estimatedFields ?? []).includes("dailyTargetDuration");
+        if (dailyTargetIsUserDefined) {
+          return { max: baseMax, min: baseMin };
+        }
+
         // Tính số ngày còn lại đến deadline
         const deadlineStr = task.deadline
           ? toLocalDateStr(new Date(task.deadline))
@@ -959,10 +971,19 @@ Format JSON:
             new Map<string, number>();
           const scheduledToday = mapForDay.get(String(task._id)) || 0;
 
-          const hardDailyCap = Math.max(
-            dailyTargetMax,
-            task.teamAssignment ? 480 : 360,
-          );
+          // Nếu user đã tự đặt dailyTargetDuration cho task cá nhân → tôn trọng
+          // tuyệt đối, KHÔNG cho fillAvailable vượt qua mục tiêu user đặt.
+          const metaForCap = estimationMetaMap.get(String(task._id));
+          const userDefinedCap =
+            !task.teamAssignment?.teamId &&
+            Number(task.dailyTargetDuration) > 0 &&
+            !(metaForCap?.estimatedFields ?? []).includes(
+              "dailyTargetDuration",
+            );
+
+          const hardDailyCap = userDefinedCap
+            ? dailyTargetMax
+            : Math.max(dailyTargetMax, task.teamAssignment ? 480 : 360);
           const effectiveDailyMax =
             mode === "fillAvailable" ? hardDailyCap : dailyTargetMax;
 

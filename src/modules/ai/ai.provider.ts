@@ -20,6 +20,8 @@ export type AiChatInput = {
    * - "schedule"/"generic": default routing
    */
   purpose?: AiChatPurpose;
+  /** Force JSON output (supported by Groq/OpenAI-compatible APIs) */
+  responseFormat?: "json_object" | "text";
 };
 
 export type AiChatResult = {
@@ -83,6 +85,9 @@ const groqChat = async (input: AiChatInput): Promise<AiChatResult> => {
       messages: input.messages,
       temperature: input.temperature,
       max_tokens: input.maxTokens,
+      ...(input.responseFormat === "json_object"
+        ? { response_format: { type: "json_object" as const } }
+        : {}),
     });
     const content = response.choices?.[0]?.message?.content ?? "";
     return {
@@ -196,8 +201,22 @@ const geminiChat = async (input: AiChatInput): Promise<AiChatResult> => {
     };
   } catch (err: any) {
     const status = err?.status ?? err?.response?.status;
-    if (status === 429) throw new Error("GEMINI_RATE_LIMIT");
-    if (status === 401 || status === 403)
+    const errMsg = String(err?.message || "").toLowerCase();
+    if (
+      status === 429 ||
+      errMsg.includes("429") ||
+      errMsg.includes("resource_exhausted") ||
+      errMsg.includes("resource has been exhausted") ||
+      errMsg.includes("quota") ||
+      errMsg.includes("rate limit")
+    )
+      throw new Error("GEMINI_RATE_LIMIT");
+    if (
+      status === 401 ||
+      status === 403 ||
+      errMsg.includes("permission_denied") ||
+      errMsg.includes("api key not valid")
+    )
       throw new Error("GEMINI_UNAUTHORIZED");
     throw err;
   }
@@ -245,58 +264,53 @@ const geminiChatStream = async function* (
       : "";
   const chat = model.startChat({ history });
 
-  const result = await chat.sendMessageStream(msg);
-  for await (const chunk of result.stream) {
-    if (chunk.text()) {
-      yield { type: "delta", delta: chunk.text() };
+  try {
+    const result = await chat.sendMessageStream(msg);
+    for await (const chunk of result.stream) {
+      if (chunk.text()) {
+        yield { type: "delta", delta: chunk.text() };
+      }
     }
+    yield { type: "done", model: modelName };
+  } catch (err: any) {
+    const status = err?.status ?? err?.response?.status;
+    const errMsg = String(err?.message || "").toLowerCase();
+    if (
+      status === 429 ||
+      errMsg.includes("429") ||
+      errMsg.includes("resource_exhausted") ||
+      errMsg.includes("resource has been exhausted") ||
+      errMsg.includes("quota") ||
+      errMsg.includes("rate limit")
+    )
+      throw new Error("GEMINI_RATE_LIMIT");
+    if (
+      status === 401 ||
+      status === 403 ||
+      errMsg.includes("permission_denied") ||
+      errMsg.includes("api key not valid")
+    )
+      throw new Error("GEMINI_UNAUTHORIZED");
+    throw err;
   }
-  yield { type: "done", model: modelName };
 };
 
-type ProviderName = "groq" | "gemini";
+type ProviderName = "groq";
 
-const hasGeminiKey = (): boolean => !!(process.env.GEMINI_API_KEY || "").trim();
 const hasGroqKey = (): boolean => !!(process.env.GROQ_API_KEY || "").trim();
 
 /**
- * Resolve provider order (primary, fallback) based on purpose + env.
- * - breakdown (reasoning): Gemini primary, Groq fallback.
- * - chat (realtime): Groq primary, Gemini fallback.
- * - schedule/generic: legacy AI_PROVIDER (default groq).
+ * Groq-only routing: always use Groq for all purposes.
  */
-const resolveProviderOrder = (purpose?: AiChatPurpose): ProviderName[] => {
-  const explicit = (
-    purpose === "breakdown"
-      ? process.env.AI_BREAKDOWN_PROVIDER
-      : purpose === "chat"
-        ? process.env.AI_CHAT_PROVIDER
-        : process.env.AI_PROVIDER
-  ) as ProviderName | undefined;
-
-  const preferred: ProviderName =
-    explicit === "gemini" || explicit === "groq"
-      ? explicit
-      : purpose === "breakdown"
-        ? hasGeminiKey()
-          ? "gemini"
-          : "groq"
-        : "groq";
-
-  const fallback: ProviderName = preferred === "gemini" ? "groq" : "gemini";
-
-  const order: ProviderName[] = [preferred];
-  const fallbackAvailable =
-    fallback === "gemini" ? hasGeminiKey() : hasGroqKey();
-  if (fallbackAvailable) order.push(fallback);
-  return order;
+const resolveProviderOrder = (_purpose?: AiChatPurpose): ProviderName[] => {
+  if (!hasGroqKey()) return [];
+  return ["groq"];
 };
 
 const runChat = async (
-  provider: ProviderName,
+  _provider: ProviderName,
   input: AiChatInput,
-): Promise<AiChatResult> =>
-  provider === "gemini" ? geminiChat(input) : groqChat(input);
+): Promise<AiChatResult> => groqChat(input);
 
 const isRetriableError = (err: any): boolean => {
   const msg = String(err?.message || "");
@@ -306,6 +320,17 @@ const isRetriableError = (err: any): boolean => {
     msg.includes("API_KEY_MISSING")
   )
     return true;
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("resource_exhausted") ||
+    lower.includes("resource has been exhausted") ||
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("too many requests") ||
+    lower.includes("permission_denied") ||
+    lower.includes("api key not valid")
+  )
+    return true;
   const status = err?.status ?? err?.response?.status;
   return status === 429 || status === 500 || status === 502 || status === 503;
 };
@@ -313,6 +338,7 @@ const isRetriableError = (err: any): boolean => {
 export const aiProvider: AiProvider = {
   chat: async (input) => {
     const order = resolveProviderOrder(input.purpose);
+    if (!order.length) throw new Error("GROQ_API_KEY_MISSING");
     let lastErr: any;
     for (const p of order) {
       try {
@@ -320,20 +346,16 @@ export const aiProvider: AiProvider = {
       } catch (err) {
         lastErr = err;
         if (!isRetriableError(err)) throw err;
-        console.warn(
-          `[aiProvider] ${p} failed (${(err as any)?.message}), trying fallback...`,
-        );
+        console.warn(`[aiProvider] ${p} failed (${(err as any)?.message}).`);
       }
     }
+    console.error(
+      `[aiProvider] All providers failed. Order: ${order.join(" → ")}. Last error: ${(lastErr as any)?.message}`,
+    );
     throw lastErr ?? new Error("AI_PROVIDER_FAILED");
   },
   chatStream: async function* (input) {
-    // Streaming chỉ dùng primary (realtime). Fallback stream phức tạp nên bỏ qua.
-    const [primary] = resolveProviderOrder(input.purpose);
-    if (primary === "gemini") {
-      yield* geminiChatStream(input);
-      return;
-    }
+    if (!hasGroqKey()) throw new Error("GROQ_API_KEY_MISSING");
     yield* groqChatStream(input);
   },
 };
