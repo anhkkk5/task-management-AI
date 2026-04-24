@@ -21,6 +21,16 @@ export const notificationGateway = {
     }
   },
 
+  // Emit a delete/hide signal for a notification (used by snooze + grouping)
+  emitDelete: (userId: string, notificationId: string): void => {
+    const chatGateway = getChatGateway();
+    if (chatGateway) {
+      chatGateway.emitToUser(userId, "notification:delete", {
+        notificationId,
+      });
+    }
+  },
+
   // Broadcast to all connected users (for system notifications)
   broadcastToAll: (notification: any): void => {
     const chatGateway = getChatGateway();

@@ -237,6 +237,9 @@ export const updateNotificationSettings = async (
 
     const settings = await userService.updateNotificationSettings(userId, {
       reminderMinutes: _req.body?.reminderMinutes,
+      quietHours: _req.body?.quietHours,
+      groupingEnabled: _req.body?.groupingEnabled,
+      digest: _req.body?.digest,
     });
 
     res.status(200).json({ settings });
@@ -245,6 +248,20 @@ export const updateNotificationSettings = async (
 
     if (message === "INVALID_REMINDER_MINUTES") {
       res.status(400).json({ message: "Số phút nhắc trước không hợp lệ" });
+      return;
+    }
+    if (message === "INVALID_QUIET_HOURS") {
+      res.status(400).json({
+        message:
+          "Khung giờ không làm phiền không hợp lệ (yêu cầu định dạng HH:mm)",
+      });
+      return;
+    }
+    if (message === "INVALID_DIGEST_SETTINGS") {
+      res.status(400).json({
+        message:
+          "Cài đặt digest không hợp lệ (frequency: daily|weekly, time: HH:mm)",
+      });
       return;
     }
     if (message === "USER_NOT_FOUND") {

@@ -74,4 +74,13 @@ export const userRepository = {
       { new: true },
     ).exec();
   },
+
+  // Users who enabled notification digest
+  findDigestEnabledUsers: async () => {
+    return User.find({
+      "settings.notifications.digest.enabled": true,
+    })
+      .select({ email: 1, settings: 1 })
+      .lean();
+  },
 };

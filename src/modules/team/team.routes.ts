@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { authMiddleware } from "../../middleware/auth.middleware";
 import { teamService } from "./team.service";
 import { inviteService } from "./invite.service";
+import { teamTaskCommentService } from "./team-task-comment.service";
 
 const router = Router();
 
@@ -81,6 +82,43 @@ router.delete(
         req.params.memberId as string,
       );
       res.json(team);
+    } catch (err: any) {
+      res.status(err.status || 500).json({ message: err.message });
+    }
+  },
+);
+
+router.get(
+  "/:id/tasks/:taskId/comments",
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user.userId;
+      const result = await teamTaskCommentService.listByTask(
+        req.params.id as string,
+        req.params.taskId as string,
+        userId,
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(err.status || 500).json({ message: err.message });
+    }
+  },
+);
+
+router.post(
+  "/:id/tasks/:taskId/comments",
+  authMiddleware,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user.userId;
+      const result = await teamTaskCommentService.create(
+        req.params.id as string,
+        req.params.taskId as string,
+        userId,
+        String(req.body?.content || ""),
+      );
+      res.status(201).json(result);
     } catch (err: any) {
       res.status(err.status || 500).json({ message: err.message });
     }

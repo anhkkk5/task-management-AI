@@ -6,12 +6,26 @@ export enum NotificationType {
   SCHEDULED_TASK_ALERT = "scheduled_task_alert",
   CHAT_MESSAGE = "chat_message",
   AI_SUGGESTION = "ai_suggestion",
+  TEAM_TASK_ASSIGNED = "team_task_assigned",
+  TEAM_TASK_STATUS_CHANGED = "team_task_status_changed",
+  TEAM_TASK_REASSIGNED = "team_task_reassigned",
+  TEAM_TASK_UPDATED = "team_task_updated",
+  TEAM_TASK_COMMENT = "team_task_comment",
+  TEAM_TASK_MENTION = "team_task_mention",
   SYSTEM = "system",
+}
+
+export enum NotificationPriority {
+  CRITICAL = "critical",
+  HIGH = "high",
+  NORMAL = "normal",
+  LOW = "low",
 }
 
 export interface INotification {
   userId: Types.ObjectId;
   type: NotificationType;
+  priority: NotificationPriority;
   title: string;
   content: string;
   data?: {
@@ -26,6 +40,14 @@ export interface INotification {
     email: boolean;
     push?: boolean;
   };
+  // Snooze: khi có giá trị và > now, notification bị ẩn khỏi list cho tới khi cron resurrect
+  snoozedUntil?: Date | null;
+  // Grouping
+  isGroup?: boolean;
+  groupCount?: number;
+  groupedIds?: Types.ObjectId[];
+  // Nếu set → noti này đã bị gom vào group parent → ẩn khỏi list
+  hiddenByGroupId?: Types.ObjectId | null;
   emailSent?: boolean;
   emailSentAt?: Date;
   readAt?: Date;
@@ -47,6 +69,34 @@ const notificationSchema = new Schema<NotificationDoc>(
       type: String,
       enum: Object.values(NotificationType),
       required: true,
+    },
+    priority: {
+      type: String,
+      enum: Object.values(NotificationPriority),
+      default: NotificationPriority.NORMAL,
+      index: true,
+    },
+    snoozedUntil: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    isGroup: {
+      type: Boolean,
+      default: false,
+    },
+    groupCount: {
+      type: Number,
+      default: 0,
+    },
+    groupedIds: {
+      type: [Schema.Types.ObjectId],
+      default: [],
+    },
+    hiddenByGroupId: {
+      type: Schema.Types.ObjectId,
+      default: null,
+      index: true,
     },
     title: {
       type: String,
@@ -104,6 +154,8 @@ notificationSchema.index({ "data.taskId": 1 });
 notificationSchema.index({ "data.conversationId": 1 });
 notificationSchema.index({ createdAt: -1 });
 notificationSchema.index({ emailSent: 1, "channels.email": 1 });
+notificationSchema.index({ userId: 1, type: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ snoozedUntil: 1 });
 
 export const NotificationModel = mongoose.model<NotificationDoc>(
   "Notification",

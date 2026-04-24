@@ -34,6 +34,8 @@ export const reminderCronService = {
       await scanAndNotifyScheduledTasks();
       await scanAndNotifyAIScheduleTasks();
       await scanAndNotifyMissedTasks();
+      await resurrectSnoozedTick();
+      await digestTick();
     });
 
     isRunning = true;
@@ -103,6 +105,7 @@ async function scanAndNotifyDeadlines(): Promise<void> {
         data: {
           taskId,
           deadline: task.deadline,
+          taskPriority: (task as any).priority,
           userEmail: user.email,
         },
         channels: {
@@ -117,6 +120,17 @@ async function scanAndNotifyDeadlines(): Promise<void> {
     }
   } catch (err) {
     console.error("[ReminderCron] Error scanning deadlines:", err);
+  }
+}
+
+async function digestTick(): Promise<void> {
+  try {
+    const n = await notificationService.sendDigestForDueUsers();
+    if (n > 0) {
+      console.log(`[ReminderCron] Sent ${n} digest email batch(es)`);
+    }
+  } catch (err) {
+    console.error("[ReminderCron] Error sending digest:", err);
   }
 }
 
@@ -220,6 +234,7 @@ async function scanAndNotifyScheduledTasks(): Promise<void> {
         data: {
           taskId,
           scheduledTime: task.scheduledTime,
+          taskPriority: (task as any).priority,
           userEmail: userInfo.email,
         },
         channels: {
@@ -517,5 +532,19 @@ export const triggerDeadlineScan = async (): Promise<void> => {
   await scanAndNotifyScheduledTasks();
   await scanAndNotifyAIScheduleTasks();
   await scanAndNotifyMissedTasks();
+  await resurrectSnoozedTick();
+  await digestTick();
   console.log("[ReminderCron] Manual trigger completed");
 };
+
+// Tick for resurrecting snoozed notifications whose snoozedUntil has elapsed
+async function resurrectSnoozedTick(): Promise<void> {
+  try {
+    const n = await notificationService.resurrectSnoozed();
+    if (n > 0) {
+      console.log(`[ReminderCron] Resurrected ${n} snoozed notification(s)`);
+    }
+  } catch (err) {
+    console.error("[ReminderCron] Error resurrecting snoozed:", err);
+  }
+}

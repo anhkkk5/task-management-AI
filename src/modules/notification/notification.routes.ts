@@ -39,4 +39,32 @@ notificationRouter.delete(
   notificationController.delete,
 );
 
+// Snooze notification: body { duration: "15min"|"1hour"|"3hour"|"tomorrow", minutes?: number }
+notificationRouter.post(
+  "/:id/snooze",
+  authMiddleware,
+  notificationController.snooze,
+);
+
+// Unsnooze (resurrect immediately)
+notificationRouter.post(
+  "/:id/unsnooze",
+  authMiddleware,
+  notificationController.unsnooze,
+);
+
+// List currently-snoozed notifications for the logged-in user
+notificationRouter.get(
+  "/snoozed/list",
+  authMiddleware,
+  notificationController.listSnoozed,
+);
+
+// Expand a group parent → list its children
+notificationRouter.get(
+  "/:id/group-children",
+  authMiddleware,
+  notificationController.listGroupChildren,
+);
+
 export default notificationRouter;

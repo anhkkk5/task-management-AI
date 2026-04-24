@@ -1,4 +1,5 @@
 import { Worker, Job } from "bullmq";
+import { Types } from "mongoose";
 import { getRedisConfig } from "../../services/redis.service";
 import { notificationService } from "./notification.service";
 import { NotificationType } from "./notification.model";
@@ -50,7 +51,9 @@ export const notificationWorker = new Worker(
 
         if (result.success) {
           // Mark as email sent in DB
-          await notificationRepository.markEmailSent(notificationId);
+          if (notificationId && Types.ObjectId.isValid(notificationId)) {
+            await notificationRepository.markEmailSent(notificationId);
+          }
           console.log(
             `[NotificationWorker] Email sent successfully: ${result.messageId}`,
           );

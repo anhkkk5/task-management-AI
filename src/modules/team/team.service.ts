@@ -12,6 +12,8 @@ import {
   getPosition,
 } from "../catalog/catalog.data";
 import { taskService } from "../task/task.service";
+import { notificationService } from "../notification/notification.service";
+import { NotificationType } from "../notification/notification.model";
 
 export type CreateTeamDto = {
   name: string;
@@ -184,6 +186,48 @@ const invalidateTaskListCacheForUser = async (
     }
   } catch (_err) {
     return;
+  }
+};
+
+const notifyTeamTask = async (params: {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  content: string;
+  taskId: string;
+  teamId: string;
+  taskPriority?: string;
+  actorId?: string;
+  actorName?: string;
+  actions?: Array<{
+    key: string;
+    label: string;
+    action: string;
+    style?: "primary" | "default" | "danger";
+    payload?: Record<string, unknown>;
+  }>;
+}) => {
+  try {
+    await notificationService.create({
+      userId: params.userId,
+      type: params.type,
+      title: params.title,
+      content: params.content,
+      channels: {
+        inApp: true,
+        email: true,
+      },
+      data: {
+        taskId: params.taskId,
+        teamId: params.teamId,
+        taskPriority: params.taskPriority,
+        actorId: params.actorId,
+        actorName: params.actorName,
+        actions: params.actions || [],
+      },
+    });
+  } catch (err) {
+    console.error("[TeamService] Failed to create team notification:", err);
   }
 };
 
@@ -514,6 +558,45 @@ export class TeamService {
       invalidateTaskListCacheForUser(previousUserId),
       invalidateTaskListCacheForUser(assigneeId),
     ]);
+
+    const assignerName =
+      team.members.find((m) => m.userId.toString() === assignerId)?.name ||
+      "Thành viên nhóm";
+    const reassigned = Boolean(previousUserId && previousUserId !== assigneeId);
+
+    if (assigneeId !== assignerId) {
+      await notifyTeamTask({
+        userId: assigneeId,
+        type: reassigned
+          ? NotificationType.TEAM_TASK_REASSIGNED
+          : NotificationType.TEAM_TASK_ASSIGNED,
+        title: reassigned
+          ? `Bạn được chuyển phụ trách task: ${task.title}`
+          : `Bạn được giao task mới: ${task.title}`,
+        content: `${assignerName} đã giao cho bạn công việc "${task.title}" trong team ${team.name}.`,
+        taskId: String(task._id),
+        teamId,
+        taskPriority: (task as any).priority,
+        actorId: assignerId,
+        actorName: assignerName,
+        actions: [
+          {
+            key: "open-task",
+            label: "Mở task",
+            action: "open_task",
+            style: "primary",
+            payload: { taskId: String(task._id), teamId },
+          },
+          {
+            key: "mark-in-progress",
+            label: "Bắt đầu ngay",
+            action: "start_task",
+            payload: { taskId: String(task._id), teamId },
+          },
+        ],
+      });
+    }
+
     return task;
   }
 
@@ -575,6 +658,29 @@ export class TeamService {
     });
 
     await invalidateTaskListCacheForUser(dto.assigneeId);
+
+    if (dto.assigneeId !== requesterId) {
+      await notifyTeamTask({
+        userId: dto.assigneeId,
+        type: NotificationType.TEAM_TASK_ASSIGNED,
+        title: `Bạn được giao task mới: ${title}`,
+        content: `${requester.name} đã tạo và giao cho bạn công việc "${title}" trong team ${team.name}.`,
+        taskId: String(task._id),
+        teamId,
+        taskPriority: priority,
+        actorId: requesterId,
+        actorName: requester.name,
+        actions: [
+          {
+            key: "open-task",
+            label: "Xem task",
+            action: "open_task",
+            style: "primary",
+            payload: { taskId: String(task._id), teamId },
+          },
+        ],
+      });
+    }
 
     return task;
   }
@@ -700,16 +806,23 @@ export class TeamService {
       task.priority = dto.priority;
     }
 
+    const previousStatus = String(task.status || "");
+    const previousAssigneeId = String(task.userId || "");
+    let changedFields: string[] = [];
+
     if (dto.status !== undefined) {
       task.status = dto.status;
+      changedFields.push("trạng thái");
     }
 
     if (dto.deadline !== undefined) {
       task.deadline = dto.deadline;
+      changedFields.push("deadline");
     }
 
     if (dto.startAt !== undefined && task.teamAssignment) {
       task.teamAssignment.startAt = dto.startAt;
+      changedFields.push("thời gian bắt đầu");
     }
 
     if (dto.assigneeId !== undefined) {
@@ -738,10 +851,95 @@ export class TeamService {
         invalidateTaskListCacheForUser(previousUserId),
         invalidateTaskListCacheForUser(dto.assigneeId),
       ]);
+
+      changedFields.push("người thực hiện");
     }
+
+    if (dto.title !== undefined) changedFields.push("tiêu đề");
+    if (dto.description !== undefined) changedFields.push("mô tả");
+    if (dto.priority !== undefined) changedFields.push("độ ưu tiên");
 
     await task.save();
     await invalidateTaskListCacheForUser(task.userId?.toString());
+
+    const requesterName =
+      team.members.find((m) => m.userId.toString() === requesterId)?.name ||
+      "Thành viên nhóm";
+    const currentAssigneeId = String(task.userId || "");
+
+    if (dto.assigneeId && dto.assigneeId !== previousAssigneeId) {
+      if (dto.assigneeId !== requesterId) {
+        await notifyTeamTask({
+          userId: dto.assigneeId,
+          type: NotificationType.TEAM_TASK_REASSIGNED,
+          title: `Task được chuyển cho bạn: ${task.title}`,
+          content: `${requesterName} đã chuyển công việc "${task.title}" cho bạn trong team ${team.name}.`,
+          taskId: String(task._id),
+          teamId,
+          taskPriority: (task as any).priority,
+          actorId: requesterId,
+          actorName: requesterName,
+          actions: [
+            {
+              key: "open-task",
+              label: "Mở task",
+              action: "open_task",
+              style: "primary",
+              payload: { taskId: String(task._id), teamId },
+            },
+          ],
+        });
+      }
+
+      if (previousAssigneeId && previousAssigneeId !== requesterId) {
+        await notifyTeamTask({
+          userId: previousAssigneeId,
+          type: NotificationType.TEAM_TASK_REASSIGNED,
+          title: `Task đã được chuyển người phụ trách: ${task.title}`,
+          content: `${requesterName} đã chuyển công việc "${task.title}" cho người khác.`,
+          taskId: String(task._id),
+          teamId,
+          taskPriority: (task as any).priority,
+          actorId: requesterId,
+          actorName: requesterName,
+        });
+      }
+    } else if (
+      changedFields.length > 0 &&
+      currentAssigneeId &&
+      currentAssigneeId !== requesterId
+    ) {
+      await notifyTeamTask({
+        userId: currentAssigneeId,
+        type: NotificationType.TEAM_TASK_UPDATED,
+        title: `Task được cập nhật: ${task.title}`,
+        content: `${requesterName} vừa cập nhật ${changedFields.join(", ")} cho công việc "${task.title}".`,
+        taskId: String(task._id),
+        teamId,
+        taskPriority: (task as any).priority,
+        actorId: requesterId,
+        actorName: requesterName,
+      });
+    }
+
+    if (
+      previousStatus !== String(task.status || "") &&
+      currentAssigneeId &&
+      currentAssigneeId !== requesterId
+    ) {
+      await notifyTeamTask({
+        userId: currentAssigneeId,
+        type: NotificationType.TEAM_TASK_STATUS_CHANGED,
+        title: `Trạng thái task thay đổi: ${task.title}`,
+        content: `${requesterName} đã đổi trạng thái công việc từ "${previousStatus}" sang "${String(task.status)}".`,
+        taskId: String(task._id),
+        teamId,
+        taskPriority: (task as any).priority,
+        actorId: requesterId,
+        actorName: requesterName,
+      });
+    }
+
     return task;
   }
 
@@ -775,9 +973,44 @@ export class TeamService {
       };
     }
 
+    const previousStatus = String(task.status || "");
     task.status = status;
     await task.save();
     await invalidateTaskListCacheForUser(task.userId?.toString());
+
+    const requesterName =
+      team.members.find((m) => m.userId.toString() === requesterId)?.name ||
+      "Thành viên nhóm";
+    const notifyUserIds = new Set<string>();
+    if (assigneeId) notifyUserIds.add(assigneeId);
+    if (assignedBy) notifyUserIds.add(assignedBy);
+    notifyUserIds.delete(requesterId);
+
+    await Promise.all(
+      [...notifyUserIds].map((targetUserId) =>
+        notifyTeamTask({
+          userId: targetUserId,
+          type: NotificationType.TEAM_TASK_STATUS_CHANGED,
+          title: `Trạng thái task thay đổi: ${task.title}`,
+          content: `${requesterName} đã cập nhật trạng thái công việc "${task.title}" từ "${previousStatus}" sang "${status}".`,
+          taskId: String(task._id),
+          teamId,
+          taskPriority: (task as any).priority,
+          actorId: requesterId,
+          actorName: requesterName,
+          actions: [
+            {
+              key: "open-task",
+              label: "Xem chi tiết",
+              action: "open_task",
+              style: "primary",
+              payload: { taskId: String(task._id), teamId },
+            },
+          ],
+        }),
+      ),
+    );
+
     return task;
   }
 
