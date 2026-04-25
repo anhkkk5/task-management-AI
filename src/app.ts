@@ -19,12 +19,24 @@ import teamRouter from "./modules/team/team.routes";
 import catalogRouter from "./modules/catalog/catalog.routes";
 import { setupPassport } from "./config/passport";
 
+const getAllowedCorsOrigins = (): string[] => {
+  const envOrigins = [process.env.CLIENT_URL, process.env.FRONTEND_URL]
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => value.split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return Array.from(
+    new Set([...envOrigins, "http://localhost:5173", "http://127.0.0.1:5173"]),
+  );
+};
+
 export const createApp = (): Express => {
   const app: Express = express();
 
   app.use(
     cors({
-      origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+      origin: getAllowedCorsOrigins(),
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"],
