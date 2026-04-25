@@ -75,6 +75,7 @@ authRouter.get(
   "/google/callback",
   passport.authenticate("google", { session: false }),
   (req, res) => {
+    const isProduction = process.env.NODE_ENV === "production";
     const user = (req as any).user;
     console.log(
       "[Google Callback] User from passport:",
@@ -91,8 +92,8 @@ authRouter.get(
       // Set httpOnly cookie for access token
       res.cookie("token", user.token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         path: "/",
       });
@@ -101,8 +102,8 @@ authRouter.get(
       if (user.refreshToken) {
         res.cookie("refreshToken", user.refreshToken, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "lax",
+          secure: isProduction,
+          sameSite: isProduction ? "none" : "lax",
           maxAge: 7 * 24 * 60 * 60 * 1000,
           path: "/auth",
         });

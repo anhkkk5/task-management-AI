@@ -10,10 +10,11 @@ export const setRefreshCookie = (
   refreshToken: string,
   input: CookieOptionsInput,
 ): void => {
+  const isProduction = input.nodeEnv === "production";
   res.cookie("refreshToken", refreshToken, {
     httpOnly: true,
-    secure: input.nodeEnv === "production",
-    sameSite: "strict",
+    secure: isProduction,
+    sameSite: isProduction ? "none" : "lax",
     path: "/auth",
     maxAge: input.maxAgeMs,
   });
