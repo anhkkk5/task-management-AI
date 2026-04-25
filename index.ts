@@ -1,11 +1,11 @@
 import express, { Express, Request, Response } from "express";
-import * as database from "./config/database";
+import { connect } from "./src/config/database";
 import dotenv from "dotenv";
 import cors from "cors";
 
 dotenv.config();
 
-database.connect();
+void connect();
 
 const app: Express = express();
 const port: number | string = process.env.PORT || 3002;
