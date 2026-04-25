@@ -8,7 +8,7 @@
     "build": "rimraf dist && tsc",
     "ts.check": "tsc --project tsconfig.json --noEmit",
     "dev": "nodemon --watch \"**/*.ts\" --exec \"ts-node --files src/server.ts\"",
-    "start": "node dist/server.js"
+    "start": "node dist/src/server.js"
   },
   "pre-commit": [
     "ts.check",
