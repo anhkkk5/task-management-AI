@@ -19,6 +19,7 @@ exports.taskRepository = {
             meetingLink: attrs.meetingLink,
             status: attrs.status ?? "todo",
             priority: attrs.priority ?? "medium",
+            startAt: attrs.startAt,
             deadline: attrs.deadline,
             tags: attrs.tags ?? [],
             userId: attrs.userId,
@@ -69,6 +70,7 @@ exports.taskRepository = {
                 ...(update.priority !== undefined
                     ? { priority: update.priority }
                     : {}),
+                ...(update.startAt !== undefined ? { startAt: update.startAt } : {}),
                 ...(update.deadline !== undefined
                     ? { deadline: update.deadline }
                     : {}),
@@ -126,6 +128,7 @@ exports.taskRepository = {
                 ...(update.priority !== undefined
                     ? { priority: update.priority }
                     : {}),
+                ...(update.startAt !== undefined ? { startAt: update.startAt } : {}),
                 ...(update.deadline !== undefined
                     ? { deadline: update.deadline }
                     : {}),
@@ -166,6 +169,15 @@ exports.taskRepository = {
             userId: params.userId,
         }).exec();
         return result.deletedCount || 0;
+    },
+    findTaskIdsByParentTaskId: async (params) => {
+        const children = await task_model_1.Task.find({
+            parentTaskId: params.parentTaskId,
+            userId: params.userId,
+        }, { _id: 1 })
+            .lean()
+            .exec();
+        return children.map((child) => String(child._id));
     },
     listByUser: async (params) => {
         const filter = {

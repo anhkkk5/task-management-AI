@@ -90,4 +90,91 @@ exports.notificationController = {
             res.status(500).json({ message: "Failed to delete notification" });
         }
     },
+    // Snooze a notification → accepts { duration?: "15min"|"1hour"|"3hour"|"tomorrow", minutes?: number }
+    snooze: async (req, res) => {
+        try {
+            const userId = req.user?.userId;
+            if (!userId) {
+                res.status(401).json({ message: "Unauthorized" });
+                return;
+            }
+            const { id } = req.params;
+            const { duration, minutes } = req.body || {};
+            let arg = duration;
+            if (!arg && typeof minutes === "number")
+                arg = minutes;
+            if (!arg) {
+                res.status(400).json({
+                    message: "Thiếu tham số duration hoặc minutes (ví dụ: '15min', '1hour', 'tomorrow', hoặc số phút)",
+                });
+                return;
+            }
+            const allowedTokens = ["15min", "1hour", "3hour", "tomorrow"];
+            if (typeof arg === "string" && !allowedTokens.includes(arg)) {
+                res.status(400).json({ message: "Giá trị duration không hợp lệ" });
+                return;
+            }
+            const updated = await notification_service_1.notificationService.snooze(String(id), userId, arg);
+            if (!updated) {
+                res.status(404).json({ message: "Notification not found" });
+                return;
+            }
+            res.status(200).json({ notification: updated });
+        }
+        catch (err) {
+            console.error("[notificationController.snooze]", err);
+            res.status(500).json({ message: "Failed to snooze notification" });
+        }
+    },
+    // Remove snooze → bring notification back immediately
+    unsnooze: async (req, res) => {
+        try {
+            const userId = req.user?.userId;
+            if (!userId) {
+                res.status(401).json({ message: "Unauthorized" });
+                return;
+            }
+            const { id } = req.params;
+            const updated = await notification_service_1.notificationService.unsnooze(String(id), userId);
+            if (!updated) {
+                res.status(404).json({ message: "Notification not found" });
+                return;
+            }
+            res.status(200).json({ notification: updated });
+        }
+        catch (err) {
+            res.status(500).json({ message: "Failed to unsnooze notification" });
+        }
+    },
+    // List currently-snoozed notifications for the user (separate tab)
+    listSnoozed: async (req, res) => {
+        try {
+            const userId = req.user?.userId;
+            if (!userId) {
+                res.status(401).json({ message: "Unauthorized" });
+                return;
+            }
+            const items = await notification_service_1.notificationService.listSnoozed(userId);
+            res.status(200).json({ items });
+        }
+        catch (err) {
+            res.status(500).json({ message: "Failed to list snoozed notifications" });
+        }
+    },
+    // Expand a group parent → return its absorbed children
+    listGroupChildren: async (req, res) => {
+        try {
+            const userId = req.user?.userId;
+            if (!userId) {
+                res.status(401).json({ message: "Unauthorized" });
+                return;
+            }
+            const { id } = req.params;
+            const items = await notification_service_1.notificationService.listGroupChildren(String(id), userId);
+            res.status(200).json({ items });
+        }
+        catch (err) {
+            res.status(500).json({ message: "Failed to list group children" });
+        }
+    },
 };

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.notificationWorker = void 0;
 const bullmq_1 = require("bullmq");
+const mongoose_1 = require("mongoose");
 const redis_service_1 = require("../../services/redis.service");
 const notification_service_1 = require("./notification.service");
 const notification_repository_1 = require("./notification.repository");
@@ -35,7 +36,9 @@ exports.notificationWorker = new bullmq_1.Worker("notification", async (job) => 
             });
             if (result.success) {
                 // Mark as email sent in DB
-                await notification_repository_1.notificationRepository.markEmailSent(notificationId);
+                if (notificationId && mongoose_1.Types.ObjectId.isValid(notificationId)) {
+                    await notification_repository_1.notificationRepository.markEmailSent(notificationId);
+                }
                 console.log(`[NotificationWorker] Email sent successfully: ${result.messageId}`);
             }
             else {

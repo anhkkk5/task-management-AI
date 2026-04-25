@@ -7,6 +7,7 @@ const aiRouter = (0, express_1.Router)();
 aiRouter.post("/chat", auth_middleware_1.authMiddleware, ai_controller_1.chat);
 aiRouter.post("/chat/stream", auth_middleware_1.authMiddleware, ai_controller_1.chatStream);
 aiRouter.get("/conversations", auth_middleware_1.authMiddleware, ai_controller_1.listConversations);
+aiRouter.get("/conversations/by-parent/:parentTaskId", auth_middleware_1.authMiddleware, ai_controller_1.getOrCreateConversationByParent);
 aiRouter.get("/conversations/:id", auth_middleware_1.authMiddleware, ai_controller_1.getConversationById);
 aiRouter.delete("/conversations/:id", auth_middleware_1.authMiddleware, ai_controller_1.deleteConversation);
 aiRouter.patch("/conversations/:id", auth_middleware_1.authMiddleware, ai_controller_1.renameConversation);

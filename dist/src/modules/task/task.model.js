@@ -111,6 +111,7 @@ const taskSchema = new mongoose_1.Schema({
         default: "medium",
         index: true,
     },
+    startAt: { type: Date, index: true },
     deadline: { type: Date, index: true },
     tags: { type: [String], default: [] },
     userId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
@@ -145,6 +146,15 @@ const taskSchema = new mongoose_1.Schema({
         reason: { type: String },
     },
     isArchived: { type: Boolean, default: false, index: true },
+    teamAssignment: {
+        teamId: { type: mongoose_1.Schema.Types.ObjectId, index: true },
+        assigneeId: { type: mongoose_1.Schema.Types.ObjectId, index: true },
+        assigneeEmail: { type: String },
+        assigneeName: { type: String },
+        assignedBy: { type: mongoose_1.Schema.Types.ObjectId },
+        assignedAt: { type: Date },
+        startAt: { type: Date },
+    },
 }, { timestamps: true });
 taskSchema.index({ userId: 1, status: 1, deadline: 1, priority: 1 });
 exports.Task = mongoose_1.default.models.Task ||

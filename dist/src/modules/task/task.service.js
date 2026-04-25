@@ -44,6 +44,9 @@ const notification_model_1 = require("../notification/notification.model");
 const notification_queue_1 = require("../notification/notification.queue");
 const user_repository_1 = require("../user/user.repository");
 const ai_schedule_repository_1 = require("../ai-schedule/ai-schedule.repository");
+const hybrid_schedule_service_1 = require("../scheduler/hybrid-schedule.service");
+const team_model_1 = require("../team/team.model");
+const catalog_data_1 = require("../catalog/catalog.data");
 const toPublicTask = (t) => {
     return {
         id: String(t._id),
@@ -51,6 +54,7 @@ const toPublicTask = (t) => {
         description: t.description,
         status: t.status,
         priority: t.priority,
+        startAt: t.startAt ?? t.teamAssignment?.startAt,
         deadline: t.deadline,
         tags: t.tags ?? [],
         type: t.type,
@@ -73,6 +77,19 @@ const toPublicTask = (t) => {
         meetingLink: t.meetingLink,
         userId: String(t.userId),
         parentTaskId: t.parentTaskId ? String(t.parentTaskId) : undefined,
+        teamAssignment: t.teamAssignment && t.teamAssignment.teamId
+            ? {
+                teamId: String(t.teamAssignment.teamId),
+                assigneeId: String(t.teamAssignment.assigneeId),
+                assigneeEmail: t.teamAssignment.assigneeEmail,
+                assigneeName: t.teamAssignment.assigneeName,
+                assignedBy: t.teamAssignment.assignedBy
+                    ? String(t.teamAssignment.assignedBy)
+                    : undefined,
+                assignedAt: t.teamAssignment.assignedAt,
+                startAt: t.teamAssignment.startAt,
+            }
+            : undefined,
         aiBreakdown: (t.aiBreakdown ?? []).map((x) => ({
             title: x.title,
             status: x.status,
@@ -87,6 +104,82 @@ const toPublicTask = (t) => {
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
     };
+};
+const LEVEL_SENIORITY = {
+    intern: 1,
+    student: 1,
+    fresher: 2,
+    junior: 3,
+    middle: 4,
+    senior: 5,
+    lead: 6,
+    manager: 6,
+    pm: 6,
+    lecturer: 6,
+};
+const buildProfileFromTeamMember = (team, member) => {
+    if (!member)
+        return undefined;
+    const industry = (0, catalog_data_1.getIndustry)(team?.industry);
+    const position = (0, catalog_data_1.getPosition)(team?.industry, member.position);
+    const levelInfo = (0, catalog_data_1.getLevelInfoForIndustry)(team?.industry, member.level);
+    return {
+        industryCode: team?.industry,
+        industryLabel: industry?.label,
+        positionCode: member.position,
+        positionLabel: position?.label,
+        levelCode: member.level,
+        levelLabel: levelInfo?.label,
+    };
+};
+const resolveBreakdownProfile = async (task) => {
+    // 1) Preferred: profile from explicit team assignment
+    const teamId = task?.teamAssignment?.teamId;
+    const assigneeId = task?.teamAssignment?.assigneeId;
+    if (teamId && assigneeId) {
+        try {
+            const team = await team_model_1.Team.findById(teamId).lean().exec();
+            const member = team?.members?.find((m) => String(m.userId) === String(assigneeId));
+            const profile = buildProfileFromTeamMember(team, member);
+            if (profile)
+                return profile;
+        }
+        catch {
+            // fall through to fallback
+        }
+    }
+    // 2) Fallback: use the task owner's HIGHEST-seniority team membership
+    const ownerId = task?.userId;
+    if (!ownerId)
+        return undefined;
+    try {
+        const teams = await team_model_1.Team.find({
+            "members.userId": new mongoose_1.Types.ObjectId(String(ownerId)),
+            isArchived: false,
+        })
+            .lean()
+            .exec();
+        let best;
+        let bestScore = -1;
+        for (const team of teams || []) {
+            const member = team.members?.find((m) => String(m.userId) === String(ownerId));
+            if (!member)
+                continue;
+            const score = (LEVEL_SENIORITY[String(member.level || "")] || 0) +
+                (member.position ? 0.1 : 0);
+            if (score > bestScore) {
+                const profile = buildProfileFromTeamMember(team, member);
+                if (profile) {
+                    best = profile;
+                    bestScore = score;
+                }
+            }
+        }
+        return best;
+    }
+    catch {
+        return undefined;
+    }
 };
 // Generate invite email HTML template
 const generateInviteEmailHtml = (params) => {
@@ -171,6 +264,37 @@ const sendGuestInvites = async (params) => {
         });
     }
 };
+const removeTaskSessionsFromActiveSchedules = async (userId, taskIds) => {
+    const ids = Array.isArray(taskIds)
+        ? taskIds.map((id) => String(id))
+        : [String(taskIds)];
+    const idSet = new Set(ids);
+    const { AISchedule } = await Promise.resolve().then(() => __importStar(require("../ai-schedule/ai-schedule.model")));
+    const schedules = await AISchedule.find({
+        userId: new mongoose_1.Types.ObjectId(userId),
+        isActive: true,
+    }).exec();
+    for (const schedule of schedules) {
+        let modified = false;
+        for (const day of schedule.schedule) {
+            const before = day.tasks.length;
+            day.tasks = day.tasks.filter((s) => !idSet.has(String(s.taskId)));
+            if (day.tasks.length !== before)
+                modified = true;
+        }
+        if (modified) {
+            schedule.schedule = schedule.schedule.filter((day) => day.tasks.length > 0);
+            schedule.sourceTasks = schedule.sourceTasks.filter((id) => !idSet.has(id));
+            if (schedule.schedule.length === 0) {
+                schedule.isActive = false;
+                schedule.markModified("isActive");
+            }
+            schedule.markModified("schedule");
+            schedule.markModified("sourceTasks");
+            await schedule.save();
+        }
+    }
+};
 const tasksListCacheKey = (params) => {
     const parts = [
         `tasks:user:${params.userId}`,
@@ -198,6 +322,7 @@ const parseCachedTaskList = (raw) => {
         ...obj,
         items: obj.items.map((t) => ({
             ...t,
+            startAt: t.startAt ? new Date(t.startAt) : undefined,
             deadline: t.deadline ? new Date(t.deadline) : undefined,
             reminderAt: t.reminderAt ? new Date(t.reminderAt) : undefined,
             createdAt: new Date(t.createdAt),
@@ -260,6 +385,7 @@ exports.taskService = {
             reminderMinutes: dto.reminderMinutes,
             recurrence: dto.recurrence,
             meetingLink: dto.meetingLink,
+            startAt: dto.startAt,
             deadline: dto.deadline,
             priority: dto.priority,
             tags: dto.tags,
@@ -316,6 +442,10 @@ exports.taskService = {
         if (!currentTask) {
             throw new Error("TASK_FORBIDDEN");
         }
+        if (currentTask.teamAssignment?.teamId) {
+            const teamId = String(currentTask.teamAssignment.teamId);
+            throw new Error(`TEAM_TASK_EDIT_RESTRICTED:${teamId}`);
+        }
         // Convert guestDetails guestId strings to ObjectId
         const guestDetails = dto.guestDetails
             ? dto.guestDetails.map((g) => ({
@@ -344,6 +474,7 @@ exports.taskService = {
             meetingLink: dto.meetingLink,
             status: dto.status,
             priority: dto.priority,
+            startAt: dto.startAt,
             deadline: dto.deadline,
             tags: dto.tags,
             reminderAt: dto.reminderAt,
@@ -372,6 +503,11 @@ exports.taskService = {
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
+        // Khi đưa task về "todo" thì xóa toàn bộ AI sessions cũ của task này
+        // để tránh apply optimize lần sau bị dư lịch/dư phiên.
+        if (dto.status === "todo") {
+            await removeTaskSessionsFromActiveSchedules(userId, taskId);
+        }
         // Track completion history when task is marked as completed
         if (dto.status === "completed" && currentTask.status !== "completed") {
             const completedAt = new Date();
@@ -398,9 +534,25 @@ exports.taskService = {
         return publicTask;
     },
     delete: async (userId, taskId) => {
+        const userObjectId = new mongoose_1.Types.ObjectId(userId);
+        const currentTask = await task_repository_1.taskRepository.findByIdForUser({
+            taskId,
+            userId: userObjectId,
+        });
+        if (!currentTask) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        if (currentTask.teamAssignment?.teamId) {
+            const teamId = String(currentTask.teamAssignment.teamId);
+            throw new Error(`TEAM_TASK_DELETE_RESTRICTED:${teamId}`);
+        }
+        const childTaskIds = await task_repository_1.taskRepository.findTaskIdsByParentTaskId({
+            parentTaskId: taskId,
+            userId: userObjectId,
+        });
         const deleted = await task_repository_1.taskRepository.deleteByIdForUser({
             taskId,
-            userId: new mongoose_1.Types.ObjectId(userId),
+            userId: userObjectId,
         });
         if (!deleted) {
             throw new Error("TASK_FORBIDDEN");
@@ -408,33 +560,16 @@ exports.taskService = {
         // Cascade delete: Xóa tất cả task con có parentTaskId trỏ đến task vừa xóa
         const deletedChildrenCount = await task_repository_1.taskRepository.deleteManyByParentTaskId({
             parentTaskId: taskId,
-            userId: new mongoose_1.Types.ObjectId(userId),
+            userId: userObjectId,
         });
         if (deletedChildrenCount > 0) {
             console.log(`[TaskDelete] Đã xóa ${deletedChildrenCount} task con của task ${taskId}`);
         }
-        // Xóa sessions của taskId này khỏi tất cả AISchedule
-        const { AISchedule } = await Promise.resolve().then(() => __importStar(require("../ai-schedule/ai-schedule.model")));
-        const schedules = await AISchedule.find({
-            userId: new mongoose_1.Types.ObjectId(userId),
-            isActive: true,
-        }).exec();
-        for (const schedule of schedules) {
-            let modified = false;
-            for (const day of schedule.schedule) {
-                const before = day.tasks.length;
-                day.tasks = day.tasks.filter((s) => String(s.taskId) !== taskId);
-                if (day.tasks.length !== before)
-                    modified = true;
-            }
-            if (modified) {
-                schedule.sourceTasks = schedule.sourceTasks.filter((id) => id !== taskId);
-                schedule.markModified("schedule");
-                schedule.markModified("sourceTasks");
-                await schedule.save();
-                console.log(`[TaskDelete] Đã xóa sessions của task ${taskId} khỏi schedule ${schedule._id}`);
-            }
-        }
+        // Xóa sessions AI liên quan tới task chính + toàn bộ task con đã bị xóa
+        await removeTaskSessionsFromActiveSchedules(userId, [
+            taskId,
+            ...childTaskIds,
+        ]);
         await invalidateTasksCache(userId);
         return { message: "Xóa task thành công" };
     },
@@ -445,6 +580,9 @@ exports.taskService = {
         });
         if (!task) {
             throw new Error("TASK_FORBIDDEN");
+        }
+        if (task.estimatedDuration == null) {
+            await hybrid_schedule_service_1.hybridScheduleService.estimateTaskPlanningInputs(userId, task, task.startAt ?? new Date());
         }
         // Đọc sessions từ AISchedule
         const { AISchedule } = await Promise.resolve().then(() => __importStar(require("../ai-schedule/ai-schedule.model")));
@@ -479,12 +617,16 @@ exports.taskService = {
         slots.sort((a, b) => a.date.localeCompare(b.date));
         // Tổng thời gian từ slots (nếu có lịch) hoặc từ estimatedDuration
         const totalSlotMinutes = slots.reduce((sum, s) => sum + s.durationMinutes, 0);
-        const targetTotalMinutes = task.estimatedDuration || totalSlotMinutes || undefined;
+        const normalizedEstimatedDuration = task.estimatedDuration ??
+            (totalSlotMinutes > 0 ? totalSlotMinutes : undefined);
+        const targetTotalMinutes = normalizedEstimatedDuration;
+        const profile = await resolveBreakdownProfile(task);
         const breakdown = await ai_service_1.aiService.taskBreakdown(userId, {
             title: task.title,
             deadline: task.deadline,
             description: task.description,
             totalMinutes: targetTotalMinutes,
+            profile,
             slots: slots.length > 0 ? slots : undefined,
         });
         // Thuật toán phân bổ: gán subtask vào slot theo tỷ lệ thời gian
@@ -525,10 +667,13 @@ exports.taskService = {
                 scheduledTime: assignedSlot?.time,
             };
         });
-        const updated = await task_repository_1.taskRepository.updateByIdForUser({ taskId, userId: new mongoose_1.Types.ObjectId(userId) }, {
+        const updatePayload = {
             aiBreakdown: stepsWithSlot,
-            // KHÔNG ghi đè estimatedDuration
-        });
+        };
+        if (task.estimatedDuration == null && normalizedEstimatedDuration != null) {
+            updatePayload.estimatedDuration = normalizedEstimatedDuration;
+        }
+        const updated = await task_repository_1.taskRepository.updateByIdForUser({ taskId, userId: new mongoose_1.Types.ObjectId(userId) }, updatePayload);
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
@@ -537,6 +682,23 @@ exports.taskService = {
         await ai_schedule_repository_1.aiScheduleRepository.updateSessionTitlesForTask(userId, taskId, subtaskTitles);
         await invalidateTasksCache(userId);
         return toPublicTask(updated);
+    },
+    explainEstimation: async (userId, taskId) => {
+        const task = await task_repository_1.taskRepository.findByIdForUser({
+            taskId,
+            userId: new mongoose_1.Types.ObjectId(userId),
+        });
+        if (!task) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        const explanation = await hybrid_schedule_service_1.hybridScheduleService.explainTaskEstimation(userId, task, task.startAt ?? new Date());
+        if (!explanation) {
+            return null;
+        }
+        return {
+            ...explanation,
+            task: toPublicTask(task),
+        };
     },
     autoBreakdown: async (userId, taskId) => {
         // Check if user has auto-breakdown enabled
@@ -559,10 +721,17 @@ exports.taskService = {
         if (!isComplex) {
             return { breakdown: [], applied: false };
         }
+        if (task.estimatedDuration == null) {
+            await hybrid_schedule_service_1.hybridScheduleService.estimateTaskPlanningInputs(userId, task, task.startAt ?? new Date());
+        }
+        const profile = await resolveBreakdownProfile(task);
         try {
             const breakdown = await ai_service_1.aiService.taskBreakdown(userId, {
                 title: task.title,
                 deadline: task.deadline,
+                description: task.description,
+                totalMinutes: task.estimatedDuration,
+                profile,
             });
             await task_repository_1.taskRepository.updateByIdForUser({ taskId, userId: new mongoose_1.Types.ObjectId(userId) }, {
                 aiBreakdown: breakdown.steps.map((s) => ({
@@ -750,6 +919,10 @@ exports.taskService = {
         if (!currentTask) {
             throw new Error("TASK_FORBIDDEN");
         }
+        if (currentTask.teamAssignment?.teamId) {
+            const teamId = String(currentTask.teamAssignment.teamId);
+            throw new Error(`TEAM_TASK_STATUS_RESTRICTED:${teamId}`);
+        }
         const updated = await task_repository_1.taskRepository.updateByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -759,6 +932,9 @@ exports.taskService = {
         });
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
+        }
+        if (status === "todo") {
+            await removeTaskSessionsFromActiveSchedules(userId, taskId);
         }
         // Track completion history when task is marked as completed
         if (status === "completed" && currentTask.status !== "completed") {

@@ -48,11 +48,20 @@ const conversationSchema = new mongoose_1.Schema({
             required: true,
         },
     ],
+    admins: [{ type: mongoose_1.Schema.Types.ObjectId, ref: "User" }],
+    createdBy: { type: mongoose_1.Schema.Types.ObjectId, ref: "User" },
     taskId: {
         type: mongoose_1.Schema.Types.ObjectId,
         ref: "Task",
     },
+    teamId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Team",
+    },
     title: {
+        type: String,
+    },
+    avatar: {
         type: String,
     },
     lastMessage: {
@@ -62,6 +71,7 @@ const conversationSchema = new mongoose_1.Schema({
             ref: "User",
         },
         createdAt: Date,
+        type: String,
     },
 }, {
     timestamps: true,
@@ -70,6 +80,8 @@ const conversationSchema = new mongoose_1.Schema({
 // Indexes for query optimization
 conversationSchema.index({ members: 1 });
 conversationSchema.index({ taskId: 1 });
+conversationSchema.index({ teamId: 1 }, { unique: true, sparse: true });
 conversationSchema.index({ type: 1 });
 conversationSchema.index({ updatedAt: -1 });
-exports.ConversationModel = mongoose_1.default.model("Conversation", conversationSchema);
+exports.ConversationModel = mongoose_1.default.models.Conversation ||
+    mongoose_1.default.model("Conversation", conversationSchema);

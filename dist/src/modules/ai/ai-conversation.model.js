@@ -38,7 +38,15 @@ const mongoose_1 = __importStar(require("mongoose"));
 const aiConversationSchema = new mongoose_1.Schema({
     userId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
     title: { type: String, required: true, trim: true },
+    parentTaskId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Task", index: true },
+    domain: { type: String, trim: true, lowercase: true },
+    lastSubtaskKey: { type: String, trim: true },
 }, { timestamps: true });
 aiConversationSchema.index({ userId: 1, updatedAt: -1 });
+// 1 user - 1 parentTask - 1 conversation
+aiConversationSchema.index({ userId: 1, parentTaskId: 1 }, {
+    unique: true,
+    partialFilterExpression: { parentTaskId: { $exists: true } },
+});
 exports.AiConversation = mongoose_1.default.models.AiConversation ||
     mongoose_1.default.model("AiConversation", aiConversationSchema, "ai_conversations");

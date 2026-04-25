@@ -37,4 +37,12 @@ exports.userRepository = {
             },
         }, { new: true }).exec();
     },
+    // Users who enabled notification digest
+    findDigestEnabledUsers: async () => {
+        return auth_model_1.User.find({
+            "settings.notifications.digest.enabled": true,
+        })
+            .select({ email: 1, settings: 1 })
+            .lean();
+    },
 };

@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.NotificationModel = exports.NotificationType = void 0;
+exports.NotificationModel = exports.NotificationPriority = exports.NotificationType = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
 var NotificationType;
 (function (NotificationType) {
@@ -42,8 +42,21 @@ var NotificationType;
     NotificationType["SCHEDULED_TASK_ALERT"] = "scheduled_task_alert";
     NotificationType["CHAT_MESSAGE"] = "chat_message";
     NotificationType["AI_SUGGESTION"] = "ai_suggestion";
+    NotificationType["TEAM_TASK_ASSIGNED"] = "team_task_assigned";
+    NotificationType["TEAM_TASK_STATUS_CHANGED"] = "team_task_status_changed";
+    NotificationType["TEAM_TASK_REASSIGNED"] = "team_task_reassigned";
+    NotificationType["TEAM_TASK_UPDATED"] = "team_task_updated";
+    NotificationType["TEAM_TASK_COMMENT"] = "team_task_comment";
+    NotificationType["TEAM_TASK_MENTION"] = "team_task_mention";
     NotificationType["SYSTEM"] = "system";
 })(NotificationType || (exports.NotificationType = NotificationType = {}));
+var NotificationPriority;
+(function (NotificationPriority) {
+    NotificationPriority["CRITICAL"] = "critical";
+    NotificationPriority["HIGH"] = "high";
+    NotificationPriority["NORMAL"] = "normal";
+    NotificationPriority["LOW"] = "low";
+})(NotificationPriority || (exports.NotificationPriority = NotificationPriority = {}));
 const notificationSchema = new mongoose_1.Schema({
     userId: {
         type: mongoose_1.Schema.Types.ObjectId,
@@ -55,6 +68,34 @@ const notificationSchema = new mongoose_1.Schema({
         type: String,
         enum: Object.values(NotificationType),
         required: true,
+    },
+    priority: {
+        type: String,
+        enum: Object.values(NotificationPriority),
+        default: NotificationPriority.NORMAL,
+        index: true,
+    },
+    snoozedUntil: {
+        type: Date,
+        default: null,
+        index: true,
+    },
+    isGroup: {
+        type: Boolean,
+        default: false,
+    },
+    groupCount: {
+        type: Number,
+        default: 0,
+    },
+    groupedIds: {
+        type: [mongoose_1.Schema.Types.ObjectId],
+        default: [],
+    },
+    hiddenByGroupId: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        default: null,
+        index: true,
     },
     title: {
         type: String,
@@ -109,4 +150,6 @@ notificationSchema.index({ "data.taskId": 1 });
 notificationSchema.index({ "data.conversationId": 1 });
 notificationSchema.index({ createdAt: -1 });
 notificationSchema.index({ emailSent: 1, "channels.email": 1 });
+notificationSchema.index({ userId: 1, type: 1, isRead: 1, createdAt: -1 });
+notificationSchema.index({ snoozedUntil: 1 });
 exports.NotificationModel = mongoose_1.default.model("Notification", notificationSchema);

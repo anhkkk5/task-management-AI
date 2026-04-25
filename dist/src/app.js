@@ -18,7 +18,11 @@ const admin_routes_1 = __importDefault(require("./modules/admin/admin.routes"));
 const schedule_template_routes_1 = __importDefault(require("./modules/schedule-template/schedule-template.routes"));
 const ai_schedule_routes_1 = __importDefault(require("./modules/ai-schedule/ai-schedule.routes"));
 const scheduler_routes_1 = __importDefault(require("./modules/scheduler/scheduler.routes"));
+const free_time_routes_1 = __importDefault(require("./modules/free-time/free-time.routes"));
 const guest_routes_1 = __importDefault(require("./modules/guest/routes/guest.routes"));
+const colors_routes_1 = __importDefault(require("./modules/colors/colors.routes"));
+const team_routes_1 = __importDefault(require("./modules/team/team.routes"));
+const catalog_routes_1 = __importDefault(require("./modules/catalog/catalog.routes"));
 const passport_2 = require("./config/passport");
 const createApp = () => {
     const app = (0, express_1.default)();
@@ -54,7 +58,11 @@ const createApp = () => {
     app.use("/schedule-templates", schedule_template_routes_1.default);
     app.use("/ai-schedules", ai_schedule_routes_1.default);
     app.use("/scheduler", scheduler_routes_1.default);
+    app.use("/free-time", free_time_routes_1.default);
     app.use("/guests", guest_routes_1.default);
+    app.use("/colors", colors_routes_1.default);
+    app.use("/teams", team_routes_1.default);
+    app.use("/catalog", catalog_routes_1.default);
     return app;
 };
 exports.createApp = createApp;

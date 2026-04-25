@@ -23,4 +23,12 @@ notificationRouter.patch("/:id/read", auth_middleware_1.authMiddleware, notifica
 notificationRouter.patch("/read-all", auth_middleware_1.authMiddleware, notification_controller_1.notificationController.markAllAsRead);
 // Delete notification
 notificationRouter.delete("/:id", auth_middleware_1.authMiddleware, notification_controller_1.notificationController.delete);
+// Snooze notification: body { duration: "15min"|"1hour"|"3hour"|"tomorrow", minutes?: number }
+notificationRouter.post("/:id/snooze", auth_middleware_1.authMiddleware, notification_controller_1.notificationController.snooze);
+// Unsnooze (resurrect immediately)
+notificationRouter.post("/:id/unsnooze", auth_middleware_1.authMiddleware, notification_controller_1.notificationController.unsnooze);
+// List currently-snoozed notifications for the logged-in user
+notificationRouter.get("/snoozed/list", auth_middleware_1.authMiddleware, notification_controller_1.notificationController.listSnoozed);
+// Expand a group parent → list its children
+notificationRouter.get("/:id/group-children", auth_middleware_1.authMiddleware, notification_controller_1.notificationController.listGroupChildren);
 exports.default = notificationRouter;

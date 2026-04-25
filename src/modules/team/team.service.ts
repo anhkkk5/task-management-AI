@@ -14,6 +14,7 @@ import {
 import { taskService } from "../task/task.service";
 import { notificationService } from "../notification/notification.service";
 import { NotificationType } from "../notification/notification.model";
+import { getChatGateway } from "../chat/chat.gateway";
 
 export type CreateTeamDto = {
   name: string;
@@ -34,7 +35,7 @@ export type UpdateMemberProfileDto = {
 export type CreateTeamTaskDto = {
   title: string;
   description?: string;
-  status?: "todo" | "in_progress" | "completed" | "cancelled";
+  status?: "todo" | "scheduled" | "in_progress" | "completed" | "cancelled";
   priority?: "low" | "medium" | "high" | "urgent";
   assigneeId: string;
   startAt?: Date;
@@ -44,7 +45,7 @@ export type CreateTeamTaskDto = {
 export type UpdateTeamTaskDto = {
   title?: string;
   description?: string;
-  status?: "todo" | "in_progress" | "completed" | "cancelled";
+  status?: "todo" | "scheduled" | "in_progress" | "completed" | "cancelled";
   priority?: "low" | "medium" | "high" | "urgent";
   assigneeId?: string;
   startAt?: Date;
@@ -186,6 +187,35 @@ const invalidateTaskListCacheForUser = async (
     }
   } catch (_err) {
     return;
+  }
+};
+
+const emitTeamTaskChanged = (params: {
+  team: TeamDoc;
+  teamId: string;
+  taskId: string;
+  action:
+    | "created"
+    | "updated"
+    | "status_changed"
+    | "deleted"
+    | "assigned"
+    | "unassigned";
+  actorId: string;
+}) => {
+  const chatGateway = getChatGateway();
+  if (!chatGateway) return;
+
+  const payload = {
+    teamId: params.teamId,
+    taskId: params.taskId,
+    action: params.action,
+    actorId: params.actorId,
+    at: new Date().toISOString(),
+  };
+
+  for (const member of params.team.members) {
+    chatGateway.emitToUser(String(member.userId), "team:task:changed", payload);
   }
 };
 
@@ -521,8 +551,10 @@ export class TeamService {
     }).lean();
     return {
       todo: tasks.filter((t) => t.status === "todo"),
+      scheduled: tasks.filter((t) => t.status === "scheduled"),
       in_progress: tasks.filter((t) => t.status === "in_progress"),
       completed: tasks.filter((t) => t.status === "completed"),
+      cancelled: tasks.filter((t) => t.status === "cancelled"),
     };
   }
 
@@ -596,6 +628,14 @@ export class TeamService {
         ],
       });
     }
+
+    emitTeamTaskChanged({
+      team,
+      teamId,
+      taskId: String(task._id),
+      action: "assigned",
+      actorId: assignerId,
+    });
 
     return task;
   }
@@ -682,6 +722,14 @@ export class TeamService {
       });
     }
 
+    emitTeamTaskChanged({
+      team,
+      teamId,
+      taskId: String(task._id),
+      action: "created",
+      actorId: requesterId,
+    });
+
     return task;
   }
 
@@ -701,6 +749,15 @@ export class TeamService {
     task.teamAssignment = undefined;
     await task.save();
     await invalidateTaskListCacheForUser(task.userId?.toString());
+
+    emitTeamTaskChanged({
+      team,
+      teamId,
+      taskId: String(task._id),
+      action: "unassigned",
+      actorId: requesterId,
+    });
+
     return task;
   }
 
@@ -940,6 +997,14 @@ export class TeamService {
       });
     }
 
+    emitTeamTaskChanged({
+      team,
+      teamId,
+      taskId: String(task._id),
+      action: "updated",
+      actorId: requesterId,
+    });
+
     return task;
   }
 
@@ -961,15 +1026,12 @@ export class TeamService {
 
     const assigneeId = String(task?.teamAssignment?.assigneeId ?? "");
     const assignedBy = String(task?.teamAssignment?.assignedBy ?? "");
-    const isOwner = team.ownerId.toString() === requesterId;
-    const canUpdateStatus =
-      isOwner || assigneeId === requesterId || assignedBy === requesterId;
 
-    if (!canUpdateStatus) {
+    if (status === "scheduled" && assigneeId !== requesterId) {
       throw {
         status: 403,
         message:
-          "Bạn không có quyền cập nhật trạng thái task này (chỉ người làm, người giao hoặc owner)",
+          "Trạng thái đã lên lịch là lịch cá nhân, chỉ người được giao task mới được cập nhật",
       };
     }
 
@@ -1011,6 +1073,14 @@ export class TeamService {
       ),
     );
 
+    emitTeamTaskChanged({
+      team,
+      teamId,
+      taskId: String(task._id),
+      action: "status_changed",
+      actorId: requesterId,
+    });
+
     return task;
   }
 
@@ -1032,8 +1102,17 @@ export class TeamService {
     }
 
     const deletedUserId = task.userId?.toString();
+    const deletedTaskId = String(task._id);
     await Task.deleteOne({ _id: task._id });
     await invalidateTaskListCacheForUser(deletedUserId);
+
+    emitTeamTaskChanged({
+      team,
+      teamId,
+      taskId: deletedTaskId,
+      action: "deleted",
+      actorId: requesterId,
+    });
 
     return { message: "Đã xóa công việc nhóm" };
   }

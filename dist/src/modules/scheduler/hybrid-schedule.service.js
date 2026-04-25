@@ -2,17 +2,134 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.hybridScheduleService = void 0;
 const mongoose_1 = require("mongoose");
+const crypto_1 = require("crypto");
 const ai_provider_1 = require("../ai/ai.provider");
 const task_repository_1 = require("../task/task.repository");
 const user_habit_repository_1 = require("../user/user-habit.repository");
 const ai_schedule_repository_1 = require("../ai-schedule/ai-schedule.repository");
+const free_time_service_1 = require("../free-time/free-time.service");
 const ai_utils_1 = require("../ai/ai-utils");
+const redis_service_1 = require("../../services/redis.service");
+const team_model_1 = require("../team/team.model");
+const catalog_data_1 = require("../catalog/catalog.data");
 const scheduler_1 = require("../scheduler");
+function parseHHMMToMinutes(time) {
+    const [h, m] = String(time)
+        .split(":")
+        .map((x) => parseInt(x, 10));
+    if (Number.isNaN(h) || Number.isNaN(m))
+        return -1;
+    if (h < 0 || h > 23 || m < 0 || m > 59)
+        return -1;
+    return h * 60 + m;
+}
+function buildOutsideAvailabilityBusySlots(date, availableSlots) {
+    const normalized = (Array.isArray(availableSlots) ? availableSlots : [])
+        .map((slot) => ({
+        start: parseHHMMToMinutes(slot.start),
+        end: parseHHMMToMinutes(slot.end),
+    }))
+        .filter((slot) => slot.start >= 0 && slot.end > slot.start)
+        .sort((a, b) => a.start - b.start);
+    // Nếu không có slot rảnh => block toàn bộ ngày
+    if (normalized.length === 0) {
+        const dayStart = new Date(date);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(date);
+        dayEnd.setHours(24, 0, 0, 0);
+        return [{ start: dayStart, end: dayEnd, taskId: "UNAVAILABLE" }];
+    }
+    const blocked = [];
+    let cursor = 0;
+    const toDateAtMinute = (baseDate, minute) => {
+        const d = new Date(baseDate);
+        const h = Math.floor(minute / 60);
+        const m = minute % 60;
+        d.setHours(h, m, 0, 0);
+        return d;
+    };
+    for (const slot of normalized) {
+        if (slot.start > cursor) {
+            blocked.push({
+                start: toDateAtMinute(date, cursor),
+                end: toDateAtMinute(date, slot.start),
+                taskId: "UNAVAILABLE",
+            });
+        }
+        cursor = Math.max(cursor, slot.end);
+    }
+    if (cursor < 24 * 60) {
+        blocked.push({
+            start: toDateAtMinute(date, cursor),
+            end: toDateAtMinute(date, 24 * 60),
+            taskId: "UNAVAILABLE",
+        });
+    }
+    return blocked;
+}
 /**
  * HYBRID AI + Algorithm Schedule Service
  * AI chỉ phân tích high-level, backend algorithm chọn giờ cụ thể
  */
 exports.hybridScheduleService = {
+    estimateTaskPlanningInputs: async (userId, task, plannerStartDate = new Date()) => {
+        if (!task)
+            return null;
+        return ensureTaskPlanningInputsWithMeta(task, plannerStartDate, userId);
+    },
+    explainTaskEstimation: async (userId, task, plannerStartDate = new Date()) => {
+        if (!task)
+            return null;
+        const sourceTask = typeof task?.toObject === "function" ? task.toObject() : task;
+        const clone = {
+            ...sourceTask,
+            teamAssignment: sourceTask?.teamAssignment
+                ? { ...sourceTask.teamAssignment }
+                : undefined,
+        };
+        const taskIdForFallback = String(clone?._id ?? sourceTask?._id ?? sourceTask?.id ?? "");
+        const titleForFallback = String(clone?.title ?? sourceTask?.title ?? "");
+        const meta = await ensureTaskPlanningInputsWithMeta(clone, plannerStartDate, userId);
+        const outputMeta = meta ?? {
+            taskId: taskIdForFallback,
+            method: "user",
+            confidence: 1,
+            estimatedFields: [],
+            aiDifficulty: undefined,
+            aiMultiplier: undefined,
+            factors: {
+                baseEstimate: undefined,
+                priorityMultiplier: undefined,
+                keywordMultiplier: undefined,
+                levelMultiplier: undefined,
+                historyMultiplier: undefined,
+            },
+            finalDuration: Number(clone.estimatedDuration ?? 0),
+            finalDailyTarget: Number(clone.dailyTargetDuration ?? 0),
+            finalDailyMin: Number(clone.dailyTargetMin ?? 0),
+        };
+        return {
+            taskId: outputMeta.taskId,
+            title: titleForFallback,
+            method: outputMeta.method,
+            confidence: outputMeta.confidence,
+            estimatedFields: outputMeta.estimatedFields,
+            difficulty: outputMeta.aiDifficulty,
+            factors: {
+                baseEstimate: outputMeta.factors?.baseEstimate,
+                priorityMultiplier: outputMeta.factors?.priorityMultiplier,
+                keywordMultiplier: outputMeta.factors?.keywordMultiplier,
+                aiMultiplier: outputMeta.aiMultiplier,
+                levelMultiplier: outputMeta.factors?.levelMultiplier,
+                historyMultiplier: outputMeta.factors?.historyMultiplier,
+            },
+            result: {
+                estimatedDuration: outputMeta.finalDuration,
+                dailyTargetDuration: outputMeta.finalDailyTarget,
+                dailyTargetMin: outputMeta.finalDailyMin,
+            },
+        };
+    },
     /**
      * Main: Tạo schedule kết hợp AI + Algorithms
      * - AI: Phân tích difficulty, priority, suggested order
@@ -38,21 +155,64 @@ exports.hybridScheduleService = {
         if (tasks.length === 0) {
             throw new Error("NO_VALID_TASKS");
         }
+        // 1.5 Preprocess planning inputs cho team tasks thiếu dữ liệu
+        const estimationMetaMap = new Map();
+        for (const task of tasks) {
+            const meta = await ensureTaskPlanningInputsWithMeta(task, input.startDate, userId);
+            if (meta) {
+                estimationMetaMap.set(meta.taskId, meta);
+            }
+        }
         // ✅ DEADLINE VALIDATION: Kiểm tra tính khả thi trước khi schedule
-        const today = new Date();
-        const todayStr = toLocalDateStr(today);
+        const plannerStartDateOnly = new Date(`${toLocalDateStr(new Date(input.startDate))}T00:00:00`);
         const warnings = [];
         for (const task of tasks) {
             if (!task.deadline)
                 continue;
-            const deadlineStr = toLocalDateStr(new Date(task.deadline));
-            // Đếm số ngày từ hôm nay đến deadline (inclusive)
-            const daysLeft = Math.ceil((new Date(deadlineStr).getTime() - new Date(todayStr).getTime()) /
-                (1000 * 60 * 60 * 24)) + 1;
-            // Tính thời gian tối đa có thể xếp (daysLeft × dailyTargetMax)
-            const dailyTargetMax = task.dailyTargetDuration ?? 120; // Mặc định 2h/ngày
-            const maxPossibleMinutes = daysLeft * dailyTargetMax;
+            const deadlineDateOnly = new Date(`${toLocalDateStr(new Date(task.deadline))}T00:00:00`);
+            const taskStartStr = getTaskStartDateStr(task);
+            const taskStartDateOnly = taskStartStr
+                ? new Date(`${taskStartStr}T00:00:00`)
+                : plannerStartDateOnly;
+            const schedulableStartDateOnly = taskStartDateOnly > plannerStartDateOnly
+                ? taskStartDateOnly
+                : plannerStartDateOnly;
+            // Đếm số ngày có thể schedule thực tế (inclusive)
+            const daysLeft = Math.max(1, Math.ceil((deadlineDateOnly.getTime() - schedulableStartDateOnly.getTime()) /
+                (1000 * 60 * 60 * 24)) + 1);
             const requiredMinutes = task.estimatedDuration ?? 0;
+            // Với team task: nếu target/ngày đang thấp hơn mức tối thiểu cần thiết,
+            // auto-raise để tránh warning giả khi chính hệ thống là người estimate.
+            if (task.teamAssignment && requiredMinutes > 0) {
+                const requiredPerDay = Math.ceil(requiredMinutes / daysLeft);
+                const enforcedDailyTarget = clamp(roundToNearest5(requiredPerDay), 60, 480);
+                const currentDailyTarget = Number(task.dailyTargetDuration ?? 0);
+                if (currentDailyTarget <= 0 ||
+                    currentDailyTarget < enforcedDailyTarget) {
+                    task.dailyTargetDuration = enforcedDailyTarget;
+                    task.dailyTargetMin = Math.max(30, roundToNearest5(enforcedDailyTarget * 0.7));
+                    const taskId = String(task._id);
+                    const meta = estimationMetaMap.get(taskId);
+                    if (meta) {
+                        if (!meta.estimatedFields.includes("dailyTargetDuration")) {
+                            meta.estimatedFields.push("dailyTargetDuration");
+                        }
+                        if (!meta.estimatedFields.includes("dailyTargetMin")) {
+                            meta.estimatedFields.push("dailyTargetMin");
+                        }
+                        meta.finalDailyTarget = task.dailyTargetDuration;
+                        meta.finalDailyMin = task.dailyTargetMin;
+                        meta.method = meta.method === "user" ? "default" : meta.method;
+                        meta.confidence = Math.max(0.65, meta.confidence);
+                        estimationMetaMap.set(taskId, meta);
+                    }
+                }
+            }
+            // Tính thời gian tối đa có thể xếp theo năng lực thực tế/ngày
+            // (không chỉ bám dailyTarget hiện tại để tránh warning giả)
+            const dailyTargetMax = task.dailyTargetDuration ?? 120;
+            const potentialDailyMax = Math.max(dailyTargetMax, task.teamAssignment ? 480 : 360);
+            const maxPossibleMinutes = daysLeft * potentialDailyMax;
             if (requiredMinutes > maxPossibleMinutes) {
                 const shortfallMinutes = requiredMinutes - maxPossibleMinutes;
                 const shortfallHours = parseFloat((shortfallMinutes / 60).toFixed(1));
@@ -302,6 +462,9 @@ Format JSON:
             autoRescheduled: 0,
             productivityOptimized: 0,
         };
+        // ── Strategy & distribution config ──
+        const strategy = input.schedulingStrategy || "balanced";
+        const distribution = input.distributionPattern || "adaptive";
         let currentDate = new Date(startDate);
         let sessionCounter = 0;
         // ✅ Get current time once to pass to slot finder
@@ -351,7 +514,19 @@ Format JSON:
                 tasks: [],
             };
             // Lấy busy slots của ngày này (từ các ngày trước đã schedule)
-            const existingBusySlots = busySlotsByDate.get(dateStr) || [];
+            // + block toàn bộ thời gian ngoài availability của user trong ngày
+            const baseBusySlots = busySlotsByDate.get(dateStr) || [];
+            const availableSlots = await free_time_service_1.freeTimeService.getAvailableSlotsForDate(userId, new Date(currentDate));
+            const outsideAvailabilityBusySlots = buildOutsideAvailabilityBusySlots(new Date(currentDate), availableSlots);
+            const existingBusySlots = [
+                ...baseBusySlots,
+                ...outsideAvailabilityBusySlots,
+            ];
+            busySlotsByDate.set(dateStr, existingBusySlots);
+            const dynamicWorkHours = {
+                start: 0,
+                end: 24,
+            };
             // Sort tasks: deadline gần hơn trước, sau đó priority cao hơn
             const baseOrder = (Array.isArray(aiAnalysis.suggestedOrder)
                 ? aiAnalysis.suggestedOrder
@@ -375,17 +550,80 @@ Format JSON:
                     return pb - pa;
                 return 0;
             });
+            // ── Helper: tính adaptive daily target cho 1 task vào ngày dateStr ──
+            const computeAdaptiveDailyTarget = (task) => {
+                const baseMax = task.dailyTargetDuration ?? 180;
+                const baseMin = task.dailyTargetMin ?? 60;
+                const remaining = remainingMinutesByTaskId.get(String(task._id)) || 0;
+                if (remaining <= 0)
+                    return { max: 0, min: 0 };
+                // ✅ Tôn trọng tuyệt đối mục tiêu user đã đặt cho task cá nhân.
+                // Khi user nhập rõ estimatedDuration + dailyTargetDuration thì không boost/adaptive.
+                const meta = estimationMetaMap.get(String(task._id));
+                const isTeamTaskEarly = !!task.teamAssignment?.teamId;
+                const dailyTargetIsUserDefined = !isTeamTaskEarly &&
+                    Number(task.dailyTargetDuration) > 0 &&
+                    !(meta?.estimatedFields ?? []).includes("dailyTargetDuration");
+                if (dailyTargetIsUserDefined) {
+                    return { max: baseMax, min: baseMin };
+                }
+                // Tính số ngày còn lại đến deadline
+                const deadlineStr = task.deadline
+                    ? toLocalDateStr(new Date(task.deadline))
+                    : null;
+                const remainingDaysToDeadline = deadlineStr
+                    ? Math.max(1, Math.ceil((new Date(deadlineStr).getTime() -
+                        new Date(dateStr).getTime()) /
+                        (1000 * 60 * 60 * 24)) + 1)
+                    : 7;
+                const isTeamTask = !!task.teamAssignment;
+                const absoluteMax = isTeamTask ? 480 : 360; // team: 8h, cá nhân: 6h
+                const teamMinDaily = isTeamTask ? 120 : 0; // team task: tối thiểu 2h/ngày
+                if (distribution === "adaptive") {
+                    // Adaptive: base demand từ remaining / remainingDays
+                    const demandPerDay = remaining / remainingDaysToDeadline;
+                    const pressureRatio = demandPerDay / Math.max(1, baseMax);
+                    // Nếu đang bị trễ tiến độ (pressure > 1), tăng mạnh target để catch up
+                    const catchUpBoost = pressureRatio > 1 ? pressureRatio : 1;
+                    // Mục tiêu max hôm nay = demand + buffer + pressure boost
+                    const adaptiveTarget = demandPerDay * 1.25 * catchUpBoost;
+                    const adaptiveMax = clamp(roundToNearest5(Math.max(adaptiveTarget, baseMax, teamMinDaily)), Math.max(30, Math.min(baseMin, teamMinDaily || baseMin)), absoluteMax);
+                    const adaptiveMin = clamp(roundToNearest5(Math.max(demandPerDay * (isTeamTask ? 0.75 : 0.65), isTeamTask ? 60 : 30)), isTeamTask ? 60 : 30, adaptiveMax);
+                    return { max: adaptiveMax, min: adaptiveMin };
+                }
+                else if (distribution === "front-load") {
+                    // Front-load: ngày đầu 1.5x, giảm dần
+                    const dayIndex = Math.ceil((new Date(dateStr).getTime() -
+                        new Date(toLocalDateStr(startDate)).getTime()) /
+                        (1000 * 60 * 60 * 24));
+                    const totalDays = remainingDaysToDeadline + dayIndex;
+                    const progressRatio = totalDays > 0 ? dayIndex / totalDays : 0;
+                    const frontLoadMultiplier = 1.5 - progressRatio; // 1.5x đầu → 0.5x cuối
+                    const adjustedMax = clamp(roundToNearest5(Math.max(baseMax * frontLoadMultiplier, teamMinDaily, baseMax)), isTeamTask ? 60 : 30, absoluteMax);
+                    const adjustedMin = clamp(roundToNearest5(Math.max(baseMin, isTeamTask ? 60 : 30)), isTeamTask ? 60 : 30, adjustedMax);
+                    return { max: adjustedMax, min: adjustedMin };
+                }
+                // "even" - giữ nguyên nhưng vẫn ép minimum cho team task
+                const evenMax = clamp(roundToNearest5(Math.max(baseMax, teamMinDaily)), isTeamTask ? 60 : 30, absoluteMax);
+                const evenMin = clamp(roundToNearest5(Math.max(baseMin, isTeamTask ? 60 : 30)), isTeamTask ? 60 : 30, evenMax);
+                return { max: evenMax, min: evenMin };
+            };
             const scheduleTaskChunksForDay = async (task, mode) => {
                 const remainingForTask = remainingMinutesByTaskId.get(String(task._id)) || 0;
                 if (remainingForTask <= 0)
                     return;
+                // Respect task-level startAt (bao gồm teamAssignment.startAt)
+                const taskStartDateStr = getTaskStartDateStr(task);
+                if (taskStartDateStr && dateStr < taskStartDateStr) {
+                    return;
+                }
                 // ✅ STRICT DEADLINE CHECK: Skip nếu đã qua deadline (không có allowAfterDeadline)
                 if (task.deadline &&
                     dateStr > toLocalDateStr(new Date(task.deadline))) {
                     return;
                 }
-                const dailyTargetMax = task.dailyTargetDuration ?? 180; // Mặc định 3h/ngày
-                const dailyTargetMin = task.dailyTargetMin ?? 60; // Mặc định 1h/ngày
+                // ── Adaptive daily target thay vì cố định ──
+                const { max: dailyTargetMax, min: dailyTargetMin } = computeAdaptiveDailyTarget(task);
                 const difficulty = aiAnalysis.difficultyAnalysis?.[String(task._id)] ||
                     aiAnalysis.difficultyAnalysis?.[String(task.id)] ||
                     "medium";
@@ -400,13 +638,24 @@ Format JSON:
                     const mapForDay = dailyScheduledMinutesByTask.get(dateStr) ||
                         new Map();
                     const scheduledToday = mapForDay.get(String(task._id)) || 0;
+                    // Nếu user đã tự đặt dailyTargetDuration cho task cá nhân → tôn trọng
+                    // tuyệt đối, KHÔNG cho fillAvailable vượt qua mục tiêu user đặt.
+                    const metaForCap = estimationMetaMap.get(String(task._id));
+                    const userDefinedCap = !task.teamAssignment?.teamId &&
+                        Number(task.dailyTargetDuration) > 0 &&
+                        !(metaForCap?.estimatedFields ?? []).includes("dailyTargetDuration");
+                    const hardDailyCap = userDefinedCap
+                        ? dailyTargetMax
+                        : Math.max(dailyTargetMax, task.teamAssignment ? 480 : 360);
+                    const effectiveDailyMax = mode === "fillAvailable" ? hardDailyCap : dailyTargetMax;
                     if (mode === "reachMin" && scheduledToday >= dailyTargetMin) {
                         break;
                     }
-                    if (mode === "fillMax" && scheduledToday >= dailyTargetMax) {
+                    if ((mode === "fillMax" || mode === "fillAvailable") &&
+                        scheduledToday >= effectiveDailyMax) {
                         break;
                     }
-                    const remainingToMaxToday = Math.max(0, dailyTargetMax - scheduledToday);
+                    const remainingToMaxToday = Math.max(0, effectiveDailyMax - scheduledToday);
                     if (remainingToMaxToday <= 0)
                         break;
                     const remainingToMinToday = Math.max(0, dailyTargetMin - scheduledToday);
@@ -424,14 +673,7 @@ Format JSON:
                         productivityScores,
                         busySlots: existingBusySlots,
                         date: new Date(currentDate),
-                        workHours: {
-                            start: 8,
-                            end: 23, // Tối đa 23h
-                            breaks: [
-                                { start: 11.5, end: 14 }, // 11:30-14:00 nghỉ trưa
-                                { start: 17.5, end: 19 }, // ✅ 17:30-19:00 nghỉ tối (sửa từ 19.5 → 19)
-                            ],
-                        },
+                        workHours: dynamicWorkHours,
                         bufferMinutes: 15, // 15 phút nghỉ giữa các task
                         currentTime: now, // ✅ Pass current time to skip past slots
                     });
@@ -497,19 +739,45 @@ Format JSON:
                     remainingMinutesByTaskId.set(String(task._id), Math.max(0, remainingForTaskNow - scheduledMinutes));
                 }
             };
-            // Phase 1: reach min for each task (in priority order)
-            for (const taskId of sortedTaskIds) {
-                const task = tasks.find((t) => String(t._id) === taskId);
-                if (!task)
-                    continue;
-                await scheduleTaskChunksForDay(task, "reachMin");
+            if (strategy === "sequential") {
+                // Sequential: hoàn thành 1 task trước rồi mới đến task kế tiếp
+                // Chỉ schedule task đầu tiên chưa hoàn thành (theo priority order)
+                for (const taskId of sortedTaskIds) {
+                    const remaining = remainingMinutesByTaskId.get(taskId) || 0;
+                    if (remaining <= 0)
+                        continue;
+                    const task = tasks.find((t) => String(t._id) === taskId);
+                    if (!task)
+                        continue;
+                    // Dồn hết thời gian cho task này trong ngày
+                    await scheduleTaskChunksForDay(task, "fillMax");
+                    break; // Chỉ 1 task/ngày trong sequential mode
+                }
             }
-            // Phase 2: fill toward max if still have time available
-            for (const taskId of sortedTaskIds) {
-                const task = tasks.find((t) => String(t._id) === taskId);
-                if (!task)
-                    continue;
-                await scheduleTaskChunksForDay(task, "fillMax");
+            else {
+                // Parallel / Balanced: làm nhiều task trong ngày
+                // Phase 1: reach min for each task (in priority order)
+                for (const taskId of sortedTaskIds) {
+                    const task = tasks.find((t) => String(t._id) === taskId);
+                    if (!task)
+                        continue;
+                    await scheduleTaskChunksForDay(task, "reachMin");
+                }
+                // Phase 2: fill toward max if still have time available
+                for (const taskId of sortedTaskIds) {
+                    const task = tasks.find((t) => String(t._id) === taskId);
+                    if (!task)
+                        continue;
+                    await scheduleTaskChunksForDay(task, "fillMax");
+                }
+                // Phase 3: nếu trong ngày vẫn còn khoảng trống, dồn thêm task để lấp ngày
+                // trước khi chuyển sang ngày tiếp theo (không vượt hard cap/ngày của task)
+                for (const taskId of sortedTaskIds) {
+                    const task = tasks.find((t) => String(t._id) === taskId);
+                    if (!task)
+                        continue;
+                    await scheduleTaskChunksForDay(task, "fillAvailable");
+                }
             }
             // Always push the day to avoid missing days in UI
             schedule.push(daySchedule);
@@ -582,11 +850,17 @@ Format JSON:
             suggestedOrder: aiAnalysis.suggestedOrder || tasks.map((t) => String(t._id)),
             personalizationNote: (aiAnalysis.personalizationNote ||
                 `Lịch trình được tối ưu với ${stats.productivityOptimized} tasks theo thói quen của bạn`) +
+                (estimationMetaMap.size > 0
+                    ? ` | Đã tự động ước tính thời lượng cho ${estimationMetaMap.size} task thiếu dữ liệu.`
+                    : "") +
                 (remainingSummary
                     ? ` | ⚠️ Không đủ thời gian trước deadline: ${remainingSummary}. Bạn nên tăng mục tiêu/ngày hoặc gia hạn deadline.`
                     : ""),
             stats,
             warnings: warnings.length > 0 ? warnings : undefined,
+            estimationMetadata: estimationMetaMap.size > 0
+                ? Array.from(estimationMetaMap.values())
+                : undefined,
         };
     },
     /**
@@ -609,11 +883,17 @@ Format JSON:
         while (currentDate <= deadline && freeSlots.length < 5) {
             // TODO: Get actual busy slots from repository
             const busySlots = []; // Placeholder
+            const availableSlots = await free_time_service_1.freeTimeService.getAvailableSlotsForDate(userId, new Date(currentDate));
+            const outsideAvailabilityBusySlots = buildOutsideAvailabilityBusySlots(new Date(currentDate), availableSlots);
+            const constrainedBusySlots = [
+                ...busySlots,
+                ...outsideAvailabilityBusySlots,
+            ];
             const slots = scheduler_1.slotFinder.findFreeSlots({
-                busySlots,
+                busySlots: constrainedBusySlots,
                 date: new Date(currentDate),
                 minDuration: task.estimatedDuration || 60,
-                workHours: { start: 8, end: 22 },
+                workHours: { start: 0, end: 24 },
             });
             freeSlots.push(...slots);
             currentDate.setDate(currentDate.getDate() + 1);
@@ -671,4 +951,438 @@ function toLocalDateStr(date) {
     const m = String(date.getMonth() + 1).padStart(2, "0");
     const d = String(date.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
+}
+function isValidDateValue(value) {
+    if (value === undefined || value === null)
+        return false;
+    const date = new Date(value);
+    return !Number.isNaN(date.getTime());
+}
+function roundToNearest5(value) {
+    return Math.round(value / 5) * 5;
+}
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+}
+function getTaskStartDateStr(task) {
+    const rawStartAt = task?.startAt ?? task?.teamAssignment?.startAt;
+    if (!isValidDateValue(rawStartAt))
+        return null;
+    return toLocalDateStr(new Date(rawStartAt));
+}
+// ───── Estimation cache helpers ─────
+function estimationCacheKey(userId, taskTitle, deadline, description) {
+    const raw = `${userId}|${taskTitle}|${deadline ?? ""}|${description}`;
+    return `est:${(0, crypto_1.createHash)("sha256").update(raw).digest("hex").slice(0, 24)}`;
+}
+async function getCachedEstimation(key) {
+    try {
+        const redis = (0, redis_service_1.getRedis)();
+        const raw = await redis.get(key);
+        if (!raw)
+            return null;
+        return JSON.parse(raw);
+    }
+    catch {
+        return null;
+    }
+}
+async function setCachedEstimation(key, data) {
+    try {
+        const redis = (0, redis_service_1.getRedis)();
+        await redis.set(key, JSON.stringify(data), "EX", 86400); // 24h TTL
+    }
+    catch {
+        // silently fail
+    }
+}
+const HISTORY_ADJUSTMENT_WEIGHT = 0.35;
+const HISTORY_MIN_MULTIPLIER = 0.85;
+const HISTORY_MAX_MULTIPLIER = 1.2;
+const INDUSTRY_COMPLEX_KEYWORDS = {
+    it_software: /design|implement|refactor|research|architecture|optimize|integration|migrate|deploy|testing|security|analysis|database|api|microservice|scalability/,
+    marketing: /campaign|branding|funnel|ab testing|performance ads|insight|positioning|kpi|strategy|influencer/,
+    design: /wireframe|prototype|user flow|design system|accessibility|interaction|usability|visual identity|journey/,
+    finance: /forecast|audit|compliance|reconciliation|cash flow|budgeting|risk model|tax|financial model/,
+    sales: /pipeline|negotiation|proposal|enterprise deal|quarterly target|territory plan|upsell|cross-sell/,
+    hr: /org design|competency framework|performance review|retention plan|workforce planning|policy design/,
+    education: /curriculum|assessment rubric|learning outcome|research methodology|accreditation|thesis|pedagogy/,
+    healthcare: /clinical protocol|diagnostic|treatment plan|compliance|patient safety|evidence review|triage/,
+    engineering: /structural analysis|simulation|cad|quality assurance|safety standard|integration test|commissioning/,
+    content_media: /editorial plan|storyboard|long-form|fact-check|content strategy|series production|media plan/,
+    legal: /contract review|litigation|compliance|legal research|due diligence|regulatory|dispute resolution/,
+};
+const INDUSTRY_SIMPLE_KEYWORDS = {
+    it_software: /fix|update|change|rename|remove|delete|add|config|setup/,
+    marketing: /caption|post|hashtag|asset resize|brief update|report export|schedule post/,
+    design: /resize|export|color tweak|font change|crop|minor edit/,
+    finance: /data entry|invoice update|voucher|statement upload|format sheet/,
+    sales: /follow up|lead import|crm update|meeting note|quote update/,
+    hr: /cv screening|interview note|attendance update|policy reminder/,
+    education: /slide update|quiz upload|assignment post|class note/,
+    healthcare: /appointment update|record update|form submit|follow up call/,
+    engineering: /drawing update|material list|site note|checklist update/,
+    content_media: /proofread|thumbnail change|caption edit|publish update/,
+    legal: /document format|clause update|template fill|filing update/,
+};
+function getKeywordMultiplier(text, industryCode) {
+    const genericComplex = /design|implement|refactor|research|architecture|optimize|integration|migrate|deploy|testing|security|analysis/;
+    const genericSimple = /fix|update|change|rename|remove|delete|add|config|setup/;
+    const industryComplex = industryCode
+        ? INDUSTRY_COMPLEX_KEYWORDS[industryCode]
+        : undefined;
+    const industrySimple = industryCode
+        ? INDUSTRY_SIMPLE_KEYWORDS[industryCode]
+        : undefined;
+    if (industryComplex?.test(text) || genericComplex.test(text))
+        return 1.15;
+    if (industrySimple?.test(text) || genericSimple.test(text))
+        return 0.85;
+    return 1.0;
+}
+/**
+ * Các ngành có tỷ trọng việc tay/gặp mặt trực tiếp cao → AI hỗ trợ ít hơn.
+ * Các ngành khác mặc định được coi là knowledge work trên máy tính,
+ * thời gian hoàn thành giảm nhờ AI (Cursor/Copilot/ChatGPT/Gemini...).
+ */
+const MANUAL_INTENSIVE_INDUSTRIES = new Set([
+    "construction",
+    "manufacturing",
+    "logistics",
+    "retail_store",
+    "food_service",
+    "agriculture",
+    "beauty",
+    "driver",
+]);
+/**
+ * Hệ số điều chỉnh thời đại AI.
+ * - Công việc knowledge work (code/thiết kế/viết/phân tích/marketing/finance/hr/legal/
+ *   design/content...) được AI tăng tốc đáng kể → nhân 0.6.
+ * - Công việc chân tay / gặp mặt trực tiếp → giữ 1.0 (AI không thay thế được).
+ * Có thể override bằng env AI_ERA_KNOWLEDGE_FACTOR (0.3 - 1.0).
+ */
+function getAiEraMultiplier(industryCode) {
+    if (industryCode && MANUAL_INTENSIVE_INDUSTRIES.has(industryCode))
+        return 1.0;
+    const raw = Number(process.env.AI_ERA_KNOWLEDGE_FACTOR);
+    if (Number.isFinite(raw) && raw >= 0.3 && raw <= 1.0)
+        return raw;
+    return 0.6;
+}
+async function getPersonalizationInsight(assigneeId) {
+    if (!assigneeId || !mongoose_1.Types.ObjectId.isValid(assigneeId))
+        return null;
+    try {
+        const history = await task_repository_1.taskRepository.listByUser({
+            userId: new mongoose_1.Types.ObjectId(assigneeId),
+            status: "completed",
+            page: 1,
+            limit: 50,
+        });
+        const completedTasks = [...history.items]
+            .filter((t) => Number(t.estimatedDuration) > 0 &&
+            t.createdAt &&
+            t.updatedAt &&
+            !t.isArchived)
+            .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        const ratios = [];
+        for (const t of completedTasks) {
+            const estimated = Number(t.estimatedDuration || 0);
+            if (estimated < 30)
+                continue;
+            const actualMinutes = Math.max(5, Math.floor((new Date(t.updatedAt).getTime() - new Date(t.createdAt).getTime()) /
+                (1000 * 60)));
+            const ratio = clamp(actualMinutes / estimated, 0.6, 1.8);
+            ratios.push(ratio);
+            if (ratios.length >= 10)
+                break;
+        }
+        if (ratios.length < 5)
+            return null;
+        const avgRatio = ratios.reduce((sum, r) => sum + r, 0) / ratios.length;
+        const multiplier = clamp(1 + (avgRatio - 1) * HISTORY_ADJUSTMENT_WEIGHT, HISTORY_MIN_MULTIPLIER, HISTORY_MAX_MULTIPLIER);
+        return {
+            multiplier,
+            sampleSize: ratios.length,
+            avgRatio: parseFloat(avgRatio.toFixed(2)),
+        };
+    }
+    catch (err) {
+        console.warn(`[Estimation] personalization insight failed: ${err?.message || err}`);
+        return null;
+    }
+}
+async function resolveAssigneeProfile(task) {
+    const teamId = task?.teamAssignment?.teamId;
+    const assigneeId = task?.teamAssignment?.assigneeId;
+    if (!teamId || !assigneeId) {
+        return { levelMultiplier: 1.0 };
+    }
+    try {
+        const team = await team_model_1.Team.findById(teamId).lean().exec();
+        if (!team)
+            return { levelMultiplier: 1.0 };
+        const member = (team.members || []).find((m) => String(m.userId) === String(assigneeId));
+        if (!member)
+            return { levelMultiplier: 1.0 };
+        const industry = (0, catalog_data_1.getIndustry)(team.industry);
+        const position = (0, catalog_data_1.getPosition)(team.industry, member.position);
+        const levelInfo = member.level
+            ? catalog_data_1.LEVELS[member.level]
+            : undefined;
+        return {
+            teamType: team.teamType,
+            industryCode: team.industry,
+            industryLabel: industry?.label,
+            positionCode: member.position,
+            positionLabel: position?.label,
+            levelCode: member.level,
+            levelLabel: levelInfo?.label,
+            levelMultiplier: (0, catalog_data_1.getLevelMultiplier)(member.level),
+        };
+    }
+    catch (err) {
+        console.warn(`[Estimation] resolveAssigneeProfile failed: ${err?.message || err}`);
+        return { levelMultiplier: 1.0 };
+    }
+}
+// ───── AI difficulty estimator ─────
+async function aiEstimateDifficulty(task, userId, profile) {
+    const title = String(task.title ?? "");
+    const description = String(task.description ?? "");
+    if (!title && !description)
+        return null;
+    const deadlineStr = task.deadline
+        ? new Date(task.deadline).toISOString().split("T")[0]
+        : null;
+    const profileKey = profile
+        ? `${profile.industryCode ?? ""}|${profile.positionCode ?? ""}|${profile.levelCode ?? ""}`
+        : "";
+    const cacheKey = estimationCacheKey(userId, title, deadlineStr, `${description}||${profileKey}`);
+    // Check cache first
+    const cached = await getCachedEstimation(cacheKey);
+    if (cached) {
+        return cached;
+    }
+    try {
+        const profileLines = [];
+        if (profile?.industryLabel)
+            profileLines.push(`Ngành nghề: ${profile.industryLabel}`);
+        if (profile?.positionLabel)
+            profileLines.push(`Vị trí người thực hiện: ${profile.positionLabel}`);
+        if (profile?.levelLabel)
+            profileLines.push(`Level người thực hiện: ${profile.levelLabel}`);
+        const prompt = `Phân tích độ phức tạp công việc này, có cân nhắc vai trò người thực hiện (nếu có), và trả về JSON duy nhất.
+
+Tiêu đề: ${title}
+${description ? `Mô tả: ${description}` : ""}
+${task.priority ? `Ưu tiên: ${task.priority}` : ""}
+${deadlineStr ? `Deadline: ${deadlineStr}` : ""}
+${profileLines.join("\n")}
+
+Bối cảnh THỜI ĐẠI AI (bắt buộc áp dụng khi ước lượng):
+- Người làm có công cụ AI (Cursor, Copilot, ChatGPT, Gemini) hỗ trợ viết code, soạn thảo, phân tích, viết test, tối ưu, nghiên cứu.
+- Rất nhiều bước trước đây tốn nhiều giờ nay chỉ còn 20-60 phút.
+- KHÔNG ước lượng theo thời gian thời đại chưa có AI.
+
+Hướng dẫn phân loại:
+- "easy": công việc đơn giản / quen thuộc / AI làm hộ gần hết, thường ≤ 45 phút.
+- "medium": công việc tiêu chuẩn, cần tập trung nhưng AI hỗ trợ tốt, thường 45-120 phút.
+- "hard": thật sự phức tạp (research chuyên sâu, tích hợp nhiều hệ thống, rủi ro cao), thường 2-4 giờ.
+- KHÔNG nhân thêm theo level ở đây (level sẽ được hệ thống nhân ngoài), chỉ đánh giá độ khó nội tại trong thời đại AI.
+
+Trả về JSON (KHÔNG kèm text khác):
+{"difficulty":"easy|medium|hard","multiplier":0.7|1.0|1.25,"reasoning":"lý do ngắn"}`;
+        const result = await Promise.race([
+            ai_provider_1.aiProvider.chat({
+                messages: [
+                    {
+                        role: "system",
+                        content: "You are a task complexity analyzer. Output valid JSON only. No markdown.",
+                    },
+                    { role: "user", content: prompt },
+                ],
+                temperature: 0.2,
+                maxTokens: 200,
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("AI_TIMEOUT")), 5000)),
+        ]);
+        const parsed = JSON.parse((0, ai_utils_1.extractJson)(result.content || "{}"));
+        const difficulty = (["easy", "medium", "hard"].includes(parsed.difficulty)
+            ? parsed.difficulty
+            : "medium");
+        const multiplierMap = {
+            easy: 0.7,
+            medium: 1.0,
+            hard: 1.25,
+        };
+        const multiplier = multiplierMap[difficulty] ?? 1.0;
+        const estimation = { difficulty, multiplier };
+        await setCachedEstimation(cacheKey, estimation);
+        return estimation;
+    }
+    catch (err) {
+        console.warn(`[Estimation] AI difficulty analysis failed for "${title}": ${err.message}`);
+        return null;
+    }
+}
+// ───── Main estimation function (heuristic + AI hybrid) ─────
+async function ensureTaskPlanningInputsWithMeta(task, plannerStartDate, userId) {
+    const taskId = String(task._id);
+    const estimatedFields = [];
+    let method = "user";
+    let confidence = 1.0;
+    let heuristicDuration;
+    let aiDifficulty;
+    let aiMultiplier;
+    let baseEstimateValue;
+    let priorityMultiplierValue;
+    let keywordMultiplierValue;
+    let levelMultiplierValue;
+    let historyMultiplierValue;
+    // All fields already provided by user → no estimation needed
+    if (task.estimatedDuration != null &&
+        task.dailyTargetDuration != null &&
+        task.dailyTargetMin != null) {
+        return null;
+    }
+    // ── Compute context ──
+    const startSource = task?.startAt ?? task?.teamAssignment?.startAt ?? plannerStartDate;
+    const startAt = isValidDateValue(startSource)
+        ? new Date(startSource)
+        : new Date(plannerStartDate);
+    const deadlineSource = task?.deadline;
+    const fallbackDeadline = new Date(startAt);
+    fallbackDeadline.setDate(fallbackDeadline.getDate() + 7);
+    const deadline = isValidDateValue(deadlineSource)
+        ? new Date(deadlineSource)
+        : fallbackDeadline;
+    const startDateOnly = new Date(`${toLocalDateStr(startAt)}T00:00:00`);
+    const deadlineDateOnly = new Date(`${toLocalDateStr(deadline)}T00:00:00`);
+    const daysUntilDeadline = Math.max(1, Math.floor((deadlineDateOnly.getTime() - startDateOnly.getTime()) /
+        (1000 * 60 * 60 * 24)) + 1);
+    // Resolve assignee profile (team industry/position/level) once
+    const assigneeProfile = await resolveAssigneeProfile(task);
+    const assigneeIdForHistory = task?.teamAssignment?.assigneeId
+        ? String(task.teamAssignment.assigneeId)
+        : undefined;
+    const personalizationInsight = await getPersonalizationInsight(assigneeIdForHistory);
+    // ── estimatedDuration ──
+    if (task.estimatedDuration == null) {
+        // Step 1: Heuristic base (AI-era: công việc knowledge work bị AI rút ngắn rất nhiều).
+        let baseEstimate;
+        if (daysUntilDeadline <= 1)
+            baseEstimate = 45;
+        else if (daysUntilDeadline <= 3)
+            baseEstimate = 90;
+        else if (daysUntilDeadline <= 7)
+            baseEstimate = 180;
+        else if (daysUntilDeadline <= 14)
+            baseEstimate = 360;
+        else
+            baseEstimate = 540;
+        baseEstimateValue = baseEstimate;
+        const priority = String(task.priority ?? "medium").toLowerCase();
+        const priorityMultiplier = priority === "urgent" ? 1.3 : priority === "high" ? 1.2 : 1;
+        priorityMultiplierValue = priorityMultiplier;
+        const text = `${String(task.title ?? "")} ${String(task.description ?? "")}`.toLowerCase();
+        const keywordMultiplier = getKeywordMultiplier(text, assigneeProfile.industryCode);
+        keywordMultiplierValue = keywordMultiplier;
+        heuristicDuration = clamp(roundToNearest5(baseEstimate * priorityMultiplier * keywordMultiplier), 60, 1440);
+        // Step 2: Try AI estimation (có context vị trí/level người làm)
+        const aiResult = await aiEstimateDifficulty(task, userId, assigneeProfile);
+        let preLevelDuration;
+        if (aiResult) {
+            aiDifficulty = aiResult.difficulty;
+            aiMultiplier = aiResult.multiplier;
+            const aiAdjusted = heuristicDuration * aiResult.multiplier;
+            const hybridDuration = aiAdjusted * 0.6 + heuristicDuration * 0.4;
+            preLevelDuration = hybridDuration;
+            method = "hybrid";
+            confidence = aiResult.difficulty === "medium" ? 0.7 : 0.8;
+        }
+        else {
+            preLevelDuration = heuristicDuration;
+            method = "heuristic";
+            confidence = 0.5;
+        }
+        // Step 3: Apply level multiplier (intern chậm hơn, senior nhanh hơn)
+        const levelMultiplier = assigneeProfile.levelMultiplier || 1.0;
+        levelMultiplierValue = levelMultiplier;
+        const personalizationMultiplier = personalizationInsight?.multiplier ?? 1.0;
+        historyMultiplierValue = personalizationMultiplier;
+        // Step 4: AI-era multiplier (AI rút ngắn đáng kể knowledge-work)
+        const aiEraMultiplier = getAiEraMultiplier(assigneeProfile.industryCode);
+        const finalDuration = preLevelDuration *
+            levelMultiplier *
+            personalizationMultiplier *
+            aiEraMultiplier;
+        task.estimatedDuration = clamp(roundToNearest5(finalDuration), 30, 1440);
+        estimatedFields.push("estimatedDuration");
+        console.log(`[Estimation] Task "${task.title}": ${method} → ${task.estimatedDuration}min` +
+            (aiDifficulty ? ` (AI: ${aiDifficulty}, ×${aiMultiplier})` : "") +
+            (assigneeProfile.levelCode
+                ? ` (level: ${assigneeProfile.levelCode}, ×${levelMultiplier})`
+                : "") +
+            (personalizationInsight
+                ? ` (history: n=${personalizationInsight.sampleSize}, avg=${personalizationInsight.avgRatio}, ×${personalizationMultiplier.toFixed(2)})`
+                : "") +
+            ` | days=${daysUntilDeadline}, base=${heuristicDuration}min`);
+    }
+    // ── dailyTargetDuration ──
+    if (task.dailyTargetDuration == null) {
+        const estDuration = Math.max(30, Number(task.estimatedDuration ?? 120));
+        const isTeamTask = !!task.teamAssignment;
+        const hasHardDeadline = isValidDateValue(deadlineSource);
+        if (isTeamTask && hasHardDeadline) {
+            // Team task với deadline cứng → PHẢI hoàn thành trước deadline
+            // Dùng safety factor 80%: plan xong trong 80% số ngày, 20% buffer
+            const effectiveDays = Math.max(1, Math.floor(daysUntilDeadline * 0.8));
+            const rawTarget = estDuration / effectiveDays;
+            // Team tasks cho phép lên tới 480 phút/ngày (8h) vì phải hoàn thành bằng mọi giá
+            task.dailyTargetDuration = clamp(roundToNearest5(rawTarget), 60, 480);
+        }
+        else {
+            // Task cá nhân hoặc không có hard deadline → chia đều bình thường
+            task.dailyTargetDuration = clamp(roundToNearest5(estDuration / daysUntilDeadline), 30, 240);
+        }
+        estimatedFields.push("dailyTargetDuration");
+    }
+    // ── dailyTargetMin ──
+    if (task.dailyTargetMin == null) {
+        const isTeamTask = !!task.teamAssignment;
+        const minRatio = isTeamTask ? 0.7 : 0.5; // Team tasks: min = 70% of max
+        task.dailyTargetMin = Math.max(15, roundToNearest5(Number(task.dailyTargetDuration ?? 60) * minRatio));
+        estimatedFields.push("dailyTargetMin");
+    }
+    // ── Edge cases ──
+    // Nếu deadline đã quá hạn, đánh dấu confidence rất thấp
+    const now = new Date();
+    if (deadline < now) {
+        confidence = Math.min(confidence, 0.3);
+    }
+    // Nếu không có deadline gốc (dùng fallback 7 ngày), giảm confidence
+    if (!isValidDateValue(deadlineSource)) {
+        confidence = Math.min(confidence, 0.4);
+    }
+    return {
+        taskId,
+        method,
+        confidence: parseFloat(confidence.toFixed(2)),
+        estimatedFields,
+        heuristicDuration,
+        aiDifficulty,
+        aiMultiplier,
+        factors: {
+            baseEstimate: baseEstimateValue,
+            priorityMultiplier: priorityMultiplierValue,
+            keywordMultiplier: keywordMultiplierValue,
+            levelMultiplier: levelMultiplierValue,
+            historyMultiplier: historyMultiplierValue,
+        },
+        finalDuration: task.estimatedDuration,
+        finalDailyTarget: task.dailyTargetDuration,
+        finalDailyMin: task.dailyTargetMin,
+    };
 }

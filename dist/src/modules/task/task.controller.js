@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.aiBreakdownTask = void 0;
+exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.explainTaskEstimation = exports.aiBreakdownTask = void 0;
 const task_service_1 = require("./task.service");
 const ai_schedule_service_1 = require("../ai-schedule/ai-schedule.service");
 const search_helper_1 = __importDefault(require("../../common/utils/search-helper"));
@@ -60,10 +60,88 @@ const aiBreakdownTask = async (_req, res) => {
             });
             return;
         }
-        res.status(500).json({ message: "Lỗi hệ thống" });
+        if (message === "GEMINI_RATE_LIMIT") {
+            res.status(429).json({
+                message: "Gemini đã đạt giới hạn request trong ngày. Vui lòng thử lại sau hoặc dùng Groq.",
+            });
+            return;
+        }
+        if (message === "GEMINI_API_KEY_MISSING") {
+            res.status(500).json({ message: "Thiếu GEMINI_API_KEY trong env" });
+            return;
+        }
+        if (message === "GEMINI_UNAUTHORIZED") {
+            res.status(500).json({
+                message: "Gemini bị từ chối (API key không hợp lệ hoặc không có quyền).",
+            });
+            return;
+        }
+        if (message === "AI_PROVIDER_FAILED") {
+            res.status(503).json({
+                message: "Tất cả nhà cung cấp AI đang không khả dụng (rate limit/lỗi). Vui lòng thử lại sau.",
+            });
+            return;
+        }
+        // Catch raw Gemini/Groq SDK errors that might slip through
+        const rawMsg = String(err instanceof Error ? err.message : JSON.stringify(err)).toLowerCase();
+        if (rawMsg.includes("429") ||
+            rawMsg.includes("resource_exhausted") ||
+            rawMsg.includes("quota") ||
+            rawMsg.includes("rate limit") ||
+            rawMsg.includes("too many requests")) {
+            console.warn("[aiBreakdownTask] Detected raw rate-limit error:", rawMsg);
+            res.status(429).json({
+                message: "AI đang bị giới hạn request (rate limit). Vui lòng thử lại sau.",
+            });
+            return;
+        }
+        console.error("[aiBreakdownTask] Unhandled error:", err);
+        const detail = process.env.NODE_ENV !== "production" && err instanceof Error
+            ? err.message
+            : undefined;
+        res.status(500).json({
+            message: detail
+                ? `Lỗi AI Breakdown: ${detail}`
+                : "Lỗi hệ thống khi tạo AI Breakdown. Vui lòng thử lại.",
+        });
     }
 };
 exports.aiBreakdownTask = aiBreakdownTask;
+const explainTaskEstimation = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const taskId = String(_req.params.id ?? "").trim();
+        if (!taskId) {
+            res.status(400).json({ message: "Task id không hợp lệ" });
+            return;
+        }
+        const explanation = await task_service_1.taskService.explainEstimation(userId, taskId);
+        if (!explanation) {
+            res
+                .status(404)
+                .json({ message: "Không thể giải thích ước lượng cho task" });
+            return;
+        }
+        res.status(200).json({ explanation });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "TASK_FORBIDDEN") {
+            res.status(403).json({ message: "Không có quyền truy cập task này" });
+            return;
+        }
+        if (message === "USER_ID_INVALID") {
+            res.status(400).json({ message: "User ID không hợp lệ" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi hệ thống", error: message });
+    }
+};
+exports.explainTaskEstimation = explainTaskEstimation;
 const parseStatus = (value) => {
     if (value === undefined || value === null)
         return undefined;
@@ -221,6 +299,12 @@ const createTask = async (_req, res) => {
             res.status(400).json({ message: "Deadline không hợp lệ" });
             return;
         }
+        const startAtRaw = _req.body?.startAt !== undefined ? String(_req.body.startAt) : undefined;
+        const startAt = startAtRaw ? new Date(startAtRaw) : undefined;
+        if (startAtRaw && Number.isNaN(startAt?.getTime())) {
+            res.status(400).json({ message: "Ngày bắt đầu không hợp lệ" });
+            return;
+        }
         const reminderAtRaw = _req.body?.reminderAt !== undefined
             ? String(_req.body.reminderAt)
             : undefined;
@@ -293,6 +377,7 @@ const createTask = async (_req, res) => {
             description: _req.body?.description !== undefined
                 ? String(_req.body.description)
                 : undefined,
+            startAt,
             deadline,
             priority: parsePriority(_req.body?.priority),
             tags,
@@ -427,6 +512,12 @@ const updateTask = async (_req, res) => {
             res.status(400).json({ message: "Deadline không hợp lệ" });
             return;
         }
+        const startAtRaw = _req.body?.startAt !== undefined ? String(_req.body.startAt) : undefined;
+        const startAt = startAtRaw ? new Date(startAtRaw) : undefined;
+        if (startAtRaw && Number.isNaN(startAt?.getTime())) {
+            res.status(400).json({ message: "Ngày bắt đầu không hợp lệ" });
+            return;
+        }
         const reminderAtRaw = _req.body?.reminderAt !== undefined
             ? String(_req.body.reminderAt)
             : undefined;
@@ -547,6 +638,7 @@ const updateTask = async (_req, res) => {
                 : undefined,
             status,
             priority,
+            startAt,
             deadline,
             tags,
             reminderAt,
@@ -587,6 +679,14 @@ const updateTask = async (_req, res) => {
             res.status(403).json({ message: "Không có quyền cập nhật task này" });
             return;
         }
+        if (message.startsWith("TEAM_TASK_EDIT_RESTRICTED:")) {
+            const teamId = message.split(":")[1];
+            res.status(403).json({
+                message: "Đây là công việc trong team. Vui lòng vào trang Team để chỉnh sửa.",
+                teamId,
+            });
+            return;
+        }
         res.status(500).json({ message: "Lỗi hệ thống" });
     }
 };
@@ -605,6 +705,14 @@ const deleteTask = async (_req, res) => {
         const message = err instanceof Error ? err.message : "UNKNOWN";
         if (message === "TASK_FORBIDDEN") {
             res.status(403).json({ message: "Không có quyền xóa task này" });
+            return;
+        }
+        if (message.startsWith("TEAM_TASK_DELETE_RESTRICTED:")) {
+            const teamId = message.split(":")[1];
+            res.status(403).json({
+                message: "Không thể xóa tại đây. Vui lòng vào Team để xóa công việc nhóm.",
+                teamId,
+            });
             return;
         }
         res.status(500).json({ message: "Lỗi hệ thống" });
@@ -645,6 +753,14 @@ const updateTaskStatus = async (_req, res) => {
         const message = err instanceof Error ? err.message : "UNKNOWN";
         if (message === "TASK_FORBIDDEN") {
             res.status(403).json({ message: "Không có quyền cập nhật task này" });
+            return;
+        }
+        if (message.startsWith("TEAM_TASK_STATUS_RESTRICTED:")) {
+            const teamId = message.split(":")[1];
+            res.status(403).json({
+                message: "Đây là công việc trong team. Hãy cập nhật trạng thái trong trang Team.",
+                teamId,
+            });
             return;
         }
         if (message === "INVALID_ID") {

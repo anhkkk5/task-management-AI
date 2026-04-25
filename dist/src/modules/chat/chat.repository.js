@@ -1,8 +1,22 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.chatRepository = void 0;
+const mongoose_1 = require("mongoose");
 const chat_model_1 = require("./chat.model");
 const message_model_1 = require("./message.model");
+const USER_POPULATE = "_id name avatar email";
+const MESSAGE_POPULATE_REPLY = {
+    path: "replyTo",
+    select: "_id content type senderId attachments deletedAt",
+    populate: { path: "senderId", select: USER_POPULATE },
+};
+const normalizeLastMessageForRuntimeSchema = (lastMessage) => {
+    const lastMessagePath = chat_model_1.ConversationModel.schema.path("lastMessage");
+    if (lastMessagePath?.instance === "String") {
+        return lastMessage.content;
+    }
+    return lastMessage;
+};
 exports.chatRepository = {
     // Conversation operations
     createConversation: async (data) => {
@@ -17,11 +31,22 @@ exports.chatRepository = {
             members: { $in: [userId] },
         });
     },
+    findConversationByIdAndMemberPopulated: async (conversationId, userId) => {
+        return chat_model_1.ConversationModel.findOne({
+            _id: conversationId,
+            members: { $in: [userId] },
+        })
+            .populate("members", USER_POPULATE)
+            .populate("taskId", "_id title")
+            .populate("teamId", "_id name avatar");
+    },
     findDirectConversation: async (userId1, userId2) => {
         return chat_model_1.ConversationModel.findOne({
             type: "direct",
             members: { $all: [userId1, userId2], $size: 2 },
-        });
+        })
+            .populate("members", USER_POPULATE)
+            .populate("taskId", "_id title");
     },
     findTaskConversation: async (taskId) => {
         return chat_model_1.ConversationModel.findOne({
@@ -29,36 +54,71 @@ exports.chatRepository = {
             taskId,
         });
     },
+    findTeamConversation: async (teamId) => {
+        return chat_model_1.ConversationModel.findOne({
+            type: "group",
+            teamId,
+        })
+            .populate("members", USER_POPULATE)
+            .populate("teamId", "_id name avatar");
+    },
+    updateConversationMembers: async (conversationId, members) => {
+        return chat_model_1.ConversationModel.findByIdAndUpdate(conversationId, { members, updatedAt: new Date() }, { new: true });
+    },
     listConversationsForUser: async (userId, options = {}) => {
-        const { limit = 20, offset = 0 } = options;
-        return chat_model_1.ConversationModel.find({ members: { $in: [userId] } })
+        const { limit = 30, offset = 0, search } = options;
+        const query = {
+            members: { $in: [userId] },
+            type: { $in: ["direct", "group"] },
+        };
+        if (search && search.trim()) {
+            query.title = { $regex: search.trim(), $options: "i" };
+        }
+        return chat_model_1.ConversationModel.find(query)
             .sort({ updatedAt: -1 })
             .skip(offset)
             .limit(limit)
-            .populate("members", "_id fullName avatar")
-            .populate("taskId", "_id title");
+            .populate("members", USER_POPULATE)
+            .populate("taskId", "_id title")
+            .populate("teamId", "_id name avatar");
     },
     updateLastMessage: async (conversationId, lastMessage) => {
-        return chat_model_1.ConversationModel.findByIdAndUpdate(conversationId, { lastMessage, updatedAt: new Date() }, { new: true });
+        const normalizedLastMessage = normalizeLastMessageForRuntimeSchema(lastMessage);
+        return chat_model_1.ConversationModel.findByIdAndUpdate(conversationId, { lastMessage: normalizedLastMessage, updatedAt: new Date() }, { new: true });
     },
     // Message operations
     createMessage: async (data) => {
         return message_model_1.MessageModel.create(data);
     },
     findMessageById: async (messageId) => {
-        return message_model_1.MessageModel.findById(messageId).populate("senderId", "_id fullName avatar");
+        return message_model_1.MessageModel.findById(messageId)
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY);
+    },
+    findMessagePopulated: async (messageId) => {
+        return message_model_1.MessageModel.findById(messageId)
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY)
+            .lean();
     },
     listMessagesByConversation: async (conversationId, options = {}) => {
-        const { limit = 50, offset = 0 } = options;
-        return message_model_1.MessageModel.find({ conversationId })
+        const { limit = 30, before, after } = options;
+        const query = { conversationId };
+        if (before)
+            query._id = { $lt: new mongoose_1.Types.ObjectId(before) };
+        if (after)
+            query._id = { $gt: new mongoose_1.Types.ObjectId(after) };
+        return message_model_1.MessageModel.find(query)
             .sort({ createdAt: -1 })
-            .skip(offset)
             .limit(limit)
-            .populate("senderId", "_id fullName avatar")
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY)
             .lean();
     },
     markMessageAsSeen: async (messageId, userId) => {
-        return message_model_1.MessageModel.findByIdAndUpdate(messageId, { $addToSet: { seenBy: userId } }, { new: true });
+        return message_model_1.MessageModel.findByIdAndUpdate(messageId, { $addToSet: { seenBy: userId } }, { new: true })
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY);
     },
     markAllMessagesAsSeen: async (conversationId, userId) => {
         return message_model_1.MessageModel.updateMany({ conversationId, senderId: { $ne: userId }, seenBy: { $nin: [userId] } }, { $addToSet: { seenBy: userId } });
@@ -68,6 +128,57 @@ exports.chatRepository = {
             conversationId,
             senderId: { $ne: userId },
             seenBy: { $nin: [userId] },
+            deletedAt: { $exists: false },
         });
+    },
+    getUnreadCountBulk: async (conversationIds, userId) => {
+        if (!conversationIds.length)
+            return {};
+        const rows = await message_model_1.MessageModel.aggregate([
+            {
+                $match: {
+                    conversationId: {
+                        $in: conversationIds.map((id) => new mongoose_1.Types.ObjectId(String(id))),
+                    },
+                    senderId: { $ne: userId },
+                    seenBy: { $nin: [userId] },
+                    deletedAt: { $exists: false },
+                },
+            },
+            { $group: { _id: "$conversationId", count: { $sum: 1 } } },
+        ]);
+        const map = {};
+        for (const r of rows)
+            map[String(r._id)] = r.count;
+        return map;
+    },
+    // Reactions
+    addReaction: async (messageId, userId, emoji) => {
+        // Remove existing reaction of same user+emoji (idempotent) then push fresh one
+        await message_model_1.MessageModel.findByIdAndUpdate(messageId, {
+            $pull: { reactions: { userId, emoji } },
+        });
+        return message_model_1.MessageModel.findByIdAndUpdate(messageId, { $push: { reactions: { userId, emoji, createdAt: new Date() } } }, { new: true })
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY);
+    },
+    removeReaction: async (messageId, userId, emoji) => {
+        return message_model_1.MessageModel.findByIdAndUpdate(messageId, { $pull: { reactions: { userId, emoji } } }, { new: true })
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY);
+    },
+    editMessage: async (messageId, content) => {
+        return message_model_1.MessageModel.findByIdAndUpdate(messageId, { content, editedAt: new Date() }, { new: true })
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY);
+    },
+    softDeleteMessage: async (messageId) => {
+        return message_model_1.MessageModel.findByIdAndUpdate(messageId, {
+            content: "",
+            attachments: [],
+            deletedAt: new Date(),
+        }, { new: true })
+            .populate("senderId", USER_POPULATE)
+            .populate(MESSAGE_POPULATE_REPLY);
     },
 };

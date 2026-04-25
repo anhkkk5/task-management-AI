@@ -36,6 +36,8 @@ exports.reminderCronService = {
             await scanAndNotifyScheduledTasks();
             await scanAndNotifyAIScheduleTasks();
             await scanAndNotifyMissedTasks();
+            await resurrectSnoozedTick();
+            await digestTick();
         });
         isRunning = true;
         console.log("Reminder cron job started (runs every minute)");
@@ -89,6 +91,7 @@ async function scanAndNotifyDeadlines() {
                 data: {
                     taskId,
                     deadline: task.deadline,
+                    taskPriority: task.priority,
                     userEmail: user.email,
                 },
                 channels: {
@@ -101,6 +104,17 @@ async function scanAndNotifyDeadlines() {
     }
     catch (err) {
         console.error("[ReminderCron] Error scanning deadlines:", err);
+    }
+}
+async function digestTick() {
+    try {
+        const n = await notification_service_1.notificationService.sendDigestForDueUsers();
+        if (n > 0) {
+            console.log(`[ReminderCron] Sent ${n} digest email batch(es)`);
+        }
+    }
+    catch (err) {
+        console.error("[ReminderCron] Error sending digest:", err);
     }
 }
 // Scan tasks có scheduledTime sắp tới và gửi notification nhắc nhở
@@ -178,6 +192,7 @@ async function scanAndNotifyScheduledTasks() {
                 data: {
                     taskId,
                     scheduledTime: task.scheduledTime,
+                    taskPriority: task.priority,
                     userEmail: userInfo.email,
                 },
                 channels: {
@@ -388,6 +403,20 @@ const triggerDeadlineScan = async () => {
     await scanAndNotifyScheduledTasks();
     await scanAndNotifyAIScheduleTasks();
     await scanAndNotifyMissedTasks();
+    await resurrectSnoozedTick();
+    await digestTick();
     console.log("[ReminderCron] Manual trigger completed");
 };
 exports.triggerDeadlineScan = triggerDeadlineScan;
+// Tick for resurrecting snoozed notifications whose snoozedUntil has elapsed
+async function resurrectSnoozedTick() {
+    try {
+        const n = await notification_service_1.notificationService.resurrectSnoozed();
+        if (n > 0) {
+            console.log(`[ReminderCron] Resurrected ${n} snoozed notification(s)`);
+        }
+    }
+    catch (err) {
+        console.error("[ReminderCron] Error resurrecting snoozed:", err);
+    }
+}

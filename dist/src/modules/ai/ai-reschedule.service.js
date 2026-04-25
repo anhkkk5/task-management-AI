@@ -77,10 +77,11 @@ Format JSON:
   "advice": "Lời khuyên để tránh bỏ lỡ lần sau (1-2 câu)"
 }`;
         const result = await ai_provider_1.aiProvider.chat({
+            responseFormat: "json_object",
             messages: [
                 {
                     role: "system",
-                    content: "You are a productivity assistant. Reply in Vietnamese. Always output valid JSON when asked.",
+                    content: "You are a productivity assistant. Reply in Vietnamese. You MUST respond with valid JSON only, no markdown, no explanation.",
                 },
                 {
                     role: "user",

@@ -81,15 +81,43 @@ exports.userService = {
         if (!user) {
             throw new Error("USER_NOT_FOUND");
         }
-        const raw = user.settings?.notifications?.reminderMinutes;
+        const notif = (user.settings?.notifications || {});
+        const raw = notif.reminderMinutes;
         const n = typeof raw === "number" ? raw : Number(raw);
-        const reminderMinutes = Number.isFinite(n) ? Math.floor(n) : 5;
+        const reminderMinutesRaw = Number.isFinite(n) ? Math.floor(n) : 5;
+        const reminderMinutes = reminderMinutesRaw < 0
+            ? 0
+            : reminderMinutesRaw > 24 * 60
+                ? 24 * 60
+                : reminderMinutesRaw;
+        const qh = notif.quietHours || {};
+        const quietHours = {
+            enabled: Boolean(qh.enabled),
+            start: typeof qh.start === "string" ? qh.start : "22:00",
+            end: typeof qh.end === "string" ? qh.end : "07:00",
+        };
+        const groupingEnabled = notif.groupingEnabled !== false; // default true
+        const digestRaw = notif.digest || {};
+        const digestFrequency = digestRaw.frequency === "weekly" ? "weekly" : "daily";
+        const digest = {
+            enabled: Boolean(digestRaw.enabled),
+            frequency: digestFrequency,
+            time: typeof digestRaw.time === "string" &&
+                /^\d{1,2}:\d{2}$/.test(digestRaw.time)
+                ? digestRaw.time
+                : "08:00",
+            includeTypes: Array.isArray(digestRaw.includeTypes)
+                ? digestRaw.includeTypes.map((x) => String(x))
+                : undefined,
+            lastSentAt: typeof digestRaw.lastSentAt === "string"
+                ? digestRaw.lastSentAt
+                : undefined,
+        };
         return {
-            reminderMinutes: reminderMinutes < 0
-                ? 0
-                : reminderMinutes > 24 * 60
-                    ? 24 * 60
-                    : reminderMinutes,
+            reminderMinutes,
+            quietHours,
+            groupingEnabled,
+            digest,
         };
     },
     updateNotificationSettings: async (userId, dto) => {
@@ -97,21 +125,69 @@ exports.userService = {
         if (!user) {
             throw new Error("USER_NOT_FOUND");
         }
-        const raw = dto.reminderMinutes;
-        const n = typeof raw === "number" ? raw : Number(raw);
-        if (!Number.isFinite(n)) {
-            throw new Error("INVALID_REMINDER_MINUTES");
-        }
-        const reminderMinutes = Math.min(24 * 60, Math.max(0, Math.floor(n)));
         const existingSettings = (user.settings || {});
         const existingNotifications = existingSettings.notifications ||
             {};
+        // Build next notification settings (only merge provided fields)
+        const nextNotif = { ...existingNotifications };
+        if (dto.reminderMinutes !== undefined) {
+            const raw = dto.reminderMinutes;
+            const n = typeof raw === "number" ? raw : Number(raw);
+            if (!Number.isFinite(n)) {
+                throw new Error("INVALID_REMINDER_MINUTES");
+            }
+            nextNotif.reminderMinutes = Math.min(24 * 60, Math.max(0, Math.floor(n)));
+        }
+        if (dto.quietHours !== undefined) {
+            const q = dto.quietHours;
+            if (!q ||
+                typeof q !== "object" ||
+                typeof q.start !== "string" ||
+                typeof q.end !== "string" ||
+                !/^\d{1,2}:\d{2}$/.test(q.start) ||
+                !/^\d{1,2}:\d{2}$/.test(q.end)) {
+                throw new Error("INVALID_QUIET_HOURS");
+            }
+            nextNotif.quietHours = {
+                enabled: Boolean(q.enabled),
+                start: q.start,
+                end: q.end,
+            };
+        }
+        if (dto.groupingEnabled !== undefined) {
+            nextNotif.groupingEnabled = Boolean(dto.groupingEnabled);
+        }
+        if (dto.digest !== undefined) {
+            const d = dto.digest;
+            if (!d || typeof d !== "object") {
+                throw new Error("INVALID_DIGEST_SETTINGS");
+            }
+            const enabled = Boolean(d.enabled);
+            const frequency = d.frequency === "weekly" ? "weekly" : "daily";
+            const time = typeof d.time === "string" ? d.time : "08:00";
+            if (!/^\d{1,2}:\d{2}$/.test(time)) {
+                throw new Error("INVALID_DIGEST_SETTINGS");
+            }
+            let includeTypes;
+            if (d.includeTypes !== undefined) {
+                if (!Array.isArray(d.includeTypes)) {
+                    throw new Error("INVALID_DIGEST_SETTINGS");
+                }
+                includeTypes = d.includeTypes.map((x) => String(x));
+            }
+            nextNotif.digest = {
+                ...(typeof nextNotif.digest === "object"
+                    ? nextNotif.digest
+                    : {}),
+                enabled,
+                frequency,
+                time,
+                ...(includeTypes ? { includeTypes } : {}),
+            };
+        }
         const nextSettings = {
             ...existingSettings,
-            notifications: {
-                ...existingNotifications,
-                reminderMinutes,
-            },
+            notifications: nextNotif,
         };
         const updated = await user_repository_1.userRepository.updateProfile(userId, {
             settings: nextSettings,
@@ -120,7 +196,8 @@ exports.userService = {
             throw new Error("USER_NOT_FOUND");
         }
         await invalidateUserProfileCache(userId);
-        return { reminderMinutes };
+        // Return merged settings
+        return exports.userService.getNotificationSettings(userId);
     },
     updateProfile: async (userId, dto) => {
         const name = dto.name?.trim();

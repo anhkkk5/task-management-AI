@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../../middleware/auth.middleware");
+const free_time_controller_1 = require("./free-time.controller");
+const freeTimeRouter = (0, express_1.Router)();
+freeTimeRouter.get("/me", auth_middleware_1.authMiddleware, free_time_controller_1.getMyAvailability);
+freeTimeRouter.put("/weekly", auth_middleware_1.authMiddleware, free_time_controller_1.updateWeeklyPattern);
+freeTimeRouter.patch("/weekly", auth_middleware_1.authMiddleware, free_time_controller_1.updateWeeklyPattern);
+freeTimeRouter.put("/custom-dates/:date", auth_middleware_1.authMiddleware, free_time_controller_1.setCustomDate);
+freeTimeRouter.patch("/custom-dates/:date", auth_middleware_1.authMiddleware, free_time_controller_1.setCustomDate);
+freeTimeRouter.delete("/custom-dates/:date", auth_middleware_1.authMiddleware, free_time_controller_1.deleteCustomDate);
+exports.default = freeTimeRouter;

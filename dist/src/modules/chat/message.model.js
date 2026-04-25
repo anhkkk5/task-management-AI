@@ -35,6 +35,36 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MessageModel = void 0;
 const mongoose_1 = __importStar(require("mongoose"));
+const attachmentSchema = new mongoose_1.Schema({
+    kind: { type: String, enum: ["image", "video", "file"], required: true },
+    url: { type: String, required: true },
+    publicId: String,
+    name: String,
+    mimeType: String,
+    size: Number,
+    width: Number,
+    height: Number,
+    duration: Number,
+    thumbnailUrl: String,
+}, { _id: false });
+const reactionSchema = new mongoose_1.Schema({
+    userId: { type: mongoose_1.Schema.Types.ObjectId, ref: "User", required: true },
+    emoji: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+const callMetaSchema = new mongoose_1.Schema({
+    callId: { type: String, required: true },
+    kind: { type: String, enum: ["audio", "video"], required: true },
+    status: {
+        type: String,
+        enum: ["started", "ended", "missed", "rejected"],
+        required: true,
+    },
+    startedAt: Date,
+    endedAt: Date,
+    durationSec: Number,
+    participants: [{ type: mongoose_1.Schema.Types.ObjectId, ref: "User" }],
+}, { _id: false });
 const messageSchema = new mongoose_1.Schema({
     conversationId: {
         type: mongoose_1.Schema.Types.ObjectId,
@@ -48,13 +78,22 @@ const messageSchema = new mongoose_1.Schema({
     },
     content: {
         type: String,
-        required: true,
+        default: "",
     },
     type: {
         type: String,
-        enum: ["text", "ai", "system"],
+        enum: ["text", "ai", "system", "image", "video", "file", "call"],
         default: "text",
     },
+    attachments: { type: [attachmentSchema], default: [] },
+    reactions: { type: [reactionSchema], default: [] },
+    replyTo: {
+        type: mongoose_1.Schema.Types.ObjectId,
+        ref: "Message",
+    },
+    editedAt: Date,
+    deletedAt: Date,
+    call: callMetaSchema,
     seenBy: [
         {
             type: mongoose_1.Schema.Types.ObjectId,

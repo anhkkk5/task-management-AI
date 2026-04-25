@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.renameConversation = exports.deleteConversation = exports.smartReschedule = exports.schedulePlan = exports.prioritySuggest = exports.taskBreakdown = exports.getConversationById = exports.listConversations = exports.chatStream = exports.chat = void 0;
+exports.renameConversation = exports.deleteConversation = exports.smartReschedule = exports.schedulePlan = exports.prioritySuggest = exports.taskBreakdown = exports.getOrCreateConversationByParent = exports.getConversationById = exports.listConversations = exports.chatStream = exports.chat = void 0;
 const ai_service_1 = require("./ai.service");
 const ai_streaming_service_1 = require("./ai.streaming.service");
 const getUserId = (req) => {
@@ -79,6 +79,10 @@ const chat = async (req, res) => {
         const conversationId = conversationIdRaw !== undefined && conversationIdRaw !== null
             ? String(conversationIdRaw).trim()
             : undefined;
+        const parentTaskIdRaw = body?.parentTaskId;
+        const parentTaskId = parentTaskIdRaw !== undefined && parentTaskIdRaw !== null
+            ? String(parentTaskIdRaw).trim()
+            : undefined;
         const systemPromptRaw = body?.systemPrompt;
         const systemPrompt = systemPromptRaw !== undefined && systemPromptRaw !== null
             ? String(systemPromptRaw).trim()
@@ -122,11 +126,19 @@ const chat = async (req, res) => {
                 description: subtaskContextRaw.description
                     ? String(subtaskContextRaw.description)
                     : undefined,
+                subtaskKey: subtaskContextRaw.subtaskKey
+                    ? String(subtaskContextRaw.subtaskKey)
+                    : undefined,
+                subtaskIndex: subtaskContextRaw.subtaskIndex !== undefined &&
+                    subtaskContextRaw.subtaskIndex !== null
+                    ? Number(subtaskContextRaw.subtaskIndex)
+                    : undefined,
             }
             : undefined;
         const result = await ai_service_1.aiService.chat(userId, {
             message,
             conversationId,
+            parentTaskId,
             systemPrompt,
             subtaskContext,
             fewShotMessages,
@@ -401,6 +413,41 @@ const getConversationById = async (req, res) => {
     }
 };
 exports.getConversationById = getConversationById;
+const getOrCreateConversationByParent = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const parentTaskId = String(req.params?.parentTaskId ?? "").trim();
+        if (!parentTaskId) {
+            res.status(400).json({ message: "parentTaskId không hợp lệ" });
+            return;
+        }
+        const titleRaw = req.query?.title;
+        const title = titleRaw !== undefined && titleRaw !== null
+            ? String(titleRaw).trim()
+            : undefined;
+        const { aiChatService } = await Promise.resolve().then(() => __importStar(require("./ai-chat.service")));
+        const result = await aiChatService.getOrCreateConversationByParentTask(userId, { parentTaskId, title });
+        res.status(200).json(result);
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "PARENT_TASK_ID_INVALID") {
+            res.status(400).json({ message: "parentTaskId không hợp lệ" });
+            return;
+        }
+        if (message === "USER_ID_INVALID") {
+            res.status(400).json({ message: "UserId không hợp lệ" });
+            return;
+        }
+        console.error("[AI_GET_OR_CREATE_BY_PARENT_ERROR]", err);
+        res.status(500).json({ message: "Lỗi hệ thống" });
+    }
+};
+exports.getOrCreateConversationByParent = getOrCreateConversationByParent;
 const taskBreakdown = async (req, res) => {
     try {
         const userId = getUserId(req);
@@ -526,6 +573,8 @@ const schedulePlan = async (req, res) => {
         }
         const taskIds = req.body?.taskIds;
         const startDateRaw = req.body?.startDate;
+        const schedulingStrategy = req.body?.schedulingStrategy;
+        const distributionPattern = req.body?.distributionPattern;
         if (!Array.isArray(taskIds) || taskIds.length === 0) {
             res.status(400).json({ message: "Danh sách taskIds không hợp lệ" });
             return;
@@ -541,7 +590,21 @@ const schedulePlan = async (req, res) => {
             res.status(400).json({ message: "Ngày bắt đầu không hợp lệ" });
             return;
         }
-        const result = await ai_service_1.aiService.schedulePlan(userId, { taskIds, startDate });
+        // Validate strategy and distribution
+        const validStrategies = ["sequential", "parallel", "balanced"];
+        const validDistributions = ["front-load", "even", "adaptive"];
+        const strategy = schedulingStrategy && validStrategies.includes(schedulingStrategy)
+            ? schedulingStrategy
+            : undefined;
+        const distribution = distributionPattern && validDistributions.includes(distributionPattern)
+            ? distributionPattern
+            : undefined;
+        const result = await ai_service_1.aiService.schedulePlan(userId, {
+            taskIds,
+            startDate,
+            schedulingStrategy: strategy,
+            distributionPattern: distribution,
+        });
         res.status(200).json(result);
     }
     catch (err) {

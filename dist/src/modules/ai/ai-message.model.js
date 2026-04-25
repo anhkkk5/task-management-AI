@@ -50,6 +50,16 @@ const aiMessageSchema = new mongoose_1.Schema({
     },
     content: { type: String, required: true },
     tokens: { type: Number },
+    meta: {
+        kind: {
+            type: String,
+            enum: ["chat", "transition", "summary"],
+            default: "chat",
+        },
+        subtaskKey: String,
+        subtaskTitle: String,
+        subtaskIndex: Number,
+    },
 }, { timestamps: true });
 aiMessageSchema.index({ conversationId: 1, createdAt: 1 });
 exports.AiMessage = mongoose_1.default.models.AiMessage ||

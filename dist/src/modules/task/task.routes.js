@@ -9,6 +9,7 @@ taskRouter.get("/", auth_middleware_1.authMiddleware, task_controller_1.listTask
 taskRouter.get("/overdue", auth_middleware_1.authMiddleware, task_controller_1.listOverdueTasks);
 taskRouter.get("/:id", auth_middleware_1.authMiddleware, task_controller_1.getTaskById);
 taskRouter.post("/:id/ai-breakdown", auth_middleware_1.authMiddleware, task_controller_1.aiBreakdownTask);
+taskRouter.get("/:id/explain-estimation", auth_middleware_1.authMiddleware, task_controller_1.explainTaskEstimation);
 taskRouter.patch("/:id", auth_middleware_1.authMiddleware, task_controller_1.updateTask);
 // Quick status update endpoint (must be before /:id/... routes)
 taskRouter.patch("/:id/status", auth_middleware_1.authMiddleware, task_controller_1.updateTaskStatus);
