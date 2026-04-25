@@ -24,10 +24,18 @@ const colors_routes_1 = __importDefault(require("./modules/colors/colors.routes"
 const team_routes_1 = __importDefault(require("./modules/team/team.routes"));
 const catalog_routes_1 = __importDefault(require("./modules/catalog/catalog.routes"));
 const passport_2 = require("./config/passport");
+const getAllowedCorsOrigins = () => {
+    const envOrigins = [process.env.CLIENT_URL, process.env.FRONTEND_URL]
+        .filter((value) => Boolean(value))
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean);
+    return Array.from(new Set([...envOrigins, "http://localhost:5173", "http://127.0.0.1:5173"]));
+};
 const createApp = () => {
     const app = (0, express_1.default)();
     app.use((0, cors_1.default)({
-        origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+        origin: getAllowedCorsOrigins(),
         credentials: true,
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allowedHeaders: ["Content-Type", "Authorization"],
