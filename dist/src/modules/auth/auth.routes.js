@@ -42,6 +42,7 @@ authRouter.get("/google", passport_1.default.authenticate("google", {
     prompt: "consent",
 }));
 authRouter.get("/google/callback", passport_1.default.authenticate("google", { session: false }), (req, res) => {
+    const isProduction = process.env.NODE_ENV === "production";
     const user = req.user;
     console.log("[Google Callback] User from passport:", user?.email, "Token exists:", !!user?.token);
     if (user?.token) {
@@ -51,8 +52,8 @@ authRouter.get("/google/callback", passport_1.default.authenticate("google", { s
         // Set httpOnly cookie for access token
         res.cookie("token", user.token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "lax",
+            secure: isProduction,
+            sameSite: isProduction ? "none" : "lax",
             maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
             path: "/",
         });
@@ -60,8 +61,8 @@ authRouter.get("/google/callback", passport_1.default.authenticate("google", { s
         if (user.refreshToken) {
             res.cookie("refreshToken", user.refreshToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "lax",
+                secure: isProduction,
+                sameSite: isProduction ? "none" : "lax",
                 maxAge: 7 * 24 * 60 * 60 * 1000,
                 path: "/auth",
             });

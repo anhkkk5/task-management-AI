@@ -2,10 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.clearRefreshCookie = exports.setRefreshCookie = void 0;
 const setRefreshCookie = (res, refreshToken, input) => {
+    const isProduction = input.nodeEnv === "production";
     res.cookie("refreshToken", refreshToken, {
         httpOnly: true,
-        secure: input.nodeEnv === "production",
-        sameSite: "strict",
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
         path: "/auth",
         maxAge: input.maxAgeMs,
     });

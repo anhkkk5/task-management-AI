@@ -85,6 +85,11 @@ authRouter.get(
     );
 
     if (user?.token) {
+      const frontendBaseUrl =
+        process.env.FRONTEND_URL || "http://localhost:5173";
+      const redirectUrl = new URL("/auth/google/callback", frontendBaseUrl);
+      redirectUrl.hash = `token=${encodeURIComponent(user.token)}`;
+
       // Clear old cookies first to prevent mixing sessions
       res.clearCookie("token", { path: "/" });
       res.clearCookie("refreshToken", { path: "/auth" });
@@ -111,12 +116,10 @@ authRouter.get(
 
       console.log(
         "[Google Callback] Cookies set, redirecting to:",
-        `${process.env.FRONTEND_URL || "http://localhost:5173"}/auth/google/callback`,
+        redirectUrl.toString(),
       );
-      // Redirect without token in URL
-      res.redirect(
-        `${process.env.FRONTEND_URL || "http://localhost:5173"}/auth/google/callback`,
-      );
+      // Redirect with token in hash for mobile fallback (not sent to server logs)
+      res.redirect(redirectUrl.toString());
     } else {
       console.log(
         "[Google Callback] No token, redirecting to login with error",
