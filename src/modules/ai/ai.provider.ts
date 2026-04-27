@@ -2,11 +2,32 @@ import OpenAI from "openai";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export type AiChatMessage = {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
+  tool_call_id?: string;
+  tool_calls?: {
+    id: string;
+    type: "function";
+    function: { name: string; arguments: string };
+  }[];
 };
 
 export type AiChatPurpose = "chat" | "breakdown" | "schedule" | "generic";
+
+export type AiToolDefinition = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+};
+
+export type AiToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+};
 
 export type AiChatInput = {
   messages: AiChatMessage[];
@@ -22,6 +43,10 @@ export type AiChatInput = {
   purpose?: AiChatPurpose;
   /** Force JSON output (supported by Groq/OpenAI-compatible APIs) */
   responseFormat?: "json_object" | "text";
+  /** Optional tool definitions exposed to the LLM (Groq/OpenAI tool-calling). */
+  tools?: AiToolDefinition[];
+  /** Tool choice hint for tool-enabled requests. */
+  toolChoice?: "auto" | "required" | "none";
 };
 
 export type AiChatResult = {
@@ -32,6 +57,7 @@ export type AiChatResult = {
     completionTokens?: number;
     totalTokens?: number;
   };
+  toolCalls?: AiToolCall[];
 };
 
 export type AiChatStreamChunk = {
@@ -62,6 +88,7 @@ export type AiChatStreamEvent =
 export type AiProvider = {
   chat: (input: AiChatInput) => Promise<AiChatResult>;
   chatStream: (input: AiChatInput) => AsyncGenerator<AiChatStreamEvent>;
+  chatWithTools: (input: AiChatInput) => Promise<AiChatResult>;
 };
 
 const groqChat = async (input: AiChatInput): Promise<AiChatResult> => {
@@ -82,7 +109,7 @@ const groqChat = async (input: AiChatInput): Promise<AiChatResult> => {
   try {
     const response = await client.chat.completions.create({
       model,
-      messages: input.messages,
+      messages: input.messages as any,
       temperature: input.temperature,
       max_tokens: input.maxTokens,
       ...(input.responseFormat === "json_object"
@@ -129,7 +156,7 @@ const groqChatStream = async function* (
   try {
     const stream = await client.chat.completions.create({
       model,
-      messages: input.messages,
+      messages: input.messages as any,
       temperature: input.temperature,
       max_tokens: input.maxTokens,
       stream: true,
@@ -335,6 +362,145 @@ const isRetriableError = (err: any): boolean => {
   return status === 429 || status === 500 || status === 502 || status === 503;
 };
 
+const groqChatWithTools = async (input: AiChatInput): Promise<AiChatResult> => {
+  const apiKey = process.env.GROQ_API_KEY || "";
+  if (!apiKey) throw new Error("GROQ_API_KEY_MISSING");
+
+  const client = new OpenAI({
+    apiKey,
+    baseURL: process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1",
+  });
+
+  // gpt-oss-20b on Groq emits proper OpenAI tool_calls reliably; Llama models
+  // frequently regress to `<function=NAME(...)></function>` text. Prefer OSS.
+  const model = (
+    input.model ||
+    process.env.GROQ_TOOL_MODEL ||
+    "openai/gpt-oss-20b"
+  ).trim();
+
+  try {
+    const response = await client.chat.completions.create({
+      model,
+      messages: input.messages as any,
+      temperature: input.temperature,
+      max_tokens: input.maxTokens,
+      ...(input.tools && input.tools.length
+        ? { tools: input.tools as any, tool_choice: input.toolChoice ?? "auto" }
+        : {}),
+    });
+
+    const choice = response.choices?.[0]?.message;
+    const content = choice?.content ?? "";
+    const rawToolCalls = (choice as any)?.tool_calls as
+      | {
+          id: string;
+          type: string;
+          function: { name: string; arguments: string };
+        }[]
+      | undefined;
+
+    const toolCalls: AiToolCall[] | undefined =
+      rawToolCalls && rawToolCalls.length
+        ? rawToolCalls
+            .filter((c) => c.type === "function" && c.function?.name)
+            .map((c) => ({
+              id: c.id,
+              name: c.function.name,
+              arguments: c.function.arguments || "{}",
+            }))
+        : undefined;
+
+    return {
+      content,
+      model: response.model,
+      usage: response.usage
+        ? {
+            promptTokens: (response.usage as any).prompt_tokens,
+            completionTokens: (response.usage as any).completion_tokens,
+            totalTokens: (response.usage as any).total_tokens,
+          }
+        : undefined,
+      toolCalls,
+    };
+  } catch (err: any) {
+    if (err?.status === 429) throw new Error("GROQ_RATE_LIMIT");
+    if (err?.status === 401 || err?.status === 403)
+      throw new Error("GROQ_UNAUTHORIZED");
+
+    // Groq sometimes rejects malformed tool calls (Llama models occasionally
+    // emit `<function=NAME({...})</function>` text instead of structured
+    // tool_calls). Salvage the call from `failed_generation` so the upstream
+    // loop can still execute the tool.
+    const code = err?.code || err?.error?.code;
+    const failedGen: string | undefined =
+      err?.error?.failed_generation ||
+      err?.response?.data?.error?.failed_generation;
+    if (code === "tool_use_failed" && typeof failedGen === "string") {
+      const salvaged = salvageMalformedToolCall(failedGen);
+      if (salvaged) {
+        return {
+          content: "",
+          model,
+          toolCalls: [salvaged],
+        };
+      }
+    }
+
+    throw err;
+  }
+};
+
+/**
+ * Parse Llama "tool_use_failed" generations into an AiToolCall. Groq returns
+ * different malformations:
+ *   - `<function=NAME({"a":1})</function>`     (with parens)
+ *   - `<function=NAME {"a":1}</function>`      (no parens, just whitespace)
+ *   - `<function=NAME({"a":1})>`               (no close tag)
+ *   - `<|python_tag|>NAME.call({"a":1})`       (rare)
+ * The JSON arguments are always usable; only the wrapper differs.
+ */
+const salvageMalformedToolCall = (raw: string): AiToolCall | null => {
+  // 1) `<function=NAME` then `(...)` or whitespace, then JSON, optionally
+  //    closed by `)` and `</function>` or `>`.
+  const re =
+    /<function\s*=\s*([a-zA-Z_][\w]*)\s*\(?\s*(\{[\s\S]*\})\s*\)?\s*<\/?function\s*>?/;
+  const m = raw.match(re);
+  if (m) {
+    const name = m[1];
+    const args = m[2];
+    try {
+      JSON.parse(args);
+    } catch {
+      return null;
+    }
+    return {
+      id: `call_salvaged_${Date.now()}`,
+      name,
+      arguments: args,
+    };
+  }
+
+  // 2) Fallback: any "NAME({...})" pattern in the raw text.
+  const fallback = raw.match(/([a-zA-Z_][\w]*)\s*\(\s*(\{[\s\S]*\})\s*\)/);
+  if (fallback) {
+    const name = fallback[1];
+    const args = fallback[2];
+    try {
+      JSON.parse(args);
+    } catch {
+      return null;
+    }
+    return {
+      id: `call_salvaged_${Date.now()}`,
+      name,
+      arguments: args,
+    };
+  }
+
+  return null;
+};
+
 export const aiProvider: AiProvider = {
   chat: async (input) => {
     const order = resolveProviderOrder(input.purpose);
@@ -357,5 +523,9 @@ export const aiProvider: AiProvider = {
   chatStream: async function* (input) {
     if (!hasGroqKey()) throw new Error("GROQ_API_KEY_MISSING");
     yield* groqChatStream(input);
+  },
+  chatWithTools: async (input) => {
+    if (!hasGroqKey()) throw new Error("GROQ_API_KEY_MISSING");
+    return groqChatWithTools(input);
   },
 };

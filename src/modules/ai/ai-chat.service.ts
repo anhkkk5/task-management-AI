@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { aiProvider, AiChatStreamEvent } from "./ai.provider";
+import { aiProvider, AiChatStreamEvent, AiChatMessage } from "./ai.provider";
 import { aiRepository } from "./ai.repository";
 import {
   PublicAiConversation,
@@ -20,6 +20,9 @@ import {
   toMemoryHints,
 } from "./ai-context";
 import { userMemoryService } from "./user-memory.service";
+import { AI_TOOL_DEFINITIONS, executeToolCall } from "./ai-tools";
+import { aiCalendarContextService } from "./ai-calendar-context.service";
+import type { ProposalDraft } from "./ai-conversation.model";
 
 type SubtaskContextInput = {
   subtaskTitle?: string;
@@ -45,6 +48,67 @@ type ChatInput = {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+};
+
+const normalizeForIntent = (text: string): string =>
+  text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const isCommitConfirmationMessage = (text: string): boolean => {
+  const normalized = normalizeForIntent(text).trim();
+  if (!normalized) return false;
+
+  // Phrase-level matches (cover natural Vietnamese / English confirmations).
+  const phrasePatterns: RegExp[] = [
+    /\b(ok|oke|okela|okie|okay)\b/,
+    /\b(yes|yep|yeah|sure|go|do it|proceed|let'?s go)\b/,
+    /\b(dong y|nhat tri|duoc|duoc roi|chuan|chinh xac)\b/,
+    /\b(chot|chot luon|chot di|chot nhe)\b/,
+    /\bxac nhan\b/,
+    /\bconfirm(ed)?\b/,
+    // "tạo (lịch) ngay/luôn/đi", "tạo cho tôi", "tạo task"
+    /\btao( ra)?( lich| task| cong viec)?( ngay| luon| di| nhe| cho toi)?\b/,
+    // "lên lịch (ngay/luôn/đi/giúp/cho)"
+    /\blen lich( ngay| luon| di| nhe| giup| cho toi| bay gio)?\b/,
+    // "lịch luôn", "lịch đi"
+    /\blich (luon|di|ngay|bay gio)\b/,
+    // "lam di", "bat dau (di|ngay|luon)"
+    /\b(lam di|bat dau( di| ngay| luon)?)\b/,
+    // "tien hanh", "trien khai"
+    /\b(tien hanh|trien khai)\b/,
+  ];
+  return phrasePatterns.some((re) => re.test(normalized));
+};
+
+const FALLBACK_ASSISTANT_REPLY =
+  "Mình chưa tạo được phản hồi cho lượt này. Bạn thử nhắn lại chi tiết hơn nhé.";
+
+const ensureAssistantContent = (raw: string | undefined | null): string => {
+  const trimmed = (raw ?? "").trim();
+  return trimmed.length > 0 ? raw! : FALLBACK_ASSISTANT_REPLY;
+};
+
+const CALENDAR_ONBOARDING_GUIDE =
+  "Hướng dẫn nhanh tạo lịch với AI:\n" +
+  "1) Nói mục tiêu + thời lượng + khung giờ (vd: tập gym 120p, 3 buổi/tuần, chiều-tối).\n" +
+  "2) Mình đề xuất lịch rảnh phù hợp, bạn xem và yêu cầu chỉnh nếu cần.\n" +
+  "3) Bạn nhắn 'chốt'/'đồng ý' để tạo lịch thật, rồi kiểm tra ở tab Lịch.";
+
+const buildCommitProposalReply = (payload: any): string => {
+  if (payload?.ok) {
+    const count = Number(payload?.createdCount || 0);
+    return count > 0
+      ? `✅ Đã lên lịch thành công ${count} buổi. Vui lòng kiểm tra tab Lịch/Calendar.`
+      : "Đã chốt lịch, nhưng chưa có công việc hợp lệ để tạo.";
+  }
+
+  if (typeof payload?.message === "string" && payload.message.trim()) {
+    return payload.message;
+  }
+
+  return "Mình chưa thể chốt lịch. Bạn thử yêu cầu đề xuất lại rồi chốt giúp mình.";
 };
 
 /**
@@ -119,10 +183,8 @@ export const aiChatService = {
     }
     const userObjectId = new Types.ObjectId(userId);
 
-    const {
-      id: conversationObjectId,
-      lastSubtaskKey,
-    } = await resolveConversation(userObjectId, input);
+    const { id: conversationObjectId, lastSubtaskKey } =
+      await resolveConversation(userObjectId, input);
 
     // ── Load conversation history (for context + discussed subtasks)
     const historyMessages = await aiRepository.listMessagesByConversation({
@@ -218,12 +280,20 @@ export const aiChatService = {
 
     // Chat-style history sent to LLM: skip 'system' meta (transition) entries,
     // keep only user/assistant turns so provider APIs accept them.
+    // Cap to the last 12 turns and trim very long messages so the prompt
+    // stays under Groq's 8k TPM cap on the OSS tier.
+    const HISTORY_TURN_CAP = 12;
+    const PER_MSG_CHAR_CAP = 1500;
     const historyForAI = historyMessages
       .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-HISTORY_TURN_CAP)
       .map((m) => ({
         role:
           m.role === "assistant" ? ("assistant" as const) : ("user" as const),
-        content: m.content,
+        content:
+          m.content.length > PER_MSG_CHAR_CAP
+            ? `${m.content.slice(0, PER_MSG_CHAR_CAP)}…`
+            : m.content,
       }));
 
     const fewShot =
@@ -234,25 +304,345 @@ export const aiChatService = {
           }))
         : [];
 
-    const result = await aiProvider.chat({
-      purpose: "chat",
-      messages: [
-        { role: "system", content: systemContent },
-        ...fewShot,
-        ...historyForAI,
-        { role: "user", content: input.message },
-      ],
-      model: input.model,
-      temperature:
-        intent === "EXERCISE" || intent === "CHECK_ANSWER" ? 0.2 : 0.4,
-      maxTokens: input.maxTokens,
-    });
+    // Note: We intentionally do NOT auto-inject a 14-day calendar snapshot
+    // here. The model has the `get_free_busy_report` tool and will fetch the
+    // exact range it needs. Pre-injecting bloats the prompt by ~3-4k tokens
+    // every turn and easily blows past Groq's 8k TPM cap on the OSS tier.
+    const baseSystemContent = systemContent;
 
+    const baseMessages: AiChatMessage[] = [
+      { role: "system", content: baseSystemContent },
+      ...fewShot.map(
+        (m) => ({ role: m.role, content: m.content }) as AiChatMessage,
+      ),
+      ...historyForAI.map(
+        (m) => ({ role: m.role, content: m.content }) as AiChatMessage,
+      ),
+      { role: "user", content: input.message },
+    ];
+
+    let result: Awaited<ReturnType<typeof aiProvider.chat>>;
+
+    if (intent === "CALENDAR_QUERY") {
+      // Tool-calling loop: let the model invoke get_free_busy_report (and any
+      // future tools) before producing the final user-facing text.
+      const toolMessages: AiChatMessage[] = [...baseMessages];
+      const MAX_TOOL_ITERATIONS = 2;
+      let iter = 0;
+      let toolResult: Awaited<ReturnType<typeof aiProvider.chatWithTools>>;
+      let proposalDraft: ProposalDraft | undefined = undefined;
+      let didCommitProposalCall = false;
+      let commitProposalReply: string | undefined = undefined;
+      let forcedCommitReply: string | undefined = undefined;
+      const shouldShowCalendarOnboarding = historyForAI.length === 0;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        toolResult = await aiProvider.chatWithTools({
+          purpose: "chat",
+          messages: toolMessages,
+          model: input.model,
+          temperature: 0.2,
+          maxTokens: input.maxTokens,
+          tools: AI_TOOL_DEFINITIONS,
+          toolChoice: iter === 0 ? "auto" : "auto",
+        });
+
+        if (!toolResult.toolCalls || toolResult.toolCalls.length === 0) {
+          break;
+        }
+
+        // Append assistant tool_calls turn
+        toolMessages.push({
+          role: "assistant",
+          content: toolResult.content || "",
+          tool_calls: toolResult.toolCalls.map((c) => ({
+            id: c.id,
+            type: "function" as const,
+            function: { name: c.name, arguments: c.arguments },
+          })),
+        });
+
+        // Execute each tool call sequentially and append tool replies
+        for (const call of toolResult.toolCalls) {
+          if (call.name === "commit_proposal") {
+            didCommitProposalCall = true;
+          }
+
+          const executed = await executeToolCall(call, {
+            userId,
+            conversationId: String(conversationObjectId),
+          });
+          toolMessages.push({
+            role: "tool",
+            tool_call_id: executed.id,
+            content: executed.content,
+          });
+
+          // Extract proposal data from propose_schedule tool
+          if (call.name === "propose_schedule" && !proposalDraft) {
+            try {
+              const toolOutput = JSON.parse(executed.content);
+              if (toolOutput.proposals && Array.isArray(toolOutput.proposals)) {
+                const args = JSON.parse(call.arguments || "{}");
+                proposalDraft = {
+                  activityName: String(args.activityName || ""),
+                  durationMin: Number(args.durationMin || 0),
+                  sessionsPerWeek: Number(args.sessionsPerWeek || 0),
+                  windowStart: String(args.windowStart || ""),
+                  windowEnd: String(args.windowEnd || ""),
+                  daysAllowed: Array.isArray(args.daysAllowed)
+                    ? args.daysAllowed.map((x: unknown) => String(x))
+                    : undefined,
+                  minGapDays: Number(args.minGapDays ?? 0),
+                  sessions: toolOutput.proposals.map((p: any) => ({
+                    date: String(p.date || ""),
+                    start: String(p.start || ""),
+                    end: String(p.end || ""),
+                    focus: undefined,
+                  })),
+                  createdAt: new Date(),
+                };
+              }
+            } catch {
+              // Ignore parse errors
+            }
+          }
+
+          // Persist tool exchange for debugging/UI rendering later
+          await aiRepository.createMessage({
+            conversationId: conversationObjectId,
+            userId: userObjectId,
+            role: "system",
+            content: `[TOOL ${executed.name}] ${executed.content.slice(0, 4000)}`,
+            meta: {
+              kind: "tool_call",
+              toolName: executed.name,
+              toolCallId: executed.id,
+            } as any,
+          });
+
+          if (call.name === "commit_proposal") {
+            try {
+              const payload = JSON.parse(executed.content);
+              commitProposalReply = buildCommitProposalReply(payload);
+            } catch {
+              commitProposalReply =
+                "Mình vừa chốt lịch nhưng không đọc được kết quả tool. Bạn mở tab Lịch để kiểm tra giúp mình.";
+            }
+          }
+        }
+
+        iter += 1;
+        if (iter >= MAX_TOOL_ITERATIONS) break;
+      }
+
+      if (
+        !didCommitProposalCall &&
+        isCommitConfirmationMessage(input.message)
+      ) {
+        const runForcedCommit = async (): Promise<{
+          payload: any;
+          executed: { id: string; name: string; content: string };
+        }> => {
+          const forcedCallId = `force_commit_${Date.now()}`;
+          const executed = await executeToolCall(
+            {
+              id: forcedCallId,
+              name: "commit_proposal",
+              arguments: "{}",
+            },
+            {
+              userId,
+              conversationId: String(conversationObjectId),
+            },
+          );
+
+          await aiRepository.createMessage({
+            conversationId: conversationObjectId,
+            userId: userObjectId,
+            role: "system",
+            content: `[TOOL ${executed.name}] ${executed.content.slice(0, 4000)}`,
+            meta: {
+              kind: "tool_call",
+              toolName: executed.name,
+              toolCallId: executed.id,
+            } as any,
+          });
+
+          let payload: any = null;
+          try {
+            payload = JSON.parse(executed.content);
+          } catch {
+            // ignore parse error
+          }
+          return { payload, executed };
+        };
+
+        const first = await runForcedCommit();
+
+        // If draft missing, the model summarised intake but never invoked
+        // propose_schedule. Nudge it ONE more time to call propose_schedule
+        // with the collected fields, then auto-commit.
+        if (first.payload?.error === "NO_DRAFT") {
+          toolMessages.push({
+            role: "system",
+            content:
+              "User vừa xác nhận muốn lên lịch nhưng chưa có proposalDraft. " +
+              "Hãy gọi propose_schedule NGAY với các field đã thu thập từ hội thoại " +
+              "(activityName, durationMin, sessionsPerWeek, windowStart, windowEnd, from, to). " +
+              "Nếu thiếu field, dùng giả định hợp lý (default: 7 ngày tới, +07:00). " +
+              "TUYỆT ĐỐI không trả lời text, phải gọi tool.",
+          });
+
+          try {
+            const retry = await aiProvider.chatWithTools({
+              purpose: "chat",
+              messages: toolMessages,
+              model: input.model,
+              temperature: 0.2,
+              maxTokens: input.maxTokens,
+              tools: AI_TOOL_DEFINITIONS,
+              toolChoice: "auto",
+            });
+
+            if (retry.toolCalls && retry.toolCalls.length > 0) {
+              toolMessages.push({
+                role: "assistant",
+                content: retry.content || "",
+                tool_calls: retry.toolCalls.map((c) => ({
+                  id: c.id,
+                  type: "function" as const,
+                  function: { name: c.name, arguments: c.arguments },
+                })),
+              });
+
+              for (const call of retry.toolCalls) {
+                const executed = await executeToolCall(call, {
+                  userId,
+                  conversationId: String(conversationObjectId),
+                });
+                toolMessages.push({
+                  role: "tool",
+                  tool_call_id: executed.id,
+                  content: executed.content,
+                });
+
+                if (call.name === "propose_schedule" && !proposalDraft) {
+                  try {
+                    const toolOutput = JSON.parse(executed.content);
+                    if (
+                      toolOutput.proposals &&
+                      Array.isArray(toolOutput.proposals)
+                    ) {
+                      const args = JSON.parse(call.arguments || "{}");
+                      proposalDraft = {
+                        activityName: String(args.activityName || ""),
+                        durationMin: Number(args.durationMin || 0),
+                        sessionsPerWeek: Number(args.sessionsPerWeek || 0),
+                        windowStart: String(args.windowStart || ""),
+                        windowEnd: String(args.windowEnd || ""),
+                        daysAllowed: Array.isArray(args.daysAllowed)
+                          ? args.daysAllowed.map((x: unknown) => String(x))
+                          : undefined,
+                        minGapDays: Number(args.minGapDays ?? 0),
+                        sessions: toolOutput.proposals.map((p: any) => ({
+                          date: String(p.date || ""),
+                          start: String(p.start || ""),
+                          end: String(p.end || ""),
+                          focus: undefined,
+                        })),
+                        createdAt: new Date(),
+                      };
+
+                      // Persist draft so commit can read it
+                      await aiRepository.updateConversationContext({
+                        conversationId: conversationObjectId,
+                        userId: userObjectId,
+                        context: {
+                          domain,
+                          lastSubtaskKey: currentSubtaskKey,
+                          proposalDraft,
+                        },
+                      });
+                    }
+                  } catch {
+                    // ignore
+                  }
+                }
+
+                await aiRepository.createMessage({
+                  conversationId: conversationObjectId,
+                  userId: userObjectId,
+                  role: "system",
+                  content: `[TOOL ${executed.name}] ${executed.content.slice(0, 4000)}`,
+                  meta: {
+                    kind: "tool_call",
+                    toolName: executed.name,
+                    toolCallId: executed.id,
+                  } as any,
+                });
+              }
+
+              if (proposalDraft) {
+                const second = await runForcedCommit();
+                forcedCommitReply = buildCommitProposalReply(second.payload);
+              } else {
+                forcedCommitReply =
+                  "Mình cần thêm thông tin để đề xuất lịch (hoạt động, thời lượng/buổi, số buổi/tuần, khung giờ). Bạn cho mình biết các thông tin đó nhé.";
+              }
+            } else {
+              forcedCommitReply =
+                "Mình cần thêm thông tin để đề xuất lịch (hoạt động, thời lượng/buổi, số buổi/tuần, khung giờ). Bạn cho mình biết các thông tin đó nhé.";
+            }
+          } catch {
+            forcedCommitReply = buildCommitProposalReply(first.payload);
+          }
+        } else {
+          forcedCommitReply = buildCommitProposalReply(first.payload);
+        }
+      }
+
+      // Save proposal draft to conversation context
+      if (proposalDraft) {
+        await aiRepository.updateConversationContext({
+          conversationId: conversationObjectId,
+          userId: userObjectId,
+          context: {
+            domain,
+            lastSubtaskKey: currentSubtaskKey,
+            proposalDraft,
+          },
+        });
+      }
+
+      result = {
+        content:
+          commitProposalReply ??
+          forcedCommitReply ??
+          (shouldShowCalendarOnboarding
+            ? `${CALENDAR_ONBOARDING_GUIDE}\n\n${toolResult.content}`
+            : toolResult.content),
+        model: toolResult.model,
+        usage: toolResult.usage,
+      };
+    } else {
+      result = await aiProvider.chat({
+        purpose: "chat",
+        messages: baseMessages,
+        model: input.model,
+        temperature:
+          intent === "EXERCISE" || intent === "CHECK_ANSWER" ? 0.2 : 0.4,
+        maxTokens: input.maxTokens,
+      });
+    }
+
+    const finalAssistantContent = ensureAssistantContent(result.content);
     await aiRepository.createMessage({
       conversationId: conversationObjectId,
       userId: userObjectId,
       role: "assistant",
-      content: result.content,
+      content: finalAssistantContent,
       tokens: result.usage?.totalTokens,
       meta: currentSubtaskKey
         ? {
@@ -281,7 +671,7 @@ export const aiChatService = {
     void userMemoryService.ingestUtterance(userObjectId, input.message);
 
     return {
-      reply: result.content,
+      reply: finalAssistantContent,
       conversationId: String(conversationObjectId),
       model: result.model,
       usage: result.usage,
@@ -437,7 +827,9 @@ export const aiChatService = {
 
     return {
       conversation: toPublicConversation(conversation),
-      messages: messages.map(toPublicMessage),
+      messages: messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map(toPublicMessage),
     };
   },
 
@@ -470,7 +862,9 @@ export const aiChatService = {
 
     return {
       conversation: toPublicConversation(doc),
-      messages: messages.map(toPublicMessage),
+      messages: messages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map(toPublicMessage),
       created,
     };
   },

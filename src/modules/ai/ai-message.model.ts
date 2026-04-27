@@ -3,10 +3,20 @@ import mongoose, { Schema, Types } from "mongoose";
 export type AiMessageRole = "user" | "assistant" | "system";
 
 export type AiMessageMeta = {
-  kind?: "chat" | "transition" | "summary";
+  kind?:
+    | "chat"
+    | "transition"
+    | "summary"
+    | "tool_call"
+    | "free_busy_table"
+    | "proposal"
+    | "tasks_created";
   subtaskKey?: string;
   subtaskTitle?: string;
   subtaskIndex?: number;
+  toolName?: string;
+  toolCallId?: string;
+  payload?: unknown;
 };
 
 export type AiMessageAttrs = {
@@ -50,12 +60,23 @@ const aiMessageSchema = new Schema<AiMessageDoc>(
     meta: {
       kind: {
         type: String,
-        enum: ["chat", "transition", "summary"],
+        enum: [
+          "chat",
+          "transition",
+          "summary",
+          "tool_call",
+          "free_busy_table",
+          "proposal",
+          "tasks_created",
+        ],
         default: "chat",
       },
       subtaskKey: String,
       subtaskTitle: String,
       subtaskIndex: Number,
+      toolName: String,
+      toolCallId: String,
+      payload: Schema.Types.Mixed,
     },
   },
   { timestamps: true },

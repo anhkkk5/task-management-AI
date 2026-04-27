@@ -65,6 +65,11 @@ export const aiRepository = {
     lastSubtaskKey?: string;
     domain?: string;
     title?: string;
+    context?: {
+      domain?: string;
+      lastSubtaskKey?: string;
+      proposalDraft?: any;
+    };
   }): Promise<void> => {
     const set: Record<string, unknown> = {};
     if (params.lastSubtaskKey !== undefined) {
@@ -75,6 +80,9 @@ export const aiRepository = {
     }
     if (params.title !== undefined) {
       set.title = params.title;
+    }
+    if (params.context !== undefined) {
+      set.context = params.context;
     }
     if (Object.keys(set).length === 0) return;
     await AiConversation.updateOne(
