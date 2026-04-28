@@ -1,5 +1,11 @@
-import { aiCalendarContextService, FreeBusyDay } from "./ai-calendar-context.service";
-import { toLocalDateStr, createDateWithTime } from "../scheduler/scheduler.utils";
+import {
+  aiCalendarContextService,
+  FreeBusyDay,
+} from "./ai-calendar-context.service";
+import {
+  toLocalDateStr,
+  createDateWithTime,
+} from "../scheduler/scheduler.utils";
 
 export type ScheduleProposal = {
   date: string;
@@ -7,6 +13,13 @@ export type ScheduleProposal = {
   end: string;
   reason: string;
   score: number;
+};
+
+type ProposeScheduleResult = {
+  proposals: ScheduleProposal[];
+  days: FreeBusyDay[];
+  unmetSessions?: number;
+  note?: string;
 };
 
 export type ScheduleInput = {
@@ -17,6 +30,7 @@ export type ScheduleInput = {
   windowEnd?: string;
   daysAllowed?: string[];
   minGapDays?: number;
+  blockedSlots?: { date: string; start: string; end: string }[];
   fromISO: string;
   toISO: string;
 };
@@ -58,7 +72,15 @@ const eachDay = (from: Date, to: Date): Date[] => {
 
 const isDayAllowed = (date: Date, allowed?: string[]): boolean => {
   if (!allowed || allowed.length === 0) return true;
-  const weekday = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"][date.getDay()];
+  const weekday = [
+    "sunday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+  ][date.getDay()];
   return allowed.includes(weekday);
 };
 
@@ -125,7 +147,7 @@ export const activitySchedulerService = {
   proposeSchedule: async (
     userId: string,
     input: ScheduleInput,
-  ): Promise<{ proposals: ScheduleProposal[]; days: FreeBusyDay[] }> => {
+  ): Promise<ProposeScheduleResult> => {
     const {
       activityName,
       durationMin,
@@ -134,12 +156,14 @@ export const activitySchedulerService = {
       windowEnd = "23:59",
       daysAllowed,
       minGapDays = 0,
+      blockedSlots,
       fromISO,
       toISO,
     } = input;
 
     if (durationMin <= 0) throw new Error("DURATION_MUST_BE_POSITIVE");
-    if (sessionsPerWeek <= 0) throw new Error("SESSIONS_PER_WEEK_MUST_BE_POSITIVE");
+    if (sessionsPerWeek <= 0)
+      throw new Error("SESSIONS_PER_WEEK_MUST_BE_POSITIVE");
 
     const from = new Date(fromISO);
     const to = new Date(toISO);
@@ -149,7 +173,11 @@ export const activitySchedulerService = {
 
     const windowStartMin = parseHHMM(windowStart);
     const windowEndMin = parseHHMM(windowEnd);
-    if (windowStartMin < 0 || windowEndMin < 0 || windowEndMin <= windowStartMin) {
+    if (
+      windowStartMin < 0 ||
+      windowEndMin < 0 ||
+      windowEndMin <= windowStartMin
+    ) {
       throw new Error("INVALID_WINDOW");
     }
 
@@ -160,6 +188,7 @@ export const activitySchedulerService = {
     );
 
     const days = snapshot.days;
+    const now = new Date();
     const allCandidates: {
       date: string;
       start: number;
@@ -181,6 +210,11 @@ export const activitySchedulerService = {
         start: parseHHMM(b.start),
         end: parseHHMM(b.end),
       }));
+      const blockedMin = (blockedSlots || [])
+        .filter((b) => b.date === dateStr)
+        .map((b) => ({ start: parseHHMM(b.start), end: parseHHMM(b.end) }))
+        .filter((b) => b.start >= 0 && b.end > b.start);
+      const occupiedMin = [...busyMin, ...blockedMin];
 
       for (const free of dayData.freeSlots) {
         const freeMin = {
@@ -188,20 +222,36 @@ export const activitySchedulerService = {
           end: parseHHMM(free.end),
         };
 
-        const windowed = intersectIntervals(freeMin, windowStartMin, windowEndMin);
+        const windowed = intersectIntervals(
+          freeMin,
+          windowStartMin,
+          windowEndMin,
+        );
         const remaining = windowed.flatMap((w) =>
-          subtractBusyFromFree(w, busyMin),
+          subtractBusyFromFree(w, occupiedMin),
         );
 
         for (const r of remaining) {
           if (r.end - r.start >= durationMin) {
             const start = r.start;
             const end = start + durationMin;
+            const candidateStart = createDateWithTime(
+              dateStr,
+              Math.floor(start / 60),
+              start % 60,
+            );
+            if (candidateStart.getTime() <= now.getTime()) {
+              continue;
+            }
             allCandidates.push({
               date: dateStr,
               start,
               end,
-              score: scoreCandidate({ start, end }, windowStartMin, windowEndMin),
+              score: scoreCandidate(
+                { start, end },
+                windowStartMin,
+                windowEndMin,
+              ),
               reason: `Free ${minutesToHHMM(start)}-${minutesToHHMM(end)}, no conflicts`,
             });
           }
@@ -209,13 +259,23 @@ export const activitySchedulerService = {
       }
     }
 
-    allCandidates.sort((a, b) => b.score - a.score);
+    // Prefer higher score first, then earlier date/time for deterministic picks.
+    allCandidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.start - b.start;
+    });
 
     const selected: ScheduleProposal[] = [];
     const selectedDates: string[] = [];
+    const selectedDateSet = new Set<string>();
 
     for (const cand of allCandidates) {
       if (selected.length >= sessionsPerWeek) break;
+
+      // Calendar weekly scheduling should not place multiple sessions on the
+      // same day unless explicitly designed otherwise.
+      if (selectedDateSet.has(cand.date)) continue;
 
       if (minGapDays > 0 && selectedDates.length > 0) {
         const candDate = new Date(cand.date);
@@ -241,20 +301,30 @@ export const activitySchedulerService = {
         score: cand.score,
       });
       selectedDates.push(cand.date);
+      selectedDateSet.add(cand.date);
     }
 
-    return { proposals: selected, days };
+    const unmetSessions = Math.max(0, sessionsPerWeek - selected.length);
+    const note =
+      unmetSessions > 0
+        ? `Không đủ slot trống để xếp đủ ${sessionsPerWeek} buổi trong khung giờ ${windowStart}-${windowEnd}. Thiếu ${unmetSessions} buổi.`
+        : undefined;
+
+    return { proposals: selected, days, unmetSessions, note };
   },
 
   breakdownActivity: async (input: {
     activityName: string;
     totalSessions: number;
     durationMinPerSession: number;
-  }): Promise<{ sessions: { index: number; focus: string; drills: string[] }[] }> => {
+  }): Promise<{
+    sessions: { index: number; focus: string; drills: string[] }[];
+  }> => {
     const { activityName, totalSessions, durationMinPerSession } = input;
 
     if (totalSessions <= 0) throw new Error("TOTAL_SESSIONS_MUST_BE_POSITIVE");
-    if (durationMinPerSession <= 0) throw new Error("DURATION_MUST_BE_POSITIVE");
+    if (durationMinPerSession <= 0)
+      throw new Error("DURATION_MUST_BE_POSITIVE");
 
     const sessions: { index: number; focus: string; drills: string[] }[] = [];
 

@@ -53,12 +53,23 @@ const aiMessageSchema = new mongoose_1.Schema({
     meta: {
         kind: {
             type: String,
-            enum: ["chat", "transition", "summary"],
+            enum: [
+                "chat",
+                "transition",
+                "summary",
+                "tool_call",
+                "free_busy_table",
+                "proposal",
+                "tasks_created",
+            ],
             default: "chat",
         },
         subtaskKey: String,
         subtaskTitle: String,
         subtaskIndex: Number,
+        toolName: String,
+        toolCallId: String,
+        payload: mongoose_1.Schema.Types.Mixed,
     },
 }, { timestamps: true });
 aiMessageSchema.index({ conversationId: 1, createdAt: 1 });

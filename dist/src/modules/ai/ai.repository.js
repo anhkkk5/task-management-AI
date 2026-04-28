@@ -46,6 +46,9 @@ exports.aiRepository = {
         if (params.title !== undefined) {
             set.title = params.title;
         }
+        if (params.context !== undefined) {
+            set.context = params.context;
+        }
         if (Object.keys(set).length === 0)
             return;
         await ai_conversation_model_1.AiConversation.updateOne({ _id: params.conversationId, userId: params.userId }, { $set: set }).exec();

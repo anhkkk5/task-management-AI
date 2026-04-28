@@ -41,6 +41,50 @@ const aiConversationSchema = new mongoose_1.Schema({
     parentTaskId: { type: mongoose_1.Schema.Types.ObjectId, ref: "Task", index: true },
     domain: { type: String, trim: true, lowercase: true },
     lastSubtaskKey: { type: String, trim: true },
+    context: {
+        type: {
+            domain: { type: String, trim: true, lowercase: true },
+            lastSubtaskKey: { type: String, trim: true },
+            proposalDraft: {
+                activityName: { type: String, trim: true },
+                durationMin: { type: Number, min: 1 },
+                sessionsPerWeek: { type: Number, min: 1 },
+                windowStart: { type: String, trim: true },
+                windowEnd: { type: String, trim: true },
+                daysAllowed: { type: [String] },
+                minGapDays: { type: Number, min: 0 },
+                items: [
+                    {
+                        activityName: { type: String, trim: true },
+                        durationMin: { type: Number, min: 1 },
+                        sessionsPerWeek: { type: Number, min: 1 },
+                        windowStart: { type: String, trim: true },
+                        windowEnd: { type: String, trim: true },
+                        daysAllowed: { type: [String] },
+                        minGapDays: { type: Number, min: 0 },
+                        sessions: [
+                            {
+                                date: { type: String, trim: true },
+                                start: { type: String, trim: true },
+                                end: { type: String, trim: true },
+                                focus: { type: String, trim: true },
+                            },
+                        ],
+                    },
+                ],
+                sessions: [
+                    {
+                        date: { type: String, trim: true },
+                        start: { type: String, trim: true },
+                        end: { type: String, trim: true },
+                        focus: { type: String, trim: true },
+                    },
+                ],
+                createdAt: { type: Date },
+            },
+        },
+        _id: false,
+    },
 }, { timestamps: true });
 aiConversationSchema.index({ userId: 1, updatedAt: -1 });
 // 1 user - 1 parentTask - 1 conversation

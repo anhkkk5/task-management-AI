@@ -103,7 +103,22 @@ TaskMind AI là ứng dụng quản lý công việc thông minh tích hợp AI.
 =====================`;
 function detectIntent(message) {
     const text = message.toLowerCase();
-    // System help - check first
+    // Calendar/free-busy queries — check before SYSTEM_HELP because words like
+    // "lịch" can collide with "tối ưu lịch".
+    // Covers:
+    //  (1) free/busy questions ("khi nào rảnh", "tuần này bận")
+    //  (2) generic scheduling requests ("sắp xếp ... 3 buổi/tuần", "xếp lịch học")
+    //  (3) questions about personal calendar ("xem lịch cá nhân")
+    //  (4) frequency-based requests with sessions per week ("3 buổi/tuần", "5 buổi mỗi tuần")
+    const freeBusyRe = /(thời gian rảnh|thời gian bận|lịch rảnh|lịch bận|lịch trống|lịch cá nhân|khi nào rảnh|khi nào bận|tuần này.*(bận|rảnh|lịch)|hôm nay.*(bận|rảnh|lịch)|ngày mai.*(bận|rảnh|lịch)|free time|busy time|my schedule|free slots|busy slots|xem.*lịch|đọc.*lịch)/;
+    const scheduleRequestRe = /(sắp xếp|xếp lịch|lên lịch|lập lịch|tạo lịch|đặt lịch|schedule|plan)/;
+    const frequencyRe = /(\d+\s*(buổi|lần|session|lượt)\s*(\/|mỗi|trong|tuần|ngày|week|day))|(buổi\s*\/\s*tuần)|(lần\s*\/\s*tuần)/;
+    if (freeBusyRe.test(text) ||
+        scheduleRequestRe.test(text) ||
+        frequencyRe.test(text)) {
+        return "CALENDAR_QUERY";
+    }
+    // System help - check next
     if (/\b(hướng dẫn|cách dùng|cách sử dụng|làm thế nào để|how to use|trang web|hệ thống|taskmind|tính năng|chức năng|ai breakdown|tối ưu lịch|lên lịch|công việc ai|trợ giúp|hỗ trợ sử dụng)\b/.test(text)) {
         return "SYSTEM_HELP";
     }
@@ -237,6 +252,42 @@ Structure your response as:
 ⚠️ **Common mistakes:** (in ${targetLangName})
 
 💡 **Tips:** (in ${userLangName})`,
+        CALENDAR_QUERY: `MODE: CALENDAR ASSISTANT. Tools:
+- get_free_busy_report(from,to): busy/free intervals
+- propose_schedule(activityName|activities[],durationMin,sessionsPerWeek,windowStart,windowEnd,daysAllowed?,minGapDays?,from,to): valid non-overlapping slots
+- commit_proposal(): TẠO THẬT tasks từ draft. Chỉ gọi khi user xác nhận.
+
+RULES (KHÔNG được vi phạm):
+1. KHÔNG bao giờ tự bịa giờ trong text. Mọi thời gian cụ thể PHẢI từ tool.
+2. KHÔNG đề xuất slot trùng busy hoặc ngoài window user nêu.
+3. Mọi request schedule/revision ("đổi giờ","muộn quá","sớm hơn","tuần khác") → call propose_schedule lại với constraint mới.
+4. User confirm ("ok","chốt","tạo đi","đồng ý","yes") → call commit_proposal NGAY. Cấm viết "Tôi sẽ tạo..." mà không gọi tool.
+5. Nếu thiếu thông tin để lên lịch, PHẢI hỏi bù từng bước (mỗi lần 1-2 câu hỏi ngắn), KHÔNG propose_schedule khi dữ liệu còn thiếu.
+6. KHÔNG được tự ý đề xuất đổi giờ/di chuyển lịch task hiện có, trừ khi user yêu cầu rõ "đổi" hoặc "dời" lịch cũ.
+7. CHỈ đề xuất slot trong tương lai. Cấm đề xuất ngày/giờ đã qua (bao gồm hôm nay nhưng giờ bắt đầu đã qua).
+
+INTAKE FIELDS (cần đủ trước khi propose_schedule):
+- activityName hoặc activities[] (nhiều hoạt động trong 1 lệnh, mỗi activity có sessionsPerWeek riêng)
+- durationMin (phút/buổi)
+- sessionsPerWeek (buổi/tuần)
+- window (windowStart/windowEnd hoặc mô tả "sáng/chiều/tối")
+- date range (from/to, nếu user chưa nói thì mặc định 7 ngày tới và nói rõ giả định)
+
+WORKFLOW:
+- Hỏi free/busy → get_free_busy_report → tóm tắt bullets theo ngày.
+- Yêu cầu sắp xếp nhưng thiếu field → hỏi bù step-by-step, chưa gọi propose_schedule.
+- Nếu user yêu cầu nhiều hoạt động trong 1 câu, gộp thành activities[] và call propose_schedule 1 lần cho tất cả.
+- Đủ field → propose_schedule với window đúng, chỉ slot tương lai → list slot + hỏi "Bạn có muốn lên lịch luôn không?".
+- propose_schedule trả thiếu slot (không đủ sessionsPerWeek) → chỉ đề xuất các ngày/giờ còn trống, gợi ý nới constraint (đổi giờ, mở rộng date range, giảm số buổi), KHÔNG đụng lịch cũ.
+- commit_proposal trả NO_DRAFT → bảo user đề xuất lại trước.
+
+VIETNAMESE TIME WINDOWS:
+sáng=06:00-11:30 / trưa=11:00-13:30 / chiều=13:00-18:00 / tối=18:00-22:00
+trước cơm tối → end ≤18:30 / sau cơm tối → start ≥19:30
+
+DATE PARSING: "tuần này"=Mon-Sun tuần hiện tại; "ngày mai"=tomorrow; mặc định=7 ngày tới. Dùng ISO 8601 +07:00.
+
+OUTPUT (in ${userLangName}): bullets ngắn gọn, **bold** giờ, kết bằng "Gợi ý tiếp theo:" 2-3 dòng.`,
         CHAT: `
 =====================
 CURRENT MODE: ASSISTANT

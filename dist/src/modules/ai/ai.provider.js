@@ -233,6 +233,127 @@ const isRetriableError = (err) => {
     const status = err?.status ?? err?.response?.status;
     return status === 429 || status === 500 || status === 502 || status === 503;
 };
+const groqChatWithTools = async (input) => {
+    const apiKey = process.env.GROQ_API_KEY || "";
+    if (!apiKey)
+        throw new Error("GROQ_API_KEY_MISSING");
+    const client = new openai_1.default({
+        apiKey,
+        baseURL: process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1",
+    });
+    // gpt-oss-20b on Groq emits proper OpenAI tool_calls reliably; Llama models
+    // frequently regress to `<function=NAME(...)></function>` text. Prefer OSS.
+    const model = (input.model ||
+        process.env.GROQ_TOOL_MODEL ||
+        "openai/gpt-oss-20b").trim();
+    try {
+        const response = await client.chat.completions.create({
+            model,
+            messages: input.messages,
+            temperature: input.temperature,
+            max_tokens: input.maxTokens,
+            ...(input.tools && input.tools.length
+                ? { tools: input.tools, tool_choice: input.toolChoice ?? "auto" }
+                : {}),
+        });
+        const choice = response.choices?.[0]?.message;
+        const content = choice?.content ?? "";
+        const rawToolCalls = choice?.tool_calls;
+        const toolCalls = rawToolCalls && rawToolCalls.length
+            ? rawToolCalls
+                .filter((c) => c.type === "function" && c.function?.name)
+                .map((c) => ({
+                id: c.id,
+                name: c.function.name,
+                arguments: c.function.arguments || "{}",
+            }))
+            : undefined;
+        return {
+            content,
+            model: response.model,
+            usage: response.usage
+                ? {
+                    promptTokens: response.usage.prompt_tokens,
+                    completionTokens: response.usage.completion_tokens,
+                    totalTokens: response.usage.total_tokens,
+                }
+                : undefined,
+            toolCalls,
+        };
+    }
+    catch (err) {
+        if (err?.status === 429)
+            throw new Error("GROQ_RATE_LIMIT");
+        if (err?.status === 401 || err?.status === 403)
+            throw new Error("GROQ_UNAUTHORIZED");
+        // Groq sometimes rejects malformed tool calls (Llama models occasionally
+        // emit `<function=NAME({...})</function>` text instead of structured
+        // tool_calls). Salvage the call from `failed_generation` so the upstream
+        // loop can still execute the tool.
+        const code = err?.code || err?.error?.code;
+        const failedGen = err?.error?.failed_generation ||
+            err?.response?.data?.error?.failed_generation;
+        if (code === "tool_use_failed" && typeof failedGen === "string") {
+            const salvaged = salvageMalformedToolCall(failedGen);
+            if (salvaged) {
+                return {
+                    content: "",
+                    model,
+                    toolCalls: [salvaged],
+                };
+            }
+        }
+        throw err;
+    }
+};
+/**
+ * Parse Llama "tool_use_failed" generations into an AiToolCall. Groq returns
+ * different malformations:
+ *   - `<function=NAME({"a":1})</function>`     (with parens)
+ *   - `<function=NAME {"a":1}</function>`      (no parens, just whitespace)
+ *   - `<function=NAME({"a":1})>`               (no close tag)
+ *   - `<|python_tag|>NAME.call({"a":1})`       (rare)
+ * The JSON arguments are always usable; only the wrapper differs.
+ */
+const salvageMalformedToolCall = (raw) => {
+    // 1) `<function=NAME` then `(...)` or whitespace, then JSON, optionally
+    //    closed by `)` and `</function>` or `>`.
+    const re = /<function\s*=\s*([a-zA-Z_][\w]*)\s*\(?\s*(\{[\s\S]*\})\s*\)?\s*<\/?function\s*>?/;
+    const m = raw.match(re);
+    if (m) {
+        const name = m[1];
+        const args = m[2];
+        try {
+            JSON.parse(args);
+        }
+        catch {
+            return null;
+        }
+        return {
+            id: `call_salvaged_${Date.now()}`,
+            name,
+            arguments: args,
+        };
+    }
+    // 2) Fallback: any "NAME({...})" pattern in the raw text.
+    const fallback = raw.match(/([a-zA-Z_][\w]*)\s*\(\s*(\{[\s\S]*\})\s*\)/);
+    if (fallback) {
+        const name = fallback[1];
+        const args = fallback[2];
+        try {
+            JSON.parse(args);
+        }
+        catch {
+            return null;
+        }
+        return {
+            id: `call_salvaged_${Date.now()}`,
+            name,
+            arguments: args,
+        };
+    }
+    return null;
+};
 exports.aiProvider = {
     chat: async (input) => {
         const order = resolveProviderOrder(input.purpose);
@@ -257,5 +378,10 @@ exports.aiProvider = {
         if (!hasGroqKey())
             throw new Error("GROQ_API_KEY_MISSING");
         yield* groqChatStream(input);
+    },
+    chatWithTools: async (input) => {
+        if (!hasGroqKey())
+            throw new Error("GROQ_API_KEY_MISSING");
+        return groqChatWithTools(input);
     },
 };

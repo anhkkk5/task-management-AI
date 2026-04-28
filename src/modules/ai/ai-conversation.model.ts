@@ -1,6 +1,6 @@
 import mongoose, { Schema, Types } from "mongoose";
 
-export type ProposalDraft = {
+export type ProposalDraftItem = {
   activityName: string;
   durationMin: number;
   sessionsPerWeek?: number;
@@ -14,6 +14,10 @@ export type ProposalDraft = {
     end: string;
     focus?: string;
   }[];
+};
+
+export type ProposalDraft = ProposalDraftItem & {
+  items?: ProposalDraftItem[];
   createdAt: Date;
 };
 
@@ -64,6 +68,25 @@ const aiConversationSchema = new Schema<AiConversationDoc>(
           windowEnd: { type: String, trim: true },
           daysAllowed: { type: [String] },
           minGapDays: { type: Number, min: 0 },
+          items: [
+            {
+              activityName: { type: String, trim: true },
+              durationMin: { type: Number, min: 1 },
+              sessionsPerWeek: { type: Number, min: 1 },
+              windowStart: { type: String, trim: true },
+              windowEnd: { type: String, trim: true },
+              daysAllowed: { type: [String] },
+              minGapDays: { type: Number, min: 0 },
+              sessions: [
+                {
+                  date: { type: String, trim: true },
+                  start: { type: String, trim: true },
+                  end: { type: String, trim: true },
+                  focus: { type: String, trim: true },
+                },
+              ],
+            },
+          ],
           sessions: [
             {
               date: { type: String, trim: true },

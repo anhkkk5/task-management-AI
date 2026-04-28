@@ -1,6 +1,15 @@
 import { aiCalendarContextService } from "./ai-calendar-context.service";
 import { activitySchedulerService } from "./activity-scheduler.service";
 
+const SCHEDULE_DEBUG_PREFIX = "[AI_SCHEDULE_DEBUG]";
+
+const shortUser = (userId: string): string =>
+  userId.length > 10 ? `${userId.slice(0, 6)}...${userId.slice(-4)}` : userId;
+
+const logScheduleDebug = (event: string, payload: Record<string, unknown>) => {
+  console.log(`${SCHEDULE_DEBUG_PREFIX} ${event}`, payload);
+};
+
 /**
  * OpenAI/Groq compatible tool schemas exposed to the LLM.
  * The LLM can request to call these tools by name + JSON args.
@@ -32,11 +41,25 @@ export const AI_TOOL_DEFINITIONS = [
     function: {
       name: "propose_schedule",
       description:
-        "Đề xuất slot cho hoạt động (gym, học, đọc...) dựa trên free/busy. KHÔNG tạo task — chỉ propose.",
+        "Đề xuất slot cho một hoặc nhiều hoạt động dựa trên free/busy. KHÔNG tạo task — chỉ propose.",
       parameters: {
         type: "object",
         properties: {
           activityName: { type: "string", description: "Tên hoạt động." },
+          activities: {
+            type: "array",
+            description:
+              "Danh sách nhiều hoạt động cần xếp cùng lúc. Nếu có field này thì ưu tiên dùng thay cho activityName/sessionsPerWeek đơn lẻ.",
+            items: {
+              type: "object",
+              properties: {
+                activityName: { type: "string" },
+                durationMin: { type: "number" },
+                sessionsPerWeek: { type: "number" },
+              },
+              required: ["activityName", "sessionsPerWeek"],
+            },
+          },
           durationMin: { type: "number", description: "Phút/buổi." },
           sessionsPerWeek: { type: "number", description: "Số buổi/tuần." },
           windowStart: {
@@ -57,13 +80,7 @@ export const AI_TOOL_DEFINITIONS = [
           from: { type: "string", description: "ISO 8601 +07:00." },
           to: { type: "string", description: "ISO 8601 +07:00." },
         },
-        required: [
-          "activityName",
-          "durationMin",
-          "sessionsPerWeek",
-          "from",
-          "to",
-        ],
+        required: ["from", "to"],
       },
     },
   },
@@ -126,6 +143,12 @@ export const executeToolCall = async (
   ctx: { userId: string; conversationId?: string },
 ): Promise<ToolCallResult> => {
   const args = safeJsonParse(call.arguments);
+  logScheduleDebug("tool.received", {
+    tool: call.name,
+    callId: call.id,
+    user: shortUser(ctx.userId),
+    conversationId: ctx.conversationId || null,
+  });
 
   if (call.name === "get_free_busy_report") {
     const from = String(args.from || "");
@@ -159,6 +182,11 @@ export const executeToolCall = async (
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "TOOL_EXECUTION_FAILED";
+      logScheduleDebug("free_busy.error", {
+        callId: call.id,
+        user: shortUser(ctx.userId),
+        message,
+      });
       return {
         id: call.id,
         name: call.name,
@@ -171,6 +199,7 @@ export const executeToolCall = async (
     const activityName = String(args.activityName || "");
     const durationMin = Number(args.durationMin || 0);
     const sessionsPerWeek = Number(args.sessionsPerWeek || 0);
+    const rawActivities = Array.isArray(args.activities) ? args.activities : [];
     const windowStart = String(args.windowStart || "00:00");
     const windowEnd = String(args.windowEnd || "23:59");
     const daysAllowed = Array.isArray(args.daysAllowed)
@@ -180,7 +209,113 @@ export const executeToolCall = async (
     const from = String(args.from || "");
     const to = String(args.to || "");
 
+    logScheduleDebug("propose.input", {
+      callId: call.id,
+      user: shortUser(ctx.userId),
+      activityName,
+      sessionsPerWeek,
+      durationMin,
+      activitiesCount: rawActivities.length,
+      windowStart,
+      windowEnd,
+      from,
+      to,
+    });
+
     try {
+      const normalizedActivities = rawActivities
+        .map((item: unknown) => {
+          const entry = (item || {}) as Record<string, unknown>;
+          return {
+            activityName: String(entry.activityName || "").trim(),
+            durationMin: Number((entry.durationMin ?? durationMin) || 0),
+            sessionsPerWeek: Number(entry.sessionsPerWeek ?? 0),
+          };
+        })
+        .filter((item) => item.activityName && item.sessionsPerWeek > 0);
+
+      if (normalizedActivities.length > 0) {
+        logScheduleDebug("propose.batch.normalized", {
+          callId: call.id,
+          normalizedActivities,
+        });
+        const items: {
+          activityName: string;
+          durationMin: number;
+          sessionsPerWeek: number;
+          proposals: {
+            date: string;
+            start: string;
+            end: string;
+            reason: string;
+            score: number;
+          }[];
+          unmetSessions?: number;
+          note?: string;
+        }[] = [];
+        const reservedSlots: { date: string; start: string; end: string }[] =
+          [];
+
+        for (const activity of normalizedActivities) {
+          const result = await activitySchedulerService.proposeSchedule(
+            ctx.userId,
+            {
+              activityName: activity.activityName,
+              durationMin: activity.durationMin,
+              sessionsPerWeek: activity.sessionsPerWeek,
+              windowStart,
+              windowEnd,
+              daysAllowed,
+              minGapDays,
+              blockedSlots: reservedSlots,
+              fromISO: from,
+              toISO: to,
+            },
+          );
+
+          items.push({
+            activityName: activity.activityName,
+            durationMin: activity.durationMin,
+            sessionsPerWeek: activity.sessionsPerWeek,
+            proposals: result.proposals.map((p) => ({
+              date: p.date,
+              start: p.start,
+              end: p.end,
+              reason: p.reason,
+              score: p.score,
+            })),
+            unmetSessions: result.unmetSessions,
+            note: result.note,
+          });
+
+          for (const p of result.proposals) {
+            reservedSlots.push({ date: p.date, start: p.start, end: p.end });
+          }
+
+          logScheduleDebug("propose.batch.item_result", {
+            callId: call.id,
+            activityName: activity.activityName,
+            proposals: result.proposals.length,
+            unmetSessions: result.unmetSessions ?? 0,
+          });
+        }
+
+        logScheduleDebug("propose.batch.result", {
+          callId: call.id,
+          items: items.map((x) => ({
+            activityName: x.activityName,
+            proposals: x.proposals.length,
+            unmetSessions: x.unmetSessions ?? 0,
+          })),
+        });
+
+        return {
+          id: call.id,
+          name: call.name,
+          content: JSON.stringify({ items }),
+        };
+      }
+
       const result = await activitySchedulerService.proposeSchedule(
         ctx.userId,
         {
@@ -196,6 +331,9 @@ export const executeToolCall = async (
         },
       );
       const compact = {
+        activityName,
+        durationMin,
+        sessionsPerWeek,
         proposals: result.proposals.map((p) => ({
           date: p.date,
           start: p.start,
@@ -203,7 +341,15 @@ export const executeToolCall = async (
           reason: p.reason,
           score: p.score,
         })),
+        unmetSessions: result.unmetSessions,
+        note: result.note,
       };
+      logScheduleDebug("propose.single.result", {
+        callId: call.id,
+        activityName,
+        proposals: result.proposals.length,
+        unmetSessions: result.unmetSessions ?? 0,
+      });
       return {
         id: call.id,
         name: call.name,
@@ -212,6 +358,11 @@ export const executeToolCall = async (
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "TOOL_EXECUTION_FAILED";
+      logScheduleDebug("propose.error", {
+        callId: call.id,
+        activityName,
+        message,
+      });
       return {
         id: call.id,
         name: call.name,
@@ -239,6 +390,14 @@ export const executeToolCall = async (
         userId: ctx.userId,
         conversationId: ctx.conversationId,
       });
+      logScheduleDebug("commit.result", {
+        callId: call.id,
+        user: shortUser(ctx.userId),
+        conversationId: ctx.conversationId,
+        ok: result.ok,
+        createdCount: result.createdCount,
+        error: result.error,
+      });
       return {
         id: call.id,
         name: call.name,
@@ -247,6 +406,12 @@ export const executeToolCall = async (
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "TOOL_EXECUTION_FAILED";
+      logScheduleDebug("commit.error", {
+        callId: call.id,
+        user: shortUser(ctx.userId),
+        conversationId: ctx.conversationId,
+        message,
+      });
       return {
         id: call.id,
         name: call.name,
