@@ -392,9 +392,45 @@ exports.aiChatService = {
                 : undefined,
         });
         // ── Build smart system prompt
-        const intent = (0, ai_intent_1.detectIntent)(input.message);
+        let intent = (0, ai_intent_1.detectIntent)(input.message);
         const userLang = (0, ai_intent_1.detectUserLanguage)(input.message);
         const targetLang = (0, ai_intent_1.resolveTargetLanguage)(input.subtaskContext);
+        // FIX: When user types a commit confirmation ("chốt", "ok", "đồng ý"...)
+        // and there's a pending proposalDraft saved in the conversation context,
+        // force intent to CALENDAR_QUERY so the tool loop runs and commit_proposal
+        // is actually invoked. Otherwise the chat falls through to plain-chat
+        // mode (no tools) and the model only HALLUCINATES "đã được tạo" without
+        // creating any task in the DB.
+        if (intent !== "CALENDAR_QUERY" &&
+            isCommitConfirmationMessage(input.message)) {
+            try {
+                const convDoc = await ai_repository_1.aiRepository.findConversationByIdForUser({
+                    conversationId: conversationObjectId,
+                    userId: userObjectId,
+                });
+                const pendingDraft = convDoc?.context?.proposalDraft;
+                const hasPendingDraft = !!pendingDraft &&
+                    (Array.isArray(pendingDraft.items)
+                        ? pendingDraft.items.length > 0
+                        : Array.isArray(pendingDraft.sessions) &&
+                            pendingDraft.sessions.length > 0);
+                if (hasPendingDraft) {
+                    logScheduleDebug("chat.intent.override_to_calendar", {
+                        user: shortUser(userId),
+                        conversationId: String(conversationObjectId),
+                        originalIntent: intent,
+                        reason: "commit_confirmation_with_pending_draft",
+                    });
+                    intent = "CALENDAR_QUERY";
+                }
+            }
+            catch (err) {
+                logScheduleDebug("chat.intent.override_check_error", {
+                    user: shortUser(userId),
+                    message: err instanceof Error ? err.message : String(err),
+                });
+            }
+        }
         const domain = (0, ai_context_1.detectDomainFromTask)({
             parentTaskTitle: input.subtaskContext?.parentTaskTitle,
             parentTaskDescription: input.subtaskContext?.parentTaskDescription,
@@ -614,7 +650,7 @@ exports.aiChatService = {
                 // Tool-calling loop: let the model invoke get_free_busy_report (and any
                 // future tools) before producing the final user-facing text.
                 const toolMessages = [...baseMessages];
-                const MAX_TOOL_ITERATIONS = 2;
+                const MAX_TOOL_ITERATIONS = 3;
                 let iter = 0;
                 let toolResult;
                 let proposalDraft = undefined;
@@ -690,6 +726,42 @@ exports.aiChatService = {
                     iter += 1;
                     if (iter >= MAX_TOOL_ITERATIONS)
                         break;
+                }
+                // If loop exited but model never produced final text (e.g. it kept
+                // wanting to call more tools and we hit the iter cap), force one more
+                // call WITHOUT tools so the model summarises the tool results into
+                // a user-facing reply. This prevents the empty-content fallback
+                // ("Mình chưa tạo được phản hồi cho lượt này") in multi-turn flows.
+                if ((!toolResult.content || toolResult.content.trim().length === 0) &&
+                    toolMessages.some((m) => m.role === "tool")) {
+                    logScheduleDebug("chat.calendar.tool_loop.force_summary", {
+                        user: shortUser(userId),
+                        conversationId: String(conversationObjectId),
+                        iter,
+                    });
+                    try {
+                        const summary = await ai_provider_1.aiProvider.chat({
+                            purpose: "chat",
+                            messages: toolMessages,
+                            model: input.model,
+                            temperature: 0.3,
+                            maxTokens: input.maxTokens,
+                        });
+                        if (summary.content && summary.content.trim().length > 0) {
+                            toolResult = {
+                                ...toolResult,
+                                content: summary.content,
+                                model: summary.model ?? toolResult.model,
+                                usage: summary.usage ?? toolResult.usage,
+                            };
+                        }
+                    }
+                    catch (err) {
+                        logScheduleDebug("chat.calendar.tool_loop.force_summary_error", {
+                            user: shortUser(userId),
+                            message: err instanceof Error ? err.message : String(err),
+                        });
+                    }
                 }
                 if (!didCommitProposalCall &&
                     isCommitConfirmationMessage(input.message)) {

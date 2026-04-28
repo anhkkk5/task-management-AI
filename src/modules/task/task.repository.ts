@@ -323,7 +323,7 @@ export const taskRepository = {
     const filter: Record<string, unknown> = {
       userId: params.userId,
       isArchived: { $ne: true },
-      parentTaskId: { $exists: false }, // Chỉ lấy task cha, không lấy subtask
+      parentTaskId: { $exists: false },
     };
 
     if (params.status) {
@@ -348,7 +348,8 @@ export const taskRepository = {
         .sort({ deadline: 1, updatedAt: -1 })
         .skip(skip)
         .limit(params.limit)
-        .exec(),
+        .lean()
+        .exec() as unknown as Promise<TaskDoc[]>,
       Task.countDocuments(filter).exec(),
     ]);
 
@@ -374,14 +375,14 @@ export const taskRepository = {
         .sort({ deadline: 1, updatedAt: -1 })
         .skip(skip)
         .limit(params.limit)
-        .exec(),
+        .lean()
+        .exec() as unknown as Promise<TaskDoc[]>,
       Task.countDocuments(filter).exec(),
     ]);
 
     return { items, total };
   },
 
-  // Find tasks with overlapping scheduled time
   findConflictingTasks: async (params: {
     userId: string | Types.ObjectId;
     startTime: Date;
@@ -395,22 +396,18 @@ export const taskRepository = {
       status: { $nin: ["completed", "cancelled"] },
     };
 
-    // Exclude specific task if provided (for update scenario)
     if (params.excludeTaskId) {
       filter._id = { $ne: new Types.ObjectId(params.excludeTaskId) };
     }
 
-    // Find tasks where scheduled time overlaps with the given time range
-    // Overlap condition: (taskStart < givenEnd) AND (taskEnd > givenStart)
     filter.$and = [
       { "scheduledTime.start": { $lt: params.endTime } },
       { "scheduledTime.end": { $gt: params.startTime } },
     ];
 
-    return Task.find(filter).exec();
+    return Task.find(filter).lean().exec() as unknown as Promise<TaskDoc[]>;
   },
 
-  // Get scheduled tasks for conflict detection
   getScheduledTasks: async (params: {
     userId: string | Types.ObjectId;
     startDate: Date;
@@ -422,21 +419,21 @@ export const taskRepository = {
       status: { $in: ["scheduled", "in_progress"] },
       "scheduledTime.start": { $exists: true, $ne: null },
       "scheduledTime.end": { $exists: true, $ne: null },
-      // Task phải overlap với range [startDate, endDate]
-      // Overlap condition: taskStart < endDate AND taskEnd > startDate
       $and: [
         { "scheduledTime.start": { $lt: params.endDate } },
         { "scheduledTime.end": { $gt: params.startDate } },
       ],
     };
 
-    // Exclude specific tasks (e.g., tasks being scheduled)
     if (params.excludeTaskIds && params.excludeTaskIds.length > 0) {
       filter._id = {
         $nin: params.excludeTaskIds.map((id) => new Types.ObjectId(id)),
       };
     }
 
-    return Task.find(filter).sort({ "scheduledTime.start": 1 }).exec();
+    return Task.find(filter)
+      .sort({ "scheduledTime.start": 1 })
+      .lean()
+      .exec() as unknown as Promise<TaskDoc[]>;
   },
 };

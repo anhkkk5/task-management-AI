@@ -319,7 +319,6 @@ export const authService = {
 
     await redis.del(rlKey);
 
-    // Clean up old refresh tokens for this user before creating new one
     const userId = String(user._id);
     const prefix = getRefreshUserPrefix(userId);
     const oldKeys: string[] = [];
@@ -518,19 +517,16 @@ export const authService = {
       throw new Error("INVALID_INPUT");
     }
 
-    // Validate file type
     const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!allowedTypes.includes(file.mimetype)) {
       throw new Error("INVALID_FILE_TYPE");
     }
 
-    // Validate file size (5MB)
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
       throw new Error("FILE_TOO_LARGE");
     }
 
-    // Upload to Cloudinary
     const result = await uploadImageBuffer(file.buffer, {
       folder: "avatars",
       publicId: `user_${userId}_${Date.now()}`,
@@ -540,13 +536,11 @@ export const authService = {
       throw new Error("UPLOAD_FAILED");
     }
 
-    // Update user avatar in database
     await authRepository.updateProfile(userId, { avatar: result.url });
 
     return result.url;
   },
 
-  // Forgot Password Flow
   forgotPassword: async (
     email: string,
   ): Promise<{ message: string; ttlSeconds: number }> => {
@@ -651,7 +645,6 @@ export const authService = {
     return { message: "Đặt lại mật khẩu thành công" };
   },
 
-  // ✅ NEW: Public method to generate access token (for Google OAuth callback)
   generateAccessToken: (payload: {
     userId: string;
     email: string;

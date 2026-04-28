@@ -97,6 +97,8 @@ const teamSchema = new Schema<TeamDoc>(
 );
 
 teamSchema.index({ "members.userId": 1 });
+// Active teams for a member (filter out archived) — covers the dashboard list.
+teamSchema.index({ "members.userId": 1, isArchived: 1, updatedAt: -1 });
 
 export const Team =
   (mongoose.models.Team as TeamModel) ||

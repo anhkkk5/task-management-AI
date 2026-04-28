@@ -49,7 +49,6 @@ const toPublicNotification = (doc: NotificationDoc): PublicNotification => {
   };
 };
 
-// ----- Priority auto-assign -----
 function resolvePriority(
   type: NotificationType,
   data: any,
@@ -184,7 +183,6 @@ function escapeHtml(input: string): string {
     .replace(/'/g, "&#039;");
 }
 
-// ----- Quiet hours helpers -----
 interface QuietHours {
   enabled: boolean;
   start: string; // "HH:mm"
@@ -349,7 +347,6 @@ function computeSnoozeUntil(
 }
 
 export const notificationService = {
-  // Create and emit notification
   create: async (data: {
     userId: string;
     type: NotificationType;
@@ -359,13 +356,10 @@ export const notificationService = {
     data?: any;
     channels?: { inApp?: boolean; email?: boolean; push?: boolean };
   }): Promise<PublicNotification> => {
-    // Resolve priority (auto if not passed)
     const priority = data.priority || resolvePriority(data.type, data.data);
 
-    // Load user prefs for quiet hours + grouping
     const prefs = await getUserNotificationPrefs(data.userId);
 
-    // Quiet hours: suppress email unless CRITICAL
     let emailChannel = data.channels?.email ?? false;
     if (
       emailChannel &&
@@ -392,7 +386,6 @@ export const notificationService = {
 
     let publicNotification = toPublicNotification(notification);
 
-    // ----- Smart grouping -----
     let groupedEmitted = false;
     if (prefs.groupingEnabled) {
       try {
@@ -419,12 +412,10 @@ export const notificationService = {
       }
     }
 
-    // Emit realtime notification if not absorbed into group
     if (!groupedEmitted && publicNotification.channels.inApp) {
       notificationGateway.emitToUser(data.userId, publicNotification);
     }
 
-    // Queue email job if email channel enabled (respects quiet hours)
     if (notification.channels.email) {
       try {
         await notificationQueue.add(
@@ -453,7 +444,6 @@ export const notificationService = {
     return publicNotification;
   },
 
-  // Snooze a notification
   snooze: async (
     notificationId: string,
     userId: string,
@@ -471,7 +461,6 @@ export const notificationService = {
     return toPublicNotification(updated);
   },
 
-  // Unsnooze (bring back immediately)
   unsnooze: async (
     notificationId: string,
     userId: string,
@@ -486,7 +475,6 @@ export const notificationService = {
     return pub;
   },
 
-  // List snoozed notifications
   listSnoozed: async (userId: string): Promise<PublicNotification[]> => {
     const docs = await notificationRepository.listSnoozed(
       new Types.ObjectId(userId),
@@ -494,7 +482,6 @@ export const notificationService = {
     return docs.map((doc) => toPublicNotification(doc as any));
   },
 
-  // Get group children (for expand view)
   listGroupChildren: async (
     parentId: string,
     userId: string,
@@ -511,7 +498,6 @@ export const notificationService = {
     return docs.map((doc) => toPublicNotification(doc as any));
   },
 
-  // Resurrect expired snoozed notifications (called by cron)
   resurrectSnoozed: async (): Promise<number> => {
     const expired = await notificationRepository.findExpiredSnoozes(500);
     if (!expired.length) return 0;
@@ -530,7 +516,6 @@ export const notificationService = {
     return expired.length;
   },
 
-  // Send digest emails for users whose digest schedule is due right now
   sendDigestForDueUsers: async (now: Date = new Date()): Promise<number> => {
     const users = await userRepository.findDigestEnabledUsers();
     let sent = 0;
@@ -639,7 +624,6 @@ export const notificationService = {
     return sent;
   },
 
-  // List notifications for user
   list: async (
     userId: string,
     options: {
@@ -656,12 +640,10 @@ export const notificationService = {
     return notifications.map(toPublicNotification);
   },
 
-  // Count unread notifications
   countUnread: async (userId: string): Promise<number> => {
     return notificationRepository.countUnread(new Types.ObjectId(userId));
   },
 
-  // Mark as read
   markAsRead: async (
     notificationId: string,
     userId: string,
@@ -674,7 +656,6 @@ export const notificationService = {
 
     const publicNotification = toPublicNotification(updated);
 
-    // Emit read update realtime
     notificationGateway.emitReadUpdate(userId, {
       notificationId: String(notificationId),
       isRead: true,
@@ -683,12 +664,10 @@ export const notificationService = {
     return publicNotification;
   },
 
-  // Mark all as read
   markAllAsRead: async (userId: string): Promise<void> => {
     await notificationRepository.markAllAsRead(new Types.ObjectId(userId));
   },
 
-  // Delete notification
   delete: async (notificationId: string, userId: string): Promise<boolean> => {
     return notificationRepository.delete(
       notificationId,
@@ -697,7 +676,6 @@ export const notificationService = {
   },
 };
 
-// Generate simple HTML email template
 function generateEmailHtml(title: string, content: string): string {
   return `
 <!DOCTYPE html>

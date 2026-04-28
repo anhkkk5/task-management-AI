@@ -1,6 +1,7 @@
 import express, { Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import compression from "compression";
 import passport from "passport";
 import authRouter from "./modules/auth/auth.routes";
 import userRouter from "./modules/user/user.routes";
@@ -42,11 +43,21 @@ export const createApp = (): Express => {
       allowedHeaders: ["Content-Type", "Authorization"],
     }),
   );
-  app.use(cookieParser());
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
 
-  // Initialize Passport
+  app.use(
+    compression({
+      threshold: 1024, // do not bother compressing tiny payloads
+      filter: (req, res) => {
+        if (req.headers["x-no-compression"]) return false;
+        return compression.filter(req, res);
+      },
+    }),
+  );
+
+  app.use(cookieParser());
+  app.use(express.json({ limit: "2mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
   setupPassport();
   app.use(passport.initialize());
 
@@ -60,6 +71,10 @@ export const createApp = (): Express => {
 
   app.get("/", (_req, res) => {
     res.send("hello");
+  });
+
+  app.get("/healthz", (_req, res) => {
+    res.json({ ok: true, ts: Date.now() });
   });
 
   app.use("/auth", authRouter);

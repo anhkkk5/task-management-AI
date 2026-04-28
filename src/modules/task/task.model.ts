@@ -243,7 +243,21 @@ const taskSchema = new Schema<TaskDoc>(
   { timestamps: true },
 );
 
+// ─── Compound indexes tuned to real query patterns (see task.repository.ts).
+// Order matters: equality fields first, then range/sort field last.
 taskSchema.index({ userId: 1, status: 1, deadline: 1, priority: 1 });
+// Calendar view + scheduling conflict detection (most-hit query).
+taskSchema.index({ userId: 1, "scheduledTime.start": 1 });
+taskSchema.index({ userId: 1, "scheduledTime.end": 1 });
+// Active task list (filter out archived, sort by deadline).
+taskSchema.index({ userId: 1, isArchived: 1, deadline: 1 });
+// Subtask traversal (AI breakdown / child tasks).
+taskSchema.index({ userId: 1, parentTaskId: 1 });
+// Team task list per assignee.
+taskSchema.index({
+  "teamAssignment.assigneeId": 1,
+  "teamAssignment.teamId": 1,
+});
 
 export const Task =
   (mongoose.models.Task as TaskModel) ||

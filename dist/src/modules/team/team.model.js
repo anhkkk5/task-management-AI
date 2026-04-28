@@ -77,5 +77,7 @@ const teamSchema = new mongoose_1.Schema({
     industry: { type: String, trim: true },
 }, { timestamps: true });
 teamSchema.index({ "members.userId": 1 });
+// Active teams for a member (filter out archived) — covers the dashboard list.
+teamSchema.index({ "members.userId": 1, isArchived: 1, updatedAt: -1 });
 exports.Team = mongoose_1.default.models.Team ||
     mongoose_1.default.model("Team", teamSchema);

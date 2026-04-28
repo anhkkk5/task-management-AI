@@ -98,7 +98,8 @@ export const aiRepository = {
     return AiConversation.find({ userId: params.userId })
       .sort({ updatedAt: -1 })
       .limit(params.limit)
-      .exec();
+      .lean()
+      .exec() as unknown as Promise<AiConversationDoc[]>;
   },
 
   findConversationByIdForUser: async (params: {
@@ -150,7 +151,8 @@ export const aiRepository = {
     })
       .sort({ createdAt: 1 })
       .limit(params.limit)
-      .exec();
+      .lean()
+      .exec() as unknown as Promise<AiMessageDoc[]>;
   },
 
   deleteConversation: async (params: {
@@ -182,7 +184,6 @@ export const aiRepository = {
     ).exec();
   },
 
-  // ─────────────────── User Memory ───────────────────
   listUserMemories: async (params: {
     userId: Types.ObjectId;
     scopes?: UserMemoryScope[];
@@ -195,7 +196,8 @@ export const aiRepository = {
     return UserMemory.find(query)
       .sort({ lastSeenAt: -1, occurrences: -1 })
       .limit(params.limit ?? 30)
-      .exec();
+      .lean()
+      .exec() as unknown as Promise<UserMemoryDoc[]>;
   },
 
   upsertUserMemory: async (params: {

@@ -41,6 +41,29 @@ const shortUser = (userId) => userId.length > 10 ? `${userId.slice(0, 6)}...${us
 const logScheduleDebug = (event, payload) => {
     console.log(`${SCHEDULE_DEBUG_PREFIX} ${event}`, payload);
 };
+// Compute Vietnamese weekday label from a YYYY-MM-DD date string,
+// using Asia/Ho_Chi_Minh timezone to avoid UTC drift.
+const VI_WEEKDAYS = [
+    "Chủ Nhật",
+    "Thứ Hai",
+    "Thứ Ba",
+    "Thứ Tư",
+    "Thứ Năm",
+    "Thứ Sáu",
+    "Thứ Bảy",
+];
+const getWeekdayVi = (dateStr) => {
+    // dateStr is YYYY-MM-DD (already local Asia/Ho_Chi_Minh from scheduler).
+    // Construct as local-noon to avoid timezone day-shift.
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+    if (!m)
+        return "";
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const d = Number(m[3]);
+    const dt = new Date(y, mo, d, 12, 0, 0);
+    return VI_WEEKDAYS[dt.getDay()] ?? "";
+};
 /**
  * OpenAI/Groq compatible tool schemas exposed to the LLM.
  * The LLM can request to call these tools by name + JSON args.
@@ -261,6 +284,7 @@ const executeToolCall = async (call, ctx) => {
                         sessionsPerWeek: activity.sessionsPerWeek,
                         proposals: result.proposals.map((p) => ({
                             date: p.date,
+                            weekday: getWeekdayVi(p.date),
                             start: p.start,
                             end: p.end,
                             reason: p.reason,
@@ -310,6 +334,7 @@ const executeToolCall = async (call, ctx) => {
                 sessionsPerWeek,
                 proposals: result.proposals.map((p) => ({
                     date: p.date,
+                    weekday: getWeekdayVi(p.date),
                     start: p.start,
                     end: p.end,
                     reason: p.reason,

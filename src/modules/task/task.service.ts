@@ -68,8 +68,8 @@ export type PublicTask = {
     scheduledTime?: string;
   }[];
   estimatedDuration?: number;
-  dailyTargetDuration?: number; // Max minutes per day
-  dailyTargetMin?: number; // Min minutes per day
+  dailyTargetDuration?: number;
+  dailyTargetMin?: number;
   reminderAt?: Date;
   scheduledTime?: {
     start: Date;
@@ -236,7 +236,6 @@ const resolveBreakdownProfile = async (
   }
 };
 
-// Generate invite email HTML template
 const generateInviteEmailHtml = (params: {
   taskTitle: string;
   organizerName: string;
@@ -292,7 +291,6 @@ const generateInviteEmailHtml = (params: {
 </html>`;
 };
 
-// Send invite emails to guests
 const sendGuestInvites = async (params: {
   userId: string;
   task: PublicTask;
@@ -302,11 +300,9 @@ const sendGuestInvites = async (params: {
 
   if (!task.guests || task.guests.length === 0) return;
 
-  // Chỉ gửi cho guests mới (không có trong previousGuests)
   const newGuests = task.guests.filter((g) => !previousGuests.includes(g));
   if (newGuests.length === 0) return;
 
-  // Lấy thông tin organizer
   const organizer = await userRepository.findById(userId);
   if (!organizer) return;
 
@@ -314,7 +310,6 @@ const sendGuestInvites = async (params: {
   const organizerEmail = organizer.email;
 
   for (const guestEmail of newGuests) {
-    // Không gửi cho chính organizer
     if (guestEmail === organizerEmail.toLowerCase()) continue;
 
     const html = generateInviteEmailHtml({
@@ -500,7 +495,6 @@ export const taskService = {
       ? new Types.ObjectId(dto.parentTaskId)
       : undefined;
 
-    // Convert guestDetails guestId strings to ObjectId
     const guestDetails = dto.guestDetails
       ? dto.guestDetails.map((g) => ({
           guestId: new Types.ObjectId(g.guestId),
@@ -544,8 +538,6 @@ export const taskService = {
         : undefined,
     });
 
-    // Auto-breakdown for all tasks (with AI analysis)
-    // Trigger auto-breakdown asynchronously (don't wait)
     taskService.autoBreakdown(userId, String(doc._id)).catch((error) => {
       console.error("[AutoBreakdown] Failed for task:", doc._id, error.message);
     });
@@ -554,7 +546,6 @@ export const taskService = {
 
     const publicTask = toPublicTask(doc);
 
-    // Send invite emails to guests (don't wait)
     if (dto.guests && dto.guests.length > 0) {
       sendGuestInvites({ userId, task: publicTask }).catch((err) => {
         console.error(
@@ -588,7 +579,6 @@ export const taskService = {
       throw new Error("INVALID_TITLE");
     }
 
-    // Get current task to check status change
     const currentTask = await taskRepository.findByIdForUser({
       taskId,
       userId: new Types.ObjectId(userId),
@@ -603,7 +593,6 @@ export const taskService = {
       throw new Error(`TEAM_TASK_EDIT_RESTRICTED:${teamId}`);
     }
 
-    // Convert guestDetails guestId strings to ObjectId
     const guestDetails = dto.guestDetails
       ? dto.guestDetails.map((g) => ({
           guestId: new Types.ObjectId(g.guestId),
@@ -646,8 +635,6 @@ export const taskService = {
       },
     );
 
-    // If scheduledTime was updated, delete old scheduled notifications for this task
-    // so that new reminders can be sent for the new time
     if (dto.scheduledTime && updated) {
       try {
         const deletedCount = await notificationRepository.deleteByTaskId(
@@ -674,18 +661,14 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
-    // Khi đưa task về "todo" thì xóa toàn bộ AI sessions cũ của task này
-    // để tránh apply optimize lần sau bị dư lịch/dư phiên.
     if (dto.status === "todo") {
       await removeTaskSessionsFromActiveSchedules(userId, taskId);
     }
 
-    // Track completion history when task is marked as completed
     if (dto.status === "completed" && currentTask.status !== "completed") {
       const completedAt = new Date();
       const hour = completedAt.getHours();
       const dayOfWeek = completedAt.getDay();
-      // Estimate duration from creation time (simplified)
       const duration = Math.floor(
         (completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60),
       );
@@ -702,7 +685,6 @@ export const taskService = {
 
     const publicTask = toPublicTask(updated);
 
-    // Send invite emails to new guests (don't wait)
     if (dto.guests && dto.guests.length > 0) {
       const previousGuests = (currentTask.guests || []).map((g: string) =>
         g.toLowerCase(),
@@ -751,7 +733,6 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
-    // Cascade delete: Xóa tất cả task con có parentTaskId trỏ đến task vừa xóa
     const deletedChildrenCount = await taskRepository.deleteManyByParentTaskId({
       parentTaskId: taskId,
       userId: userObjectId,
@@ -763,7 +744,6 @@ export const taskService = {
       );
     }
 
-    // Xóa sessions AI liên quan tới task chính + toàn bộ task con đã bị xóa
     await removeTaskSessionsFromActiveSchedules(userId, [
       taskId,
       ...childTaskIds,
@@ -790,7 +770,6 @@ export const taskService = {
       );
     }
 
-    // Đọc sessions từ AISchedule
     const { AISchedule } = await import("../ai-schedule/ai-schedule.model");
     const activeSchedules = await AISchedule.find({
       userId: new Types.ObjectId(userId),
@@ -798,7 +777,6 @@ export const taskService = {
       sourceTasks: taskId,
     }).lean();
 
-    // Thu thập slots theo thứ tự ngày/giờ
     type Slot = {
       date: string;
       day: string;
@@ -832,7 +810,6 @@ export const taskService = {
     }
     slots.sort((a, b) => a.date.localeCompare(b.date));
 
-    // Tổng thời gian từ slots (nếu có lịch) hoặc từ estimatedDuration
     const totalSlotMinutes = slots.reduce(
       (sum, s) => sum + s.durationMinutes,
       0,
@@ -853,7 +830,6 @@ export const taskService = {
       slots: slots.length > 0 ? slots : undefined,
     });
 
-    // Thuật toán phân bổ: gán subtask vào slot theo tỷ lệ thời gian
     const stepsWithSlot = breakdown.steps.map((s, i) => {
       let assignedSlot: Slot | undefined;
 
@@ -919,7 +895,6 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
-    // Cập nhật title sessions trong AISchedule
     const subtaskTitles = stepsWithSlot.map((s) => s.title);
     await aiScheduleRepository.updateSessionTitlesForTask(
       userId,
@@ -963,7 +938,6 @@ export const taskService = {
     breakdown: { title: string; status: string; estimatedDuration?: number }[];
     applied: boolean;
   }> => {
-    // Check if user has auto-breakdown enabled
     const userHabits = await userHabitRepository.findByUserId(userId);
     const autoBreakdownEnabled =
       userHabits?.aiPreferences?.autoBreakdown ?? true;
@@ -981,7 +955,6 @@ export const taskService = {
       throw new Error("TASK_FORBIDDEN");
     }
 
-    // Only auto-breakdown for complex tasks (high priority or with keywords indicating complexity)
     const isComplex =
       task.priority === "high" ||
       task.priority === "urgent" ||
@@ -1277,7 +1250,6 @@ export const taskService = {
       throw new Error("INVALID_ID");
     }
 
-    // Get current task to check status change
     const currentTask = await taskRepository.findByIdForUser({
       taskId,
       userId: new Types.ObjectId(userId),
@@ -1311,12 +1283,10 @@ export const taskService = {
       await removeTaskSessionsFromActiveSchedules(userId, taskId);
     }
 
-    // Track completion history when task is marked as completed
     if (status === "completed" && currentTask.status !== "completed") {
       const completedAt = new Date();
       const hour = completedAt.getHours();
       const dayOfWeek = completedAt.getDay();
-      // Estimate duration from creation time (simplified)
       const duration = Math.floor(
         (completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60),
       );
