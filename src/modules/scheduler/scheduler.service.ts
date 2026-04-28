@@ -7,47 +7,67 @@ import {
 
 export class IntervalScheduler {
   /**
-   * Kiểm tra xem newTask có conflict với existing tasks không
-   * O(n log n) - sort rồi binary search
+   * Kiểm tra xem newTask có conflict với existing tasks không.
+   * O(n log n) sort + O(log n) binary search to find overlap window.
    */
   checkConflict(
     newTask: TimeInterval,
     existingTasks: TimeInterval[],
   ): ConflictResult {
-    // Sort existing tasks by start time
+    if (existingTasks.length === 0) {
+      return { hasConflict: false, conflictingTasks: [] };
+    }
+
     const sorted = [...existingTasks].sort(
       (a, b) => a.start.getTime() - b.start.getTime(),
     );
 
+    // Binary search: find first interval whose start < newTask.end
+    // Any interval starting at or after newTask.end cannot overlap.
+    const newEnd = newTask.end.getTime();
+    const newStart = newTask.start.getTime();
+
+    // Upper bound: first index where sorted[i].start >= newEnd
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (sorted[mid].start.getTime() < newEnd) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    // Only intervals [0..lo-1] can possibly overlap (start < newEnd).
+    // Among those, only ones with end > newStart actually overlap.
+
     const conflictingTasks: string[] = [];
     let hasConflict = false;
+    let latestEnd = 0;
+    let latestConflict: TimeInterval | undefined;
 
-    // Tìm các task có thể overlap
-    for (const task of sorted) {
-      // Check overlap: new.start < existing.end && new.end > existing.start
-      if (newTask.start < task.end && newTask.end > task.start) {
+    for (let i = 0; i < lo; i++) {
+      const task = sorted[i];
+      if (task.end.getTime() > newStart) {
         hasConflict = true;
         if (task.taskId) {
           conflictingTasks.push(task.taskId);
         }
+        if (task.end.getTime() > latestEnd) {
+          latestEnd = task.end.getTime();
+          latestConflict = task;
+        }
       }
     }
 
-    // Nếu conflict, suggest slot mới (đơn giản: sau task cuối cùng conflict)
     let suggestedNewSlot: TimeInterval | undefined;
-    if (hasConflict && sorted.length > 0) {
-      const lastConflict = sorted
-        .filter((t) => t.taskId && conflictingTasks.includes(t.taskId))
-        .sort((a, b) => b.end.getTime() - a.end.getTime())[0];
-
-      if (lastConflict) {
-        const duration = newTask.end.getTime() - newTask.start.getTime();
-        suggestedNewSlot = {
-          start: lastConflict.end,
-          end: new Date(lastConflict.end.getTime() + duration),
-          taskId: newTask.taskId,
-        };
-      }
+    if (hasConflict && latestConflict) {
+      const duration = newTask.end.getTime() - newTask.start.getTime();
+      suggestedNewSlot = {
+        start: latestConflict.end,
+        end: new Date(latestConflict.end.getTime() + duration),
+        taskId: newTask.taskId,
+      };
     }
 
     return {

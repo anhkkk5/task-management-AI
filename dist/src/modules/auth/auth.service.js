@@ -220,7 +220,6 @@ exports.authService = {
             throw new Error("INVALID_CREDENTIALS");
         }
         await redis.del(rlKey);
-        // Clean up old refresh tokens for this user before creating new one
         const userId = String(user._id);
         const prefix = getRefreshUserPrefix(userId);
         const oldKeys = [];
@@ -350,17 +349,14 @@ exports.authService = {
         if (!file) {
             throw new Error("INVALID_INPUT");
         }
-        // Validate file type
         const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
         if (!allowedTypes.includes(file.mimetype)) {
             throw new Error("INVALID_FILE_TYPE");
         }
-        // Validate file size (5MB)
         const maxSize = 5 * 1024 * 1024;
         if (file.size > maxSize) {
             throw new Error("FILE_TOO_LARGE");
         }
-        // Upload to Cloudinary
         const result = await (0, cloudinary_service_1.uploadImageBuffer)(file.buffer, {
             folder: "avatars",
             publicId: `user_${userId}_${Date.now()}`,
@@ -368,11 +364,9 @@ exports.authService = {
         if (!result?.url) {
             throw new Error("UPLOAD_FAILED");
         }
-        // Update user avatar in database
         await auth_repository_1.authRepository.updateProfile(userId, { avatar: result.url });
         return result.url;
     },
-    // Forgot Password Flow
     forgotPassword: async (email) => {
         const normalizedEmail = email?.trim().toLowerCase();
         if (!normalizedEmail) {
@@ -446,7 +440,6 @@ exports.authService = {
         await otp_service_1.otpService.deleteChangePasswordOtp(normalizedEmail);
         return { message: "Đặt lại mật khẩu thành công" };
     },
-    // ✅ NEW: Public method to generate access token (for Google OAuth callback)
     generateAccessToken: (payload) => {
         return signAccessToken(payload);
     },

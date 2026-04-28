@@ -38,16 +38,13 @@ const mongoose_1 = require("mongoose");
 const ai_provider_1 = require("./ai.provider");
 const ai_cache_service_1 = require("./ai.cache.service");
 const ai_utils_1 = require("./ai-utils");
-// Re-export từ các service đã tách
 var ai_chat_service_1 = require("./ai-chat.service");
 Object.defineProperty(exports, "aiChatService", { enumerable: true, get: function () { return ai_chat_service_1.aiChatService; } });
 var ai_schedule_service_1 = require("./ai-schedule.service");
 Object.defineProperty(exports, "aiScheduleService", { enumerable: true, get: function () { return ai_schedule_service_1.aiScheduleService; } });
 var ai_reschedule_service_1 = require("./ai-reschedule.service");
 Object.defineProperty(exports, "aiRescheduleService", { enumerable: true, get: function () { return ai_reschedule_service_1.aiRescheduleService; } });
-// Các functions còn lại trong ai.service.ts
 exports.aiService = {
-    // Các methods được re-export từ file con
     chat: async (...args) => {
         const { aiChatService } = await Promise.resolve().then(() => __importStar(require("./ai-chat.service")));
         return aiChatService.chat(...args);
@@ -94,7 +91,6 @@ exports.aiService = {
             model: breakdownPromptVersion,
         });
         if (cached) {
-            // Nếu cached nhưng totalMinutes khác → bỏ qua cache, tính lại
             const cachedTotal = cached.steps?.reduce((s, x) => s + (x.estimatedDuration ?? 0), 0) ?? 0;
             if (!input.totalMinutes ||
                 Math.abs(cachedTotal - input.totalMinutes) < 5) {
@@ -272,9 +268,6 @@ QUY TẮC BẮT BUỘC:
             "lam",
             "va",
         ]);
-        // ─── Description relevance check ───
-        // Chỉ inject mô tả vào breakdown khi mô tả THỰC SỰ liên quan đến title.
-        // Tránh trường hợp user nhập mô tả linh tinh (abc, copy-paste lệch chủ đề).
         const titleTokens = new Set(tokenize(input.title).filter((t) => t.length >= 3 && !stopWords.has(t)));
         const descTokensList = tokenize(descriptionRaw).filter((t) => t.length >= 3 && !stopWords.has(t));
         const descTokens = new Set(descTokensList);
@@ -366,7 +359,6 @@ ${extraGuidance}`;
                 maxTokens: 2000,
             });
             let raw = (result.content || "").trim();
-            // Strip markdown code fences (```json ... ``` hoặc ``` ... ```)
             raw = raw
                 .replace(/^```(?:json)?\s*/i, "")
                 .replace(/\s*```\s*$/, "")
@@ -376,7 +368,6 @@ ${extraGuidance}`;
                 parsed = JSON.parse((0, ai_utils_1.extractJson)(raw));
             }
             catch {
-                // Fallback: try repairing truncated JSON
                 try {
                     parsed = JSON.parse((0, ai_utils_1.repairTruncatedJson)(raw));
                     console.warn("[aiBreakdown] JSON repaired via repairTruncatedJson");
@@ -490,9 +481,6 @@ ${extraGuidance}`;
                 const text = `${step.title} ${step.description ?? ""}`.toLowerCase();
                 return forbiddenWhenNotExplicit.some((k) => text.includes(k));
             });
-        // ─── Coverage check: literal quan trọng từ description ───
-        // Khi mô tả liên quan, trích các literal bắt buộc (endpoint, số+đơn vị,
-        // identifier kỹ thuật, JSON shape) và bắt buộc phải xuất hiện trong breakdown.
         const breakdownJoinedText = steps
             .map((s) => `${s.title} ${s.description ?? ""}`)
             .join("\n")
@@ -521,7 +509,6 @@ ${extraGuidance}`;
             for (const sh of shapes)
                 criticalLiterals.push(sh.trim());
         }
-        // Dedupe + giữ thứ tự xuất hiện
         const uniqueLiterals = Array.from(new Set(criticalLiterals)).filter((s) => s.length > 0);
         const missingLiterals = uniqueLiterals.filter((lit) => {
             const needle = lit.toLowerCase();
@@ -561,36 +548,27 @@ ${extraGuidance}`;
             console.log(`[aiBreakdown] Retry due to ${missingLiterals.length > 0 ? `missing literals: ${missingLiterals.join(" | ")}` : "grounding issue"}`);
             steps = await generateSteps(retryGuidance);
         }
-        // Post-processing: scale thời gian để tổng = totalMinutes chính xác
         if (input.totalMinutes && input.totalMinutes > 0 && steps.length > 0) {
             const currentTotal = steps.reduce((sum, s) => sum + (s.estimatedDuration ?? 60), 0);
             if (currentTotal > 0) {
                 const scale = input.totalMinutes / currentTotal;
-                // Bước 1: Scale tất cả subtasks (chưa làm tròn)
                 const scaledDurations = steps.map((s) => Math.max(5, (s.estimatedDuration ?? 60) * scale));
-                // Bước 2: Làm tròn xuống bội số 5 cho tất cả
                 const roundedDurations = scaledDurations.map((d) => Math.floor(d / 5) * 5);
-                // Bước 3: Tính phần dư cần phân bổ
                 const roundedTotal = roundedDurations.reduce((sum, d) => sum + d, 0);
                 let remainder = input.totalMinutes - roundedTotal;
-                // Bước 4: Phân bổ phần dư (mỗi lần +5 phút) cho các subtask có phần lẻ lớn nhất
                 const fractionalParts = scaledDurations.map((d, i) => ({
                     index: i,
                     fraction: d - roundedDurations[i],
                 }));
-                // Sắp xếp theo phần lẻ giảm dần
                 fractionalParts.sort((a, b) => b.fraction - a.fraction);
-                // Phân bổ phần dư
                 for (let i = 0; i < fractionalParts.length && remainder >= 5; i++) {
                     const idx = fractionalParts[i].index;
                     roundedDurations[idx] += 5;
                     remainder -= 5;
                 }
-                // Bước 5: Nếu vẫn còn dư (< 5 phút), cộng vào subtask cuối
                 if (remainder > 0) {
                     roundedDurations[roundedDurations.length - 1] += remainder;
                 }
-                // Bước 6: Gán lại estimatedDuration
                 steps = steps.map((s, i) => ({
                     ...s,
                     estimatedDuration: Math.max(5, roundedDurations[i]),

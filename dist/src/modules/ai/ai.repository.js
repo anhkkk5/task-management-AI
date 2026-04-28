@@ -57,6 +57,7 @@ exports.aiRepository = {
         return ai_conversation_model_1.AiConversation.find({ userId: params.userId })
             .sort({ updatedAt: -1 })
             .limit(params.limit)
+            .lean()
             .exec();
     },
     findConversationByIdForUser: async (params) => {
@@ -85,6 +86,7 @@ exports.aiRepository = {
         })
             .sort({ createdAt: 1 })
             .limit(params.limit)
+            .lean()
             .exec();
     },
     deleteConversation: async (params) => {
@@ -103,7 +105,6 @@ exports.aiRepository = {
     renameConversation: async (params) => {
         return ai_conversation_model_1.AiConversation.findOneAndUpdate({ _id: params.conversationId, userId: params.userId }, { $set: { title: params.title } }, { new: true }).exec();
     },
-    // ─────────────────── User Memory ───────────────────
     listUserMemories: async (params) => {
         const query = { userId: params.userId };
         if (params.scopes?.length)
@@ -113,6 +114,7 @@ exports.aiRepository = {
         return user_memory_model_1.UserMemory.find(query)
             .sort({ lastSeenAt: -1, occurrences: -1 })
             .limit(params.limit ?? 30)
+            .lean()
             .exec();
     },
     upsertUserMemory: async (params) => {

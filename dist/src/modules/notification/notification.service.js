@@ -25,7 +25,6 @@ const toPublicNotification = (doc) => {
         createdAt: doc.createdAt,
     };
 };
-// ----- Priority auto-assign -----
 function resolvePriority(type, data) {
     const now = Date.now();
     const deadline = data?.deadline ? new Date(data.deadline).getTime() : null;
@@ -256,13 +255,9 @@ function computeSnoozeUntil(duration) {
     }
 }
 exports.notificationService = {
-    // Create and emit notification
     create: async (data) => {
-        // Resolve priority (auto if not passed)
         const priority = data.priority || resolvePriority(data.type, data.data);
-        // Load user prefs for quiet hours + grouping
         const prefs = await getUserNotificationPrefs(data.userId);
-        // Quiet hours: suppress email unless CRITICAL
         let emailChannel = data.channels?.email ?? false;
         if (emailChannel &&
             priority !== notification_model_1.NotificationPriority.CRITICAL &&
@@ -284,7 +279,6 @@ exports.notificationService = {
             },
         });
         let publicNotification = toPublicNotification(notification);
-        // ----- Smart grouping -----
         let groupedEmitted = false;
         if (prefs.groupingEnabled) {
             try {
@@ -301,11 +295,9 @@ exports.notificationService = {
                 console.error("[NotificationService] Grouping error:", err);
             }
         }
-        // Emit realtime notification if not absorbed into group
         if (!groupedEmitted && publicNotification.channels.inApp) {
             notification_gateway_1.notificationGateway.emitToUser(data.userId, publicNotification);
         }
-        // Queue email job if email channel enabled (respects quiet hours)
         if (notification.channels.email) {
             try {
                 await notification_queue_1.notificationQueue.add("send-email", {
@@ -329,7 +321,6 @@ exports.notificationService = {
         }
         return publicNotification;
     },
-    // Snooze a notification
     snooze: async (notificationId, userId, duration) => {
         const until = computeSnoozeUntil(duration);
         const updated = await notification_repository_1.notificationRepository.snooze(notificationId, new mongoose_1.Types.ObjectId(userId), until);
@@ -339,7 +330,6 @@ exports.notificationService = {
         notification_gateway_1.notificationGateway.emitDelete?.(userId, notificationId);
         return toPublicNotification(updated);
     },
-    // Unsnooze (bring back immediately)
     unsnooze: async (notificationId, userId) => {
         const updated = await notification_repository_1.notificationRepository.unsnooze(notificationId, new mongoose_1.Types.ObjectId(userId));
         if (!updated)
@@ -348,12 +338,10 @@ exports.notificationService = {
         notification_gateway_1.notificationGateway.emitToUser(userId, pub);
         return pub;
     },
-    // List snoozed notifications
     listSnoozed: async (userId) => {
         const docs = await notification_repository_1.notificationRepository.listSnoozed(new mongoose_1.Types.ObjectId(userId));
         return docs.map((doc) => toPublicNotification(doc));
     },
-    // Get group children (for expand view)
     listGroupChildren: async (parentId, userId) => {
         // Verify ownership of group parent first
         const parent = await notification_repository_1.notificationRepository.findByIdAndUser(parentId, new mongoose_1.Types.ObjectId(userId));
@@ -362,7 +350,6 @@ exports.notificationService = {
         const docs = await notification_repository_1.notificationRepository.findGroupChildren(new mongoose_1.Types.ObjectId(parentId));
         return docs.map((doc) => toPublicNotification(doc));
     },
-    // Resurrect expired snoozed notifications (called by cron)
     resurrectSnoozed: async () => {
         const expired = await notification_repository_1.notificationRepository.findExpiredSnoozes(500);
         if (!expired.length)
@@ -379,7 +366,6 @@ exports.notificationService = {
         }
         return expired.length;
     },
-    // Send digest emails for users whose digest schedule is due right now
     sendDigestForDueUsers: async (now = new Date()) => {
         const users = await user_repository_1.userRepository.findDigestEnabledUsers();
         let sent = 0;
@@ -459,38 +445,31 @@ exports.notificationService = {
         }
         return sent;
     },
-    // List notifications for user
     list: async (userId, options = {}) => {
         const notifications = await notification_repository_1.notificationRepository.listForUser(new mongoose_1.Types.ObjectId(userId), options);
         return notifications.map(toPublicNotification);
     },
-    // Count unread notifications
     countUnread: async (userId) => {
         return notification_repository_1.notificationRepository.countUnread(new mongoose_1.Types.ObjectId(userId));
     },
-    // Mark as read
     markAsRead: async (notificationId, userId) => {
         const updated = await notification_repository_1.notificationRepository.markAsRead(notificationId, new mongoose_1.Types.ObjectId(userId));
         if (!updated)
             return null;
         const publicNotification = toPublicNotification(updated);
-        // Emit read update realtime
         notification_gateway_1.notificationGateway.emitReadUpdate(userId, {
             notificationId: String(notificationId),
             isRead: true,
         });
         return publicNotification;
     },
-    // Mark all as read
     markAllAsRead: async (userId) => {
         await notification_repository_1.notificationRepository.markAllAsRead(new mongoose_1.Types.ObjectId(userId));
     },
-    // Delete notification
     delete: async (notificationId, userId) => {
         return notification_repository_1.notificationRepository.delete(notificationId, new mongoose_1.Types.ObjectId(userId));
     },
 };
-// Generate simple HTML email template
 function generateEmailHtml(title, content) {
     return `
 <!DOCTYPE html>

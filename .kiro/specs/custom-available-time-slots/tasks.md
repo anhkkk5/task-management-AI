@@ -1,0 +1,431 @@
+# Implementation Plan: Custom Available Time Slots
+
+## Overview
+
+This implementation plan breaks down the Custom Available Time Slots feature into discrete coding tasks. The feature allows users to define their own available time slots instead of using hardcoded workHours, with weekly patterns, custom date overrides, time templates, and full integration with the existing AI scheduler.
+
+The implementation follows a bottom-up approach: data models → services → API endpoints → scheduler integration → conflict detection → frontend components → testing.
+
+## Tasks
+
+- [ ] 1. Set up data models and database schema
+  - [ ] 1.1 Create UserAvailability MongoDB schema and model
+    - Define TimeSlot, WeeklyPattern, CustomDateOverride interfaces in types file
+    - Create Mongoose schema with validation (HH:mm format, YYYY-MM-DD format)
+    - Add indexes for userId (unique) and customDates.date
+    - Add pre-save validation middleware to check for overlapping slots
+    - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5, 11.6_
+  - [ ] 1.2 Create time template constants
+    - Define TimeTemplate interface
+    - Create TIME_TEMPLATES constant array with predefined templates (office-worker, student, freelancer)
+    - _Requirements: 3.1, 3.4_
+  - [ ]\* 1.3 Write property test for time slot validation
+    - **Property 1: Time Slot Validation**
+    - **Validates: Requirements 1.2, 2.5**
+    - Generate random time slots and verify validation rejects start >= end
+    - _Requirements: 1.2, 2.5_
+
+- [ ] 2. Implement core availability service
+  - [ ] 2.1 Create availability.service.ts with CRUD operations
+    - Implement createOrUpdateWeeklyPattern (upsert UserAvailability)
+    - Implement getAvailability (find by userId)
+    - Implement addCustomDate (push to customDates array)
+    - Implement removeCustomDate (pull from customDates array)
+    - Implement getTemplates (return TIME_TEMPLATES)
+    - Implement applyTemplate (update weeklyPattern from template)
+    - _Requirements: 1.1, 1.5, 2.1, 2.3, 3.2, 3.3, 10.1, 10.2, 10.3, 10.4, 10.5_
+  - [ ] 2.2 Implement validation functions
+    - Implement validateTimeSlot (check start < end, HH:mm format)
+    - Implement validateWeeklyPattern (validate all days)
+    - Implement checkOverlap (detect overlapping slots within a day)
+    - _Requirements: 1.2, 1.3, 2.5_
+  - [ ]\* 2.3 Write property test for overlap detection
+    - **Property 2: Overlap Detection Correctness**
+    - **Validates: Requirements 1.3**
+    - Generate random slot arrays and verify overlap detection accuracy
+    - _Requirements: 1.3_
+  - [ ]\* 2.4 Write unit tests for availability service
+    - Test createOrUpdateWeeklyPattern (create new, update existing)
+    - Test addCustomDate (add new, replace existing)
+    - Test removeCustomDate
+    - Test validation functions (edge cases: midnight, invalid formats)
+    - _Requirements: 1.1, 1.2, 1.3, 1.5, 2.1, 2.3_
+
+- [ ] 3. Implement availability resolver service
+  - [ ] 3.1 Create availability-resolver.service.ts
+    - Implement getUserAvailableSlots (resolve slots for specific date)
+    - Check Redis cache first (key: availability:custom:${userId}:${date})
+    - Query UserAvailability from MongoDB if cache miss
+    - Check for custom date override, fallback to weekly pattern
+    - Cache result in Redis (custom dates: 24h TTL, weekly: 1h TTL)
+    - Fallback to default workHours if no availability data
+    - _Requirements: 4.5, 12.1, 12.2, 12.5, 13.1_
+  - [ ] 3.2 Implement batch and utility functions
+    - Implement getUserAvailableSlotsForRange (batch query for date range)
+    - Implement convertSlotsToWorkHours (convert TimeSlot[] to WorkHours format)
+    - Implement calculateTotalAvailableMinutes (sum slot durations)
+    - Implement helper functions: timeToMinutes, minutesToTime, getDayName, formatDate
+    - _Requirements: 12.2, 13.3_
+  - [ ]\* 3.3 Write property test for custom date override resolution
+    - **Property 3: Custom Date Override Resolution**
+    - **Validates: Requirements 2.2**
+    - Generate random availability data and verify custom dates take precedence
+    - _Requirements: 2.2_
+  - [ ]\* 3.4 Write property test for template application
+    - **Property 4: Template Application Correctness**
+    - **Validates: Requirements 3.2**
+    - Verify applied template matches template definition exactly
+    - _Requirements: 3.2_
+  - [ ]\* 3.5 Write unit tests for resolver service
+    - Test getUserAvailableSlots (custom date, weekly pattern, fallback)
+    - Test cache hit/miss scenarios
+    - Test convertSlotsToWorkHours (single slot, multiple slots, gaps)
+    - Test helper functions (edge cases: midnight, timezone)
+    - _Requirements: 2.2, 4.5, 12.1, 12.2, 13.1_
+
+- [ ] 4. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 5. Implement feasibility validation service
+  - [ ] 5.1 Create feasibility checker in availability-resolver.service.ts
+    - Implement checkFeasibility function
+    - Calculate total available minutes from startDate to deadline for each task
+    - Calculate total required minutes (sum of estimatedDuration)
+    - Compare available vs required, calculate shortfall
+    - Generate suggestions (extend availability, extend deadline, reduce scope)
+    - Return FeasibilityResult with per-task breakdown
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+  - [ ]\* 5.2 Write property test for total available time calculation
+    - **Property 11: Total Available Time Calculation**
+    - **Validates: Requirements 6.1**
+    - Generate random date ranges and verify total minutes calculation
+    - _Requirements: 6.1_
+  - [ ]\* 5.3 Write property test for feasibility check
+    - **Property 12: Feasibility Check Correctness**
+    - **Validates: Requirements 6.3, 6.5**
+    - Generate random task sets and verify feasibility logic
+    - _Requirements: 6.3, 6.5_
+  - [ ]\* 5.4 Write unit tests for feasibility service
+    - Test checkFeasibility (feasible case, infeasible case, edge cases)
+    - Test with custom date overrides
+    - Test with tasks having different deadlines
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+
+- [ ] 6. Implement conflict detection service
+  - [ ] 6.1 Create conflict-detection.service.ts
+    - Implement detectSchedulingConflict function
+    - Check if scheduled time is within available slots
+    - Query existing scheduled tasks for overlaps
+    - Return ConflictResult with conflict type and message
+    - _Requirements: 5.1, 5.2_
+  - [ ] 6.2 Implement affected tasks finder
+    - Implement findAffectedTasks function
+    - Query all scheduled tasks for user
+    - Check each task against new availability
+    - Find suggested new slots for affected tasks
+    - Return AffectedTask[] with suggestions
+    - _Requirements: 5.5, 9.1, 9.2, 9.3_
+  - [ ] 6.3 Implement alternative slot suggester
+    - Implement suggestAlternativeSlots function
+    - Get available slots for task date
+    - Query existing scheduled tasks to build busy slots
+    - Filter available slots by task duration
+    - Return top N slots with best productivity scores
+    - _Requirements: 5.4_
+  - [ ]\* 6.4 Write property test for conflict detection
+    - **Property 8: Conflict Detection Accuracy**
+    - **Validates: Requirements 5.1**
+    - Generate random scheduled times and verify conflict detection logic
+    - _Requirements: 5.1_
+  - [ ]\* 6.5 Write property test for alternative slot validity
+    - **Property 9: Alternative Slot Suggestions Validity**
+    - **Validates: Requirements 5.4**
+    - Verify all suggested slots are valid (within availability, no overlaps, sufficient duration)
+    - _Requirements: 5.4_
+  - [ ]\* 6.6 Write property test for affected task detection
+    - **Property 10: Affected Task Detection Completeness**
+    - **Validates: Requirements 5.5**
+    - Verify all and only affected tasks are identified
+    - _Requirements: 5.5_
+  - [ ]\* 6.7 Write unit tests for conflict detection service
+    - Test detectSchedulingConflict (outside availability, overlapping task, no conflict)
+    - Test findAffectedTasks (weekly pattern change, custom date change)
+    - Test suggestAlternativeSlots (multiple suggestions, no available slots)
+    - _Requirements: 5.1, 5.2, 5.4, 5.5, 9.1, 9.2, 9.3_
+
+- [ ] 7. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 8. Integrate with existing scheduler
+  - [ ] 8.1 Modify hybrid-schedule.service.ts to use availability
+    - Import availability-resolver.service
+    - Replace hardcoded workHours with getUserAvailableSlots call
+    - Convert slots to workHours format using convertSlotsToWorkHours
+    - Add error handling with fallback to default workHours
+    - Update schedulePlan function to use dynamic availability
+    - _Requirements: 4.1, 4.2, 4.3, 4.5, 12.1, 12.2, 12.3, 12.4, 12.5_
+  - [ ] 8.2 Update scheduler to calculate busy slots correctly
+    - Query existing scheduled tasks from database
+    - Build busySlots array from scheduled tasks
+    - Combine with availability gaps (time outside available slots)
+    - Pass busySlots to findOptimalSlotWithFallback
+    - _Requirements: 4.6_
+  - [ ]\* 8.3 Write property test for scheduler respecting availability
+    - **Property 5: Scheduler Respects Availability**
+    - **Validates: Requirements 4.1, 4.2**
+    - Generate random availability and tasks, verify all scheduled tasks are within available slots
+    - _Requirements: 4.1, 4.2_
+  - [ ]\* 8.4 Write property test for scheduler prioritizing longer slots
+    - **Property 6: Scheduler Prioritizes Longer Slots**
+    - **Validates: Requirements 4.4**
+    - Verify scheduler prefers longer slots when productivity scores are equal
+    - _Requirements: 4.4_
+  - [ ]\* 8.5 Write property test for busy slot calculation
+    - **Property 7: Busy Slot Calculation Correctness**
+    - **Validates: Requirements 4.6**
+    - Verify busy slots are correctly calculated from scheduled tasks and availability gaps
+    - _Requirements: 4.6_
+  - [ ]\* 8.6 Write integration tests for scheduler
+    - Test scheduler uses user availability instead of hardcoded workHours
+    - Test scheduler with limited availability (e.g., only 20:00-23:00)
+    - Test scheduler with custom date overrides
+    - Test scheduler fallback when no availability data
+    - _Requirements: 4.1, 4.2, 4.3, 4.5, 12.5_
+
+- [ ] 9. Implement API endpoints
+  - [ ] 9.1 Create availability.controller.ts
+    - Implement createOrUpdateAvailability (POST /api/users/:userId/availability)
+    - Implement getAvailability (GET /api/users/:userId/availability)
+    - Implement addCustomDate (POST /api/users/:userId/availability/custom-dates)
+    - Implement removeCustomDate (DELETE /api/users/:userId/availability/custom-dates/:date)
+    - Implement getTemplates (GET /api/users/:userId/availability/templates)
+    - Implement applyTemplate (POST /api/users/:userId/availability/templates/:templateId)
+    - Implement copyDay (POST /api/users/:userId/availability/copy)
+    - Add error handling and response formatting
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 8.1, 8.2, 8.3, 8.4_
+  - [ ] 9.2 Create validation middleware with Joi schemas
+    - Create Joi schema for TimeSlot (start/end format validation)
+    - Create Joi schema for WeeklyPattern (all 7 days)
+    - Create Joi schema for CustomDateOverride (date format, slots)
+    - Create Joi schema for copyDay request (sourceDay, targetDays)
+    - Add validation middleware to routes
+    - _Requirements: 10.6, 1.2, 1.3, 2.5_
+  - [ ] 9.3 Create availability.routes.ts
+    - Define all availability routes with validation middleware
+    - Add authentication middleware (require user to be logged in)
+    - Add authorization check (user can only modify their own availability)
+    - Mount routes in app.ts
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+  - [ ] 9.4 Add conflict detection and feasibility endpoints
+    - Implement checkFeasibility endpoint (POST /api/users/:userId/availability/check-feasibility)
+    - Implement findAffectedTasks endpoint (POST /api/users/:userId/availability/find-affected-tasks)
+    - Implement getAvailableSlots endpoint (GET /api/users/:userId/availability/slots)
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 9.1, 9.2, 9.3_
+  - [ ]\* 9.5 Write API integration tests
+    - Test POST /api/users/:userId/availability (success, validation errors, overlaps)
+    - Test GET /api/users/:userId/availability (found, not found)
+    - Test custom date endpoints (add, remove)
+    - Test template endpoints (get, apply)
+    - Test copyDay endpoint
+    - Test conflict detection and feasibility endpoints
+    - Test authentication and authorization
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7_
+
+- [ ] 10. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 11. Implement cache invalidation logic
+  - [ ] 11.1 Add cache invalidation to availability service
+    - Invalidate weekly pattern cache on createOrUpdateWeeklyPattern
+    - Invalidate custom date cache on addCustomDate
+    - Invalidate custom date cache on removeCustomDate
+    - Invalidate all user caches on applyTemplate
+    - _Requirements: 13.2_
+  - [ ]\* 11.2 Write property test for cache consistency
+    - **Property 14: Cache Consistency**
+    - **Validates: Requirements 13.2**
+    - Verify cache returns fresh data after updates
+    - _Requirements: 13.2_
+  - [ ]\* 11.3 Write unit tests for cache invalidation
+    - Test cache invalidation on weekly pattern update
+    - Test cache invalidation on custom date add/remove
+    - Test cache hit after invalidation returns fresh data
+    - _Requirements: 13.2_
+
+- [ ] 12. Implement reschedule functionality
+  - [ ] 12.1 Add auto-reschedule function to conflict-detection.service.ts
+    - Implement autoRescheduleAffectedTasks function
+    - For each affected task, update scheduledTime to suggested slot
+    - Handle errors gracefully (log and continue)
+    - Return success/failure summary
+    - _Requirements: 9.4, 9.5_
+  - [ ] 12.2 Add reschedule endpoint to availability.controller.ts
+    - Implement autoReschedule endpoint (POST /api/users/:userId/availability/auto-reschedule)
+    - Call findAffectedTasks to get affected tasks
+    - Call autoRescheduleAffectedTasks to reschedule
+    - Return summary of rescheduled and failed tasks
+    - _Requirements: 9.4, 9.5_
+  - [ ]\* 12.3 Write unit tests for reschedule functionality
+    - Test autoRescheduleAffectedTasks (all success, partial failure)
+    - Test reschedule endpoint
+    - _Requirements: 9.4, 9.5_
+
+- [ ] 13. Implement analytics for availability utilization
+  - [ ] 13.1 Create availability-analytics.service.ts
+    - Implement calculateWeeklyAvailableMinutes (sum all slots in weekly pattern)
+    - Implement calculateWeeklyScheduledMinutes (sum scheduled tasks for week)
+    - Implement calculateUtilizationRate (scheduled / available)
+    - Implement getUtilizationBreakdown (per-day breakdown)
+    - _Requirements: 14.1, 14.2, 14.3, 14.6_
+  - [ ] 13.2 Add analytics endpoint to availability.controller.ts
+    - Implement getUtilization endpoint (GET /api/users/:userId/availability/utilization)
+    - Calculate utilization rate and breakdown
+    - Add warnings for under-utilization (<30%) and over-scheduling (>90%)
+    - _Requirements: 14.4, 14.5_
+  - [ ]\* 13.3 Write unit tests for analytics service
+    - Test calculateWeeklyAvailableMinutes
+    - Test calculateWeeklyScheduledMinutes
+    - Test calculateUtilizationRate (various scenarios)
+    - Test getUtilizationBreakdown
+    - Test warnings for under/over utilization
+    - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 14.6_
+
+- [ ] 14. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 15. Add error handling and logging
+  - [ ] 15.1 Create custom error classes
+    - Create TimeSlotValidationError class
+    - Create OverlapError class
+    - Create InvalidDateFormatError class
+    - Add error classes to common/errors directory
+    - _Requirements: Error handling (design document)_
+  - [ ] 15.2 Add structured logging to all services
+    - Add logger calls for availability updates (info level)
+    - Add logger calls for conflicts detected (warn level)
+    - Add logger calls for errors (error level with stack trace)
+    - Use structured logging format with userId, action, timestamp
+    - _Requirements: Error handling (design document)_
+  - [ ] 15.3 Add error handling middleware to API routes
+    - Catch validation errors and return 400 Bad Request
+    - Catch not found errors and return 404 Not Found
+    - Catch overlap errors and return 409 Conflict
+    - Catch internal errors and return 500 Internal Server Error
+    - Format error responses consistently
+    - _Requirements: 10.6, 10.7, Error handling (design document)_
+
+- [ ] 16. Implement performance optimizations
+  - [ ] 16.1 Add database indexes
+    - Verify userId index on UserAvailability (unique)
+    - Add index on customDates.date for faster custom date lookups
+    - Add compound index on Task (userId, scheduledTime.start) for conflict detection
+    - Add index on Task (userId, status) for scheduled task queries
+    - _Requirements: 11.2, 13.3_
+  - [ ] 16.2 Optimize batch queries
+    - Implement batch availability query for date ranges (single DB call)
+    - Implement batch scheduled task query (single DB call)
+    - Use MongoDB projection to fetch only needed fields
+    - _Requirements: 13.3, 13.4_
+  - [ ]\* 16.3 Write performance tests
+    - Test availability query completes within 100ms (90th percentile)
+    - Test cache hit rate is >80% after warmup
+    - Test batch queries are faster than individual queries
+    - _Requirements: 13.5_
+
+- [ ] 17. Create frontend calendar view component (React/Vue)
+  - [ ] 17.1 Create CalendarView component
+    - Create 7-column grid layout (Monday-Sunday)
+    - Display available time slots in green
+    - Display unavailable time (gaps) in gray
+    - Display custom date overrides in yellow
+    - Display scheduled tasks overlay in blue
+    - Add responsive design for mobile (<768px)
+    - _Requirements: 7.1, 7.2, 7.5, 7.6, 15.1_
+  - [ ] 17.2 Add slot editing functionality
+    - Add click handler to add new time slot
+    - Add drag & drop to resize slot (desktop only)
+    - Add tap-to-edit mode for mobile
+    - Show time picker modal on edit
+    - Call API to save changes
+    - _Requirements: 7.3, 7.4, 15.2, 15.3_
+  - [ ] 17.3 Add mobile-specific features
+    - Implement swipe left/right to navigate days
+    - Use native time picker on mobile
+    - Switch to list view on very small screens if needed
+    - _Requirements: 15.2, 15.3, 15.4, 15.5_
+
+- [ ] 18. Create frontend time picker component
+  - [ ] 18.1 Create TimePicker component
+    - Use native time input on mobile
+    - Create custom dropdown time picker for desktop
+    - Support 15-minute step intervals
+    - Add validation (start < end, within 00:00-23:59)
+    - _Requirements: 1.2, 2.5_
+
+- [ ] 19. Create frontend template selector component
+  - [ ] 19.1 Create TemplateSelector component
+    - Fetch templates from API
+    - Display template cards with name, description, category
+    - Show preview of template weekly pattern
+    - Add confirmation dialog if user has existing pattern
+    - Call API to apply template
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+
+- [ ] 20. Create frontend conflict warning component
+  - [ ] 20.1 Create ConflictWarning component
+    - Display red badge indicator when conflicts exist
+    - Show list of conflicts with details
+    - Display suggested alternative slots
+    - Add "Auto-reschedule" button
+    - Add "Manual review" option
+    - Call API to reschedule or dismiss
+    - _Requirements: 5.1, 5.2, 5.3, 5.4, 9.3, 9.4_
+
+- [ ] 21. Create frontend copy day functionality
+  - [ ] 21.1 Add copy/paste UI to CalendarView
+    - Add "Copy" button to each day column
+    - Add "Paste to..." dropdown to select target days
+    - Show confirmation dialog before overwriting
+    - Call API to copy slots
+    - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
+
+- [ ] 22. Checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+- [ ] 23. Add API documentation
+  - [ ] 23.1 Add Swagger/OpenAPI documentation for all endpoints
+    - Document POST /api/users/:userId/availability
+    - Document GET /api/users/:userId/availability
+    - Document custom date endpoints
+    - Document template endpoints
+    - Document conflict detection endpoints
+    - Document feasibility endpoints
+    - Document analytics endpoints
+    - Add request/response examples
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
+
+- [ ] 24. Final integration testing
+  - [ ]\* 24.1 Write end-to-end tests for complete user flows
+    - Test flow: Setup availability → Schedule tasks → View calendar
+    - Test flow: Apply template → Customize → Schedule tasks
+    - Test flow: Add custom date → Schedule tasks → Verify override
+    - Test flow: Change availability → See affected tasks → Auto-reschedule
+    - Test flow: Manual schedule → Detect conflict → Accept suggestion
+    - Test flow: View utilization analytics → Adjust availability
+    - _Requirements: All requirements_
+
+- [ ] 25. Final checkpoint - Ensure all tests pass
+  - Ensure all tests pass, ask the user if questions arise.
+
+## Notes
+
+- Tasks marked with `*` are optional and can be skipped for faster MVP
+- Each task references specific requirements for traceability
+- Property-based tests validate universal correctness properties (14 properties total)
+- Unit tests validate specific examples and edge cases
+- Integration tests validate end-to-end flows
+- The implementation uses TypeScript with Express, MongoDB (Mongoose), Redis, and Jest
+- Frontend components can be implemented in React or Vue (project uses both)
+- All database operations include proper error handling and fallback mechanisms
+- Cache invalidation ensures data consistency after updates
+- Performance optimizations target <100ms query time for 90% of requests

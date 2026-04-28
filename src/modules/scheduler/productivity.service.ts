@@ -31,63 +31,180 @@ export class ProductivityScorer {
 
     return scores;
   }
+  // Circadian rhythm prior — fallback when no/little user data
+  private static readonly CIRCADIAN_PRIOR: Record<number, number> = {
+    0: 0.15,
+    1: 0.1,
+    2: 0.08,
+    3: 0.08,
+    4: 0.1,
+    5: 0.2,
+    6: 0.4,
+    7: 0.55,
+    8: 0.8,
+    9: 0.9,
+    10: 0.92,
+    11: 0.85,
+    12: 0.5,
+    13: 0.55,
+    14: 0.75,
+    15: 0.82,
+    16: 0.8,
+    17: 0.7,
+    18: 0.55,
+    19: 0.65,
+    20: 0.72,
+    21: 0.68,
+    22: 0.45,
+    23: 0.25,
+  };
+
   /**
-   * Tính điểm productivity cho từng giờ trong ngày
-   * Dựa trên lịch sử completed tasks của user
+   * Tính điểm productivity cho từng giờ trong ngày.
+   *
+   * Improvements over v1:
+   * - Exponential decay: recent tasks weigh more (half-life = lookbackDays / 3)
+   * - Bayesian smoothing: blends observed score with circadian prior based on confidence
+   * - Backward compatible: `daysAgo` field is optional
    */
   calculateHourlyScores(
-    completedTasks: { hour: number; completed: boolean; duration: number }[],
+    completedTasks: {
+      hour: number;
+      completed: boolean;
+      duration: number;
+      /** Days ago this task was completed (0 = today). Optional for backward compat. */
+      daysAgo?: number;
+      /** Day of week (0=Sun, 6=Sat). Optional for day-of-week filtering. */
+      dayOfWeek?: number;
+    }[],
     lookbackDays: number = 30,
   ): Map<number, ProductivityScore> {
+    // Half-life for exponential decay (in days)
+    const halfLife = Math.max(3, lookbackDays / 3);
+    const decayLambda = Math.LN2 / halfLife;
+
     const hourlyStats = new Map<
       number,
-      { completed: number; total: number; totalDuration: number }
+      {
+        weightedCompleted: number;
+        weightedTotal: number;
+        weightedDuration: number;
+        rawTotal: number;
+      }
     >();
 
-    // Khởi tạo stats cho tất cả giờ
     for (let i = 0; i < 24; i++) {
-      hourlyStats.set(i, { completed: 0, total: 0, totalDuration: 0 });
+      hourlyStats.set(i, {
+        weightedCompleted: 0,
+        weightedTotal: 0,
+        weightedDuration: 0,
+        rawTotal: 0,
+      });
     }
 
-    // Group tasks theo giờ
     completedTasks.forEach((task) => {
       const stats = hourlyStats.get(task.hour);
-      if (stats) {
-        stats.total++;
-        stats.totalDuration += task.duration;
-        if (task.completed) {
-          stats.completed++;
-        }
+      if (!stats) return;
+
+      // Exponential decay weight: recent tasks count more
+      const age = task.daysAgo ?? 0;
+      const weight = Math.exp(-decayLambda * age);
+
+      stats.weightedTotal += weight;
+      stats.weightedDuration += task.duration * weight;
+      stats.rawTotal++;
+      if (task.completed) {
+        stats.weightedCompleted += weight;
       }
     });
 
-    // Tính score cho mỗi giờ
     const scores = new Map<number, ProductivityScore>();
 
     hourlyStats.forEach((stats, hour) => {
+      // Observed score from user data
       const completionRate =
-        stats.total > 0 ? stats.completed / stats.total : 0.5;
+        stats.weightedTotal > 0
+          ? stats.weightedCompleted / stats.weightedTotal
+          : 0;
       const avgDuration =
-        stats.total > 0 ? stats.totalDuration / stats.total : 60;
-
-      // Normalize avgDuration (giả định 30-120 phút là tốt)
+        stats.weightedTotal > 0
+          ? stats.weightedDuration / stats.weightedTotal
+          : 60;
       const durationScore = Math.min(Math.max(avgDuration / 60, 0.3), 1);
+      const observedScore = completionRate * 0.7 + durationScore * 0.3;
 
-      // Weighted score
-      const score = completionRate * 0.7 + durationScore * 0.3;
+      // Confidence: grows with effective sample size (decay-weighted)
+      const confidence = Math.min(stats.weightedTotal / 8, 1);
 
-      // Confidence dựa trên sample size
-      const confidence = Math.min(stats.total / 10, 1);
+      // Bayesian smoothing: blend observed with circadian prior
+      const prior = ProductivityScorer.CIRCADIAN_PRIOR[hour] ?? 0.5;
+      const bayesianScore =
+        observedScore * confidence + prior * (1 - confidence);
 
       scores.set(hour, {
         hour,
-        score: Math.round(score * 100) / 100,
+        score: Math.round(bayesianScore * 100) / 100,
         confidence: Math.round(confidence * 100) / 100,
-        sampleSize: stats.total,
+        sampleSize: stats.rawTotal,
       });
     });
 
     return scores;
+  }
+
+  /**
+   * Tính productivity scores filtered by day-of-week.
+   * Useful for scheduling on a specific day (e.g., Monday vs Friday).
+   * Falls back to all-day scores if not enough data for the target day.
+   */
+  calculateHourlyScoresForDay(
+    completedTasks: {
+      hour: number;
+      completed: boolean;
+      duration: number;
+      daysAgo?: number;
+      dayOfWeek?: number;
+    }[],
+    targetDayOfWeek: number,
+    lookbackDays: number = 30,
+  ): Map<number, ProductivityScore> {
+    // Filter to target day
+    const dayFiltered = completedTasks.filter(
+      (t) => t.dayOfWeek === targetDayOfWeek,
+    );
+
+    // If enough data for this day-of-week, use it
+    if (dayFiltered.length >= 10) {
+      return this.calculateHourlyScores(dayFiltered, lookbackDays);
+    }
+
+    // Otherwise blend: 60% day-specific + 40% all-days
+    const dayScores = this.calculateHourlyScores(dayFiltered, lookbackDays);
+    const allScores = this.calculateHourlyScores(completedTasks, lookbackDays);
+
+    const blended = new Map<number, ProductivityScore>();
+    const dayWeight = Math.min(dayFiltered.length / 10, 0.6);
+    const allWeight = 1 - dayWeight;
+
+    for (let h = 0; h < 24; h++) {
+      const ds = dayScores.get(h);
+      const as = allScores.get(h);
+      if (!ds || !as) continue;
+
+      blended.set(h, {
+        hour: h,
+        score:
+          Math.round((ds.score * dayWeight + as.score * allWeight) * 100) / 100,
+        confidence:
+          Math.round(
+            Math.max(ds.confidence * dayWeight, as.confidence * allWeight) *
+              100,
+          ) / 100,
+        sampleSize: ds.sampleSize + as.sampleSize,
+      });
+    }
+
+    return blended;
   }
 
   /**

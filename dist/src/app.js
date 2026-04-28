@@ -41,9 +41,6 @@ const createApp = () => {
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allowedHeaders: ["Content-Type", "Authorization"],
     }));
-    // Gzip/Brotli compression for all responses. Critical on managed hosts
-    // (Vercel/Render) where bandwidth & cold-start TTFB dominate. Skip when
-    // the client opts-out or when the response sets `x-no-compression`.
     app.use((0, compression_1.default)({
         threshold: 1024, // do not bother compressing tiny payloads
         filter: (req, res) => {
@@ -53,11 +50,8 @@ const createApp = () => {
         },
     }));
     app.use((0, cookie_parser_1.default)());
-    // Generous JSON limit for AI breakdown payloads. Keep urlencoded smaller
-    // since we only use it for OAuth callbacks.
     app.use(express_1.default.json({ limit: "2mb" }));
     app.use(express_1.default.urlencoded({ extended: true, limit: "1mb" }));
-    // Initialize Passport
     (0, passport_2.setupPassport)();
     app.use(passport_1.default.initialize());
     app.use(((err, _req, res, next) => {
@@ -70,7 +64,6 @@ const createApp = () => {
     app.get("/", (_req, res) => {
         res.send("hello");
     });
-    // Health check used by Render/Vercel to keep the dyno warm.
     app.get("/healthz", (_req, res) => {
         res.json({ ok: true, ts: Date.now() });
     });

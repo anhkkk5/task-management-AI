@@ -1,28 +1,48 @@
 /**
  * Adaptive Buffer Calculator
- * Tính buffer time linh hoạt dựa trên duration của session
+ * Pomodoro-inspired graduated buffer with cumulative fatigue support.
+ *
+ * Levels:
+ *   < 25 min  →  5 min  (micro break)
+ *  25-50 min  → 10 min  (short break)
+ *  50-90 min  → 15 min  (standard break)
+ *   > 90 min  → 20 min  (long break, mental reset)
+ *
+ * Fatigue bonus: +5 min after every 3 consecutive sessions.
  */
 
 export class AdaptiveBufferCalculator {
   /**
-   * Tính buffer time dựa trên duration của session vừa kết thúc
-   *
-   * Quy tắc:
-   * - Session < 40 phút → buffer 10 phút (nghỉ ngắn)
-   * - Session ≥ 40 phút → buffer 15 phút (nghỉ dài hơn)
+   * Tính buffer time dựa trên duration của session vừa kết thúc.
    *
    * @param sessionDuration Duration của session (phút)
-   * @param defaultBuffer Buffer mặc định nếu không áp dụng quy tắc (phút)
+   * @param _defaultBuffer Kept for backward compat (ignored in new logic)
+   * @param consecutiveSessions Số session liên tiếp đã hoàn thành (dùng cho fatigue bonus)
    * @returns Buffer time (phút)
    */
   static calculateBuffer(
     sessionDuration: number,
-    defaultBuffer: number = 15,
+    _defaultBuffer: number = 15,
+    consecutiveSessions: number = 0,
   ): number {
-    if (sessionDuration < 40) {
-      return 10; // Session ngắn → nghỉ 10 phút
+    // Graduated base buffer
+    let base: number;
+    if (sessionDuration < 25) {
+      base = 5; // micro break
+    } else if (sessionDuration < 50) {
+      base = 10; // short break
+    } else if (sessionDuration <= 90) {
+      base = 15; // standard break
+    } else {
+      base = 20; // long break — mental reset needed
     }
-    return defaultBuffer; // Session dài → nghỉ 15 phút (hoặc theo config)
+
+    // Cumulative fatigue: +5 min every 3 consecutive sessions
+    const fatigueBonus =
+      consecutiveSessions >= 3 ? Math.floor(consecutiveSessions / 3) * 5 : 0;
+
+    // Cap total buffer at 30 min to avoid excessive gaps
+    return Math.min(base + fatigueBonus, 30);
   }
 
   /**

@@ -1817,13 +1817,13 @@ async function ensureTaskPlanningInputsWithMeta(
 
   // ── estimatedDuration ──
   if (task.estimatedDuration == null) {
-    // Step 1: Heuristic base (AI-era: công việc knowledge work bị AI rút ngắn rất nhiều).
-    let baseEstimate: number;
-    if (daysUntilDeadline <= 1) baseEstimate = 45;
-    else if (daysUntilDeadline <= 3) baseEstimate = 90;
-    else if (daysUntilDeadline <= 7) baseEstimate = 180;
-    else if (daysUntilDeadline <= 14) baseEstimate = 360;
-    else baseEstimate = 540;
+    // Step 1: Heuristic base — continuous logarithmic scale.
+    // Smooth curve: ~45 min (1 day) → ~90 (3d) → ~180 (7d) → ~360 (14d) → ~540 (30d+)
+    const baseEstimate = clamp(
+      roundToNearest5(45 + 95 * Math.log2(Math.max(1, daysUntilDeadline))),
+      45,
+      540,
+    );
     baseEstimateValue = baseEstimate;
 
     const priority = String(task.priority ?? "medium").toLowerCase();

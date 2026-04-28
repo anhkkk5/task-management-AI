@@ -11,7 +11,6 @@ import { aiCacheService } from "./ai.cache.service";
 import { extractJson, repairTruncatedJson } from "./ai-utils";
 
 export { aiChatService } from "./ai-chat.service";
-export { aiScheduleService } from "./ai-schedule.service";
 export { aiRescheduleService } from "./ai-reschedule.service";
 
 export const aiService = {
@@ -575,11 +574,21 @@ ${extraGuidance}`;
     ];
 
     const hasTaskAnchors = anchorSet.size >= 3;
+    const JACCARD_THRESHOLD = 0.12;
     const ungroundedCount = steps.filter(
       (step: { title: string; description?: string }) => {
         if (!hasTaskAnchors) return false;
-        const stepTokens = tokenize(`${step.title} ${step.description ?? ""}`);
-        return !stepTokens.some((token) => anchorSet.has(token));
+        const stepTokens = new Set(
+          tokenize(`${step.title} ${step.description ?? ""}`),
+        );
+        // Jaccard similarity: |A ∩ B| / |A ∪ B|
+        let intersection = 0;
+        for (const token of stepTokens) {
+          if (anchorSet.has(token)) intersection++;
+        }
+        const union = anchorSet.size + stepTokens.size - intersection;
+        const jaccard = union > 0 ? intersection / union : 0;
+        return jaccard < JACCARD_THRESHOLD;
       },
     ).length;
 

@@ -181,7 +181,6 @@ const resolveBreakdownProfile = async (task) => {
         return undefined;
     }
 };
-// Generate invite email HTML template
 const generateInviteEmailHtml = (params) => {
     const timeStr = params.startTime
         ? `${params.startTime.toLocaleString("vi-VN")}${params.endTime ? ` - ${params.endTime.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}` : ""}`
@@ -226,23 +225,19 @@ const generateInviteEmailHtml = (params) => {
 </body>
 </html>`;
 };
-// Send invite emails to guests
 const sendGuestInvites = async (params) => {
     const { userId, task, previousGuests = [] } = params;
     if (!task.guests || task.guests.length === 0)
         return;
-    // Chỉ gửi cho guests mới (không có trong previousGuests)
     const newGuests = task.guests.filter((g) => !previousGuests.includes(g));
     if (newGuests.length === 0)
         return;
-    // Lấy thông tin organizer
     const organizer = await user_repository_1.userRepository.findById(userId);
     if (!organizer)
         return;
     const organizerName = organizer.name || organizer.email;
     const organizerEmail = organizer.email;
     for (const guestEmail of newGuests) {
-        // Không gửi cho chính organizer
         if (guestEmail === organizerEmail.toLowerCase())
             continue;
         const html = generateInviteEmailHtml({
@@ -362,7 +357,6 @@ exports.taskService = {
         const parentTaskId = dto.parentTaskId
             ? new mongoose_1.Types.ObjectId(dto.parentTaskId)
             : undefined;
-        // Convert guestDetails guestId strings to ObjectId
         const guestDetails = dto.guestDetails
             ? dto.guestDetails.map((g) => ({
                 guestId: new mongoose_1.Types.ObjectId(g.guestId),
@@ -404,14 +398,11 @@ exports.taskService = {
                 }
                 : undefined,
         });
-        // Auto-breakdown for all tasks (with AI analysis)
-        // Trigger auto-breakdown asynchronously (don't wait)
         exports.taskService.autoBreakdown(userId, String(doc._id)).catch((error) => {
             console.error("[AutoBreakdown] Failed for task:", doc._id, error.message);
         });
         await invalidateTasksCache(userId);
         const publicTask = toPublicTask(doc);
-        // Send invite emails to guests (don't wait)
         if (dto.guests && dto.guests.length > 0) {
             sendGuestInvites({ userId, task: publicTask }).catch((err) => {
                 console.error("[TaskService] Failed to send guest invites:", err.message);
@@ -434,7 +425,6 @@ exports.taskService = {
         if (title !== undefined && title.length === 0) {
             throw new Error("INVALID_TITLE");
         }
-        // Get current task to check status change
         const currentTask = await task_repository_1.taskRepository.findByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -446,7 +436,6 @@ exports.taskService = {
             const teamId = String(currentTask.teamAssignment.teamId);
             throw new Error(`TEAM_TASK_EDIT_RESTRICTED:${teamId}`);
         }
-        // Convert guestDetails guestId strings to ObjectId
         const guestDetails = dto.guestDetails
             ? dto.guestDetails.map((g) => ({
                 guestId: new mongoose_1.Types.ObjectId(g.guestId),
@@ -484,8 +473,6 @@ exports.taskService = {
             dailyTargetMin: dto.dailyTargetMin,
             scheduledTime: dto.scheduledTime,
         });
-        // If scheduledTime was updated, delete old scheduled notifications for this task
-        // so that new reminders can be sent for the new time
         if (dto.scheduledTime && updated) {
             try {
                 const deletedCount = await notification_repository_1.notificationRepository.deleteByTaskId(new mongoose_1.Types.ObjectId(userId), taskId, [
@@ -503,17 +490,13 @@ exports.taskService = {
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
-        // Khi đưa task về "todo" thì xóa toàn bộ AI sessions cũ của task này
-        // để tránh apply optimize lần sau bị dư lịch/dư phiên.
         if (dto.status === "todo") {
             await removeTaskSessionsFromActiveSchedules(userId, taskId);
         }
-        // Track completion history when task is marked as completed
         if (dto.status === "completed" && currentTask.status !== "completed") {
             const completedAt = new Date();
             const hour = completedAt.getHours();
             const dayOfWeek = completedAt.getDay();
-            // Estimate duration from creation time (simplified)
             const duration = Math.floor((completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60));
             await user_habit_repository_1.userHabitRepository.addCompletionHistory(userId, {
                 hour,
@@ -524,7 +507,6 @@ exports.taskService = {
         }
         await invalidateTasksCache(userId);
         const publicTask = toPublicTask(updated);
-        // Send invite emails to new guests (don't wait)
         if (dto.guests && dto.guests.length > 0) {
             const previousGuests = (currentTask.guests || []).map((g) => g.toLowerCase());
             sendGuestInvites({ userId, task: publicTask, previousGuests }).catch((err) => {
@@ -557,7 +539,6 @@ exports.taskService = {
         if (!deleted) {
             throw new Error("TASK_FORBIDDEN");
         }
-        // Cascade delete: Xóa tất cả task con có parentTaskId trỏ đến task vừa xóa
         const deletedChildrenCount = await task_repository_1.taskRepository.deleteManyByParentTaskId({
             parentTaskId: taskId,
             userId: userObjectId,
@@ -565,7 +546,6 @@ exports.taskService = {
         if (deletedChildrenCount > 0) {
             console.log(`[TaskDelete] Đã xóa ${deletedChildrenCount} task con của task ${taskId}`);
         }
-        // Xóa sessions AI liên quan tới task chính + toàn bộ task con đã bị xóa
         await removeTaskSessionsFromActiveSchedules(userId, [
             taskId,
             ...childTaskIds,
@@ -584,7 +564,6 @@ exports.taskService = {
         if (task.estimatedDuration == null) {
             await hybrid_schedule_service_1.hybridScheduleService.estimateTaskPlanningInputs(userId, task, task.startAt ?? new Date());
         }
-        // Đọc sessions từ AISchedule
         const { AISchedule } = await Promise.resolve().then(() => __importStar(require("../ai-schedule/ai-schedule.model")));
         const activeSchedules = await AISchedule.find({
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -615,7 +594,6 @@ exports.taskService = {
             }
         }
         slots.sort((a, b) => a.date.localeCompare(b.date));
-        // Tổng thời gian từ slots (nếu có lịch) hoặc từ estimatedDuration
         const totalSlotMinutes = slots.reduce((sum, s) => sum + s.durationMinutes, 0);
         const normalizedEstimatedDuration = task.estimatedDuration ??
             (totalSlotMinutes > 0 ? totalSlotMinutes : undefined);
@@ -629,7 +607,6 @@ exports.taskService = {
             profile,
             slots: slots.length > 0 ? slots : undefined,
         });
-        // Thuật toán phân bổ: gán subtask vào slot theo tỷ lệ thời gian
         const stepsWithSlot = breakdown.steps.map((s, i) => {
             let assignedSlot;
             if (slots.length === 0) {
@@ -677,7 +654,6 @@ exports.taskService = {
         if (!updated) {
             throw new Error("TASK_FORBIDDEN");
         }
-        // Cập nhật title sessions trong AISchedule
         const subtaskTitles = stepsWithSlot.map((s) => s.title);
         await ai_schedule_repository_1.aiScheduleRepository.updateSessionTitlesForTask(userId, taskId, subtaskTitles);
         await invalidateTasksCache(userId);
@@ -701,7 +677,6 @@ exports.taskService = {
         };
     },
     autoBreakdown: async (userId, taskId) => {
-        // Check if user has auto-breakdown enabled
         const userHabits = await user_habit_repository_1.userHabitRepository.findByUserId(userId);
         const autoBreakdownEnabled = userHabits?.aiPreferences?.autoBreakdown ?? true;
         if (!autoBreakdownEnabled) {
@@ -714,7 +689,6 @@ exports.taskService = {
         if (!task) {
             throw new Error("TASK_FORBIDDEN");
         }
-        // Only auto-breakdown for complex tasks (high priority or with keywords indicating complexity)
         const isComplex = task.priority === "high" ||
             task.priority === "urgent" ||
             /(phân tích|thiết kế|xây dựng|develop|implement|code|backend|frontend)/i.test(task.title);
@@ -911,7 +885,6 @@ exports.taskService = {
         if (!mongoose_1.Types.ObjectId.isValid(userId) || !mongoose_1.Types.ObjectId.isValid(taskId)) {
             throw new Error("INVALID_ID");
         }
-        // Get current task to check status change
         const currentTask = await task_repository_1.taskRepository.findByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -936,12 +909,10 @@ exports.taskService = {
         if (status === "todo") {
             await removeTaskSessionsFromActiveSchedules(userId, taskId);
         }
-        // Track completion history when task is marked as completed
         if (status === "completed" && currentTask.status !== "completed") {
             const completedAt = new Date();
             const hour = completedAt.getHours();
             const dayOfWeek = completedAt.getDay();
-            // Estimate duration from creation time (simplified)
             const duration = Math.floor((completedAt.getTime() - currentTask.createdAt.getTime()) / (1000 * 60));
             await user_habit_repository_1.userHabitRepository.addCompletionHistory(userId, {
                 hour,

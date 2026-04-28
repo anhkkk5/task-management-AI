@@ -183,7 +183,7 @@ exports.taskRepository = {
         const filter = {
             userId: params.userId,
             isArchived: { $ne: true },
-            parentTaskId: { $exists: false }, // Chỉ lấy task cha, không lấy subtask
+            parentTaskId: { $exists: false },
         };
         if (params.status) {
             filter.status = params.status;
@@ -206,6 +206,7 @@ exports.taskRepository = {
                 .sort({ deadline: 1, updatedAt: -1 })
                 .skip(skip)
                 .limit(params.limit)
+                .lean()
                 .exec(),
             task_model_1.Task.countDocuments(filter).exec(),
         ]);
@@ -224,12 +225,12 @@ exports.taskRepository = {
                 .sort({ deadline: 1, updatedAt: -1 })
                 .skip(skip)
                 .limit(params.limit)
+                .lean()
                 .exec(),
             task_model_1.Task.countDocuments(filter).exec(),
         ]);
         return { items, total };
     },
-    // Find tasks with overlapping scheduled time
     findConflictingTasks: async (params) => {
         const filter = {
             userId: params.userId,
@@ -237,38 +238,34 @@ exports.taskRepository = {
             "scheduledTime.end": { $exists: true, $ne: null },
             status: { $nin: ["completed", "cancelled"] },
         };
-        // Exclude specific task if provided (for update scenario)
         if (params.excludeTaskId) {
             filter._id = { $ne: new mongoose_1.Types.ObjectId(params.excludeTaskId) };
         }
-        // Find tasks where scheduled time overlaps with the given time range
-        // Overlap condition: (taskStart < givenEnd) AND (taskEnd > givenStart)
         filter.$and = [
             { "scheduledTime.start": { $lt: params.endTime } },
             { "scheduledTime.end": { $gt: params.startTime } },
         ];
-        return task_model_1.Task.find(filter).exec();
+        return task_model_1.Task.find(filter).lean().exec();
     },
-    // Get scheduled tasks for conflict detection
     getScheduledTasks: async (params) => {
         const filter = {
             userId: params.userId,
             status: { $in: ["scheduled", "in_progress"] },
             "scheduledTime.start": { $exists: true, $ne: null },
             "scheduledTime.end": { $exists: true, $ne: null },
-            // Task phải overlap với range [startDate, endDate]
-            // Overlap condition: taskStart < endDate AND taskEnd > startDate
             $and: [
                 { "scheduledTime.start": { $lt: params.endDate } },
                 { "scheduledTime.end": { $gt: params.startDate } },
             ],
         };
-        // Exclude specific tasks (e.g., tasks being scheduled)
         if (params.excludeTaskIds && params.excludeTaskIds.length > 0) {
             filter._id = {
                 $nin: params.excludeTaskIds.map((id) => new mongoose_1.Types.ObjectId(id)),
             };
         }
-        return task_model_1.Task.find(filter).sort({ "scheduledTime.start": 1 }).exec();
+        return task_model_1.Task.find(filter)
+            .sort({ "scheduledTime.start": 1 })
+            .lean()
+            .exec();
     },
 };
