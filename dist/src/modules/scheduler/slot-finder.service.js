@@ -145,8 +145,11 @@ class SlotFinder {
         return freeSlots.sort((a, b) => a.start.getTime() - b.start.getTime());
     }
     /**
-     * Tìm slot tối ưu nhất cho task cụ thể
-     * Kết hợp: duration match + productivity score + preferred time
+     * Tìm slot tối ưu nhất cho task cụ thể.
+     *
+     * Multi-factor scoring:
+     *   productivity (40%) + slotFitness (20%) + preferredTime (15%)
+     *   + urgency (15%) − fragmentationPenalty (10%)
      */
     findOptimalSlot(input) {
         const { taskDuration, preferredTimeOfDay, productivityScores, busySlots, date, workHours = {
@@ -156,50 +159,97 @@ class SlotFinder {
                 { start: 11.5, end: 14 },
                 { start: 17.5, end: 19 },
             ],
-        }, bufferMinutes = 15, currentTime, } = input;
-        // Tìm tất cả slots đủ dài
+        }, bufferMinutes = 15, currentTime, deadline, priority, } = input;
         const freeSlots = this.findFreeSlots({
             busySlots,
             date,
             minDuration: taskDuration,
             workHours,
             bufferMinutes,
-            currentTime, // ⭐ Pass currentTime to findFreeSlots
+            currentTime,
         });
         if (freeSlots.length === 0) {
             return null;
         }
-        // Score mỗi slot
+        // ── Weights ──
+        const W_PROD = 0.4;
+        const W_FIT = 0.2;
+        const W_PREF = 0.15;
+        const W_URG = 0.15;
+        const W_FRAG = 0.1;
+        // ── Pre-compute urgency factor (shared across all slots) ──
+        let urgencyBonus = 0;
+        if (deadline) {
+            const msLeft = deadline.getTime() - date.getTime();
+            const daysLeft = msLeft / (1000 * 60 * 60 * 24);
+            // Closer deadline → higher urgency (1.0 = overdue, 0.0 = 7+ days)
+            urgencyBonus = Math.max(0, Math.min(1, 1 - daysLeft / 7));
+        }
+        // Priority boost stacks with deadline urgency
+        const priorityMultiplier = priority === "urgent"
+            ? 1.0
+            : priority === "high"
+                ? 0.7
+                : priority === "low"
+                    ? 0.2
+                    : 0.4; // medium / default
+        urgencyBonus *= priorityMultiplier;
         const scoredSlots = freeSlots.map((slot) => {
-            let score = slot.productivityScore;
-            // Bonus nếu slot vừa khít với task duration (không quá dư)
-            const efficiency = taskDuration / slot.duration;
-            if (efficiency >= 0.7 && efficiency <= 1) {
-                score += 0.1;
+            const hour = slot.start.getHours();
+            // 1. Productivity score (from history or fallback)
+            let prodScore = slot.productivityScore;
+            if (productivityScores) {
+                const histScore = productivityScores.get(hour)?.score;
+                if (histScore !== undefined) {
+                    const confidence = productivityScores.get(hour)?.confidence ?? 0;
+                    // Bayesian blend: high confidence → trust history, low → keep fallback
+                    prodScore = histScore * confidence + prodScore * (1 - confidence);
+                }
             }
-            // Bonus theo preferred time of day
+            // 2. Slot fitness — how well the slot fits the task duration
+            const efficiency = taskDuration / slot.duration;
+            // Perfect fit (70-100%) → 1.0, too much waste → lower
+            const fitnessScore = efficiency >= 0.7 && efficiency <= 1.0
+                ? 1.0
+                : efficiency > 1.0
+                    ? 0.0 // shouldn't happen (slot too small) but safety
+                    : Math.max(0.3, efficiency / 0.7); // partial credit for larger slots
+            // 3. Preferred time of day
+            let prefScore = 0.5; // neutral default
             if (preferredTimeOfDay) {
-                const hour = slot.start.getHours();
                 const ranges = {
                     morning: [8, 9, 10, 11],
                     afternoon: [14, 15, 16, 17],
                     evening: [19, 20, 21, 22],
                 };
-                if (ranges[preferredTimeOfDay]?.includes(hour)) {
-                    score += 0.2;
-                }
+                prefScore = ranges[preferredTimeOfDay]?.includes(hour) ? 1.0 : 0.3;
             }
-            // Override với productivity score nếu có
-            if (productivityScores) {
-                const hour = slot.start.getHours();
-                const prodScore = productivityScores.get(hour)?.score;
-                if (prodScore !== undefined) {
-                    score = prodScore * 0.8 + score * 0.2; // 80% từ real data
-                }
+            // 4. Urgency — earlier slot in the day is better when deadline is near
+            let urgScore = urgencyBonus;
+            if (urgencyBonus > 0.3) {
+                // Strong urgency → bonus for earlier time slots
+                const earlyBonus = Math.max(0, 1 - hour / 24);
+                urgScore = urgencyBonus * 0.7 + earlyBonus * 0.3;
             }
-            return { ...slot, productivityScore: Math.min(score, 1) };
+            // 5. Fragmentation penalty — large leftover gaps are wasteful
+            const leftover = slot.duration - taskDuration;
+            // Penalize tiny leftovers (< 30 min) that can't fit another task
+            const fragPenalty = leftover > 0 && leftover < 30
+                ? 0.8 // high penalty for unusable fragments
+                : leftover >= 30
+                    ? 0.0 // no penalty, leftover is usable
+                    : 0.0; // exact fit
+            // ── Weighted combination ──
+            const totalScore = prodScore * W_PROD +
+                fitnessScore * W_FIT +
+                prefScore * W_PREF +
+                urgScore * W_URG -
+                fragPenalty * W_FRAG;
+            return {
+                ...slot,
+                productivityScore: Math.max(0, Math.min(1, totalScore)),
+            };
         });
-        // Sort by score và trả về cao nhất
         scoredSlots.sort((a, b) => b.productivityScore - a.productivityScore);
         return scoredSlots[0];
     }

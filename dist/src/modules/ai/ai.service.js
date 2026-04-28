@@ -33,15 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.aiService = exports.aiRescheduleService = exports.aiScheduleService = exports.aiChatService = void 0;
+exports.aiService = exports.aiRescheduleService = exports.aiChatService = void 0;
 const mongoose_1 = require("mongoose");
 const ai_provider_1 = require("./ai.provider");
 const ai_cache_service_1 = require("./ai.cache.service");
 const ai_utils_1 = require("./ai-utils");
 var ai_chat_service_1 = require("./ai-chat.service");
 Object.defineProperty(exports, "aiChatService", { enumerable: true, get: function () { return ai_chat_service_1.aiChatService; } });
-var ai_schedule_service_1 = require("./ai-schedule.service");
-Object.defineProperty(exports, "aiScheduleService", { enumerable: true, get: function () { return ai_schedule_service_1.aiScheduleService; } });
 var ai_reschedule_service_1 = require("./ai-reschedule.service");
 Object.defineProperty(exports, "aiRescheduleService", { enumerable: true, get: function () { return ai_reschedule_service_1.aiRescheduleService; } });
 exports.aiService = {
@@ -458,11 +456,20 @@ ${extraGuidance}`;
             "terraform",
         ];
         const hasTaskAnchors = anchorSet.size >= 3;
+        const JACCARD_THRESHOLD = 0.12;
         const ungroundedCount = steps.filter((step) => {
             if (!hasTaskAnchors)
                 return false;
-            const stepTokens = tokenize(`${step.title} ${step.description ?? ""}`);
-            return !stepTokens.some((token) => anchorSet.has(token));
+            const stepTokens = new Set(tokenize(`${step.title} ${step.description ?? ""}`));
+            // Jaccard similarity: |A ∩ B| / |A ∪ B|
+            let intersection = 0;
+            for (const token of stepTokens) {
+                if (anchorSet.has(token))
+                    intersection++;
+            }
+            const union = anchorSet.size + stepTokens.size - intersection;
+            const jaccard = union > 0 ? intersection / union : 0;
+            return jaccard < JACCARD_THRESHOLD;
         }).length;
         const hasCrossDomainMismatch = (hasFrontendHint &&
             !hasBackendHint &&

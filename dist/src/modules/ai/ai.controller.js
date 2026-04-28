@@ -681,30 +681,13 @@ const smartReschedule = async (req, res) => {
         res.status(200).json(result);
     }
     catch (err) {
-        console.error("smartReschedule error:", err);
         const message = err instanceof Error ? err.message : "UNKNOWN";
         if (message === "USER_ID_INVALID") {
             res.status(400).json({ message: "User ID không hợp lệ" });
             return;
         }
-        if (message === "AI_JSON_INVALID" || message === "AI_RESPONSE_INVALID") {
-            res.status(502).json({ message: "AI trả về phản hồi không hợp lệ" });
-            return;
-        }
-        if (message === "GROQ_API_KEY_MISSING") {
-            res.status(500).json({ message: "Thiếu GROQ_API_KEY trong env" });
-            return;
-        }
-        if (message === "GROQ_UNAUTHORIZED") {
-            res.status(500).json({
-                message: "Groq bị từ chối (API key không hợp lệ hoặc không có quyền).",
-            });
-            return;
-        }
-        if (message === "GROQ_RATE_LIMIT") {
-            res.status(429).json({
-                message: "Groq bị giới hạn rate limit. Thử lại sau.",
-            });
+        if (message === "TASK_NOT_FOUND") {
+            res.status(404).json({ message: "Không tìm thấy task" });
             return;
         }
         res.status(500).json({ message: "Lỗi hệ thống", error: message });
