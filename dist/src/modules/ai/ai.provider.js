@@ -205,16 +205,147 @@ const geminiChatStream = async function* (input) {
         throw err;
     }
 };
+const hasOpenAiKey = () => !!(process.env.OPENAI_API_KEY || "").trim();
+const openaiChat = async (input) => {
+    const apiKey = process.env.OPENAI_API_KEY || "";
+    if (!apiKey)
+        throw new Error("OPENAI_API_KEY_MISSING");
+    const client = new openai_1.default({ apiKey });
+    const model = (input.model ||
+        process.env.OPENAI_MODEL ||
+        "gpt-4o-mini").trim();
+    try {
+        const response = await client.chat.completions.create({
+            model,
+            messages: input.messages,
+            temperature: input.temperature ?? 0.7,
+            max_tokens: input.maxTokens,
+            ...(input.responseFormat === "json_object"
+                ? { response_format: { type: "json_object" } }
+                : {}),
+        });
+        const content = response.choices?.[0]?.message?.content ?? "";
+        return {
+            content,
+            model: response.model,
+            usage: response.usage
+                ? {
+                    promptTokens: response.usage.prompt_tokens,
+                    completionTokens: response.usage.completion_tokens,
+                    totalTokens: response.usage.total_tokens,
+                }
+                : undefined,
+        };
+    }
+    catch (err) {
+        if (err?.status === 429)
+            throw new Error("OPENAI_RATE_LIMIT");
+        if (err?.status === 401 || err?.status === 403)
+            throw new Error("OPENAI_UNAUTHORIZED");
+        throw err;
+    }
+};
+const openaiChatStream = async function* (input) {
+    const apiKey = process.env.OPENAI_API_KEY || "";
+    if (!apiKey)
+        throw new Error("OPENAI_API_KEY_MISSING");
+    const client = new openai_1.default({ apiKey });
+    const model = (input.model ||
+        process.env.OPENAI_MODEL ||
+        "gpt-4o-mini").trim();
+    try {
+        const stream = await client.chat.completions.create({
+            model,
+            messages: input.messages,
+            temperature: input.temperature ?? 0.7,
+            max_tokens: input.maxTokens,
+            stream: true,
+        });
+        for await (const chunk of stream) {
+            const delta = chunk?.choices?.[0]?.delta?.content !== undefined
+                ? String(chunk.choices[0].delta.content)
+                : "";
+            if (delta)
+                yield { type: "delta", delta };
+        }
+        yield { type: "done", model };
+    }
+    catch (err) {
+        if (err?.status === 429)
+            throw new Error("OPENAI_RATE_LIMIT");
+        if (err?.status === 401 || err?.status === 403)
+            throw new Error("OPENAI_UNAUTHORIZED");
+        throw err;
+    }
+};
+const openaiChatWithTools = async (input) => {
+    const apiKey = process.env.OPENAI_API_KEY || "";
+    if (!apiKey)
+        throw new Error("OPENAI_API_KEY_MISSING");
+    const client = new openai_1.default({ apiKey });
+    const model = (input.model ||
+        process.env.OPENAI_MODEL ||
+        "gpt-4o-mini").trim();
+    try {
+        const response = await client.chat.completions.create({
+            model,
+            messages: input.messages,
+            temperature: input.temperature ?? 0.7,
+            max_tokens: input.maxTokens,
+            ...(input.tools && input.tools.length
+                ? { tools: input.tools, tool_choice: input.toolChoice ?? "auto" }
+                : {}),
+        });
+        const choice = response.choices?.[0]?.message;
+        const content = choice?.content ?? "";
+        const rawToolCalls = choice?.tool_calls;
+        const toolCalls = rawToolCalls && rawToolCalls.length
+            ? rawToolCalls
+                .filter((c) => c.type === "function" && c.function?.name)
+                .map((c) => ({
+                id: c.id,
+                name: c.function.name,
+                arguments: c.function.arguments || "{}",
+            }))
+            : undefined;
+        return {
+            content,
+            model: response.model,
+            usage: response.usage
+                ? {
+                    promptTokens: response.usage.prompt_tokens,
+                    completionTokens: response.usage.completion_tokens,
+                    totalTokens: response.usage.total_tokens,
+                }
+                : undefined,
+            toolCalls,
+        };
+    }
+    catch (err) {
+        if (err?.status === 429)
+            throw new Error("OPENAI_RATE_LIMIT");
+        if (err?.status === 401 || err?.status === 403)
+            throw new Error("OPENAI_UNAUTHORIZED");
+        throw err;
+    }
+};
 const hasGroqKey = () => !!(process.env.GROQ_API_KEY || "").trim();
 /**
- * Groq-only routing: always use Groq for all purposes.
+ * Provider order: prefer OpenAI (gpt-4o-mini), then Groq if configured.
  */
 const resolveProviderOrder = (_purpose) => {
-    if (!hasGroqKey())
-        return [];
-    return ["groq"];
+    const order = [];
+    if (hasOpenAiKey())
+        order.push("openai");
+    if (hasGroqKey())
+        order.push("groq");
+    return order;
 };
-const runChat = async (_provider, input) => groqChat(input);
+const runChat = async (provider, input) => {
+    if (provider === "openai")
+        return openaiChat(input);
+    return groqChat(input);
+};
 const isRetriableError = (err) => {
     const msg = String(err?.message || "");
     if (msg.includes("RATE_LIMIT") ||
@@ -358,7 +489,7 @@ exports.aiProvider = {
     chat: async (input) => {
         const order = resolveProviderOrder(input.purpose);
         if (!order.length)
-            throw new Error("GROQ_API_KEY_MISSING");
+            throw new Error("OPENAI_API_KEY_MISSING");
         let lastErr;
         for (const p of order) {
             try {
@@ -375,13 +506,25 @@ exports.aiProvider = {
         throw lastErr ?? new Error("AI_PROVIDER_FAILED");
     },
     chatStream: async function* (input) {
-        if (!hasGroqKey())
-            throw new Error("GROQ_API_KEY_MISSING");
-        yield* groqChatStream(input);
+        if (hasOpenAiKey()) {
+            yield* openaiChatStream(input);
+        }
+        else if (hasGroqKey()) {
+            yield* groqChatStream(input);
+        }
+        else {
+            throw new Error("OPENAI_API_KEY_MISSING");
+        }
     },
     chatWithTools: async (input) => {
-        if (!hasGroqKey())
-            throw new Error("GROQ_API_KEY_MISSING");
-        return groqChatWithTools(input);
+        if (hasOpenAiKey()) {
+            return openaiChatWithTools(input);
+        }
+        else if (hasGroqKey()) {
+            return groqChatWithTools(input);
+        }
+        else {
+            throw new Error("OPENAI_API_KEY_MISSING");
+        }
     },
 };

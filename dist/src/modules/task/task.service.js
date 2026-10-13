@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.taskService = void 0;
 const mongoose_1 = require("mongoose");
+const task_model_1 = require("./task.model");
 const task_repository_1 = require("./task.repository");
 const redis_service_1 = require("../../services/redis.service");
 const ai_service_1 = require("../ai/ai.service");
@@ -96,6 +97,12 @@ const toPublicTask = (t) => {
             estimatedDuration: x.estimatedDuration,
             difficulty: x.difficulty,
             description: x.description,
+        })),
+        aiChatHistory: (t.aiChatHistory ?? []).map((c) => ({
+            role: c.role,
+            content: c.content,
+            suggestedBreakdown: c.suggestedBreakdown,
+            timestamp: c.timestamp,
         })),
         estimatedDuration: t.estimatedDuration,
         dailyTargetDuration: t.dailyTargetDuration,
@@ -1069,5 +1076,158 @@ exports.taskService = {
             conflicts,
             hasConflicts: conflicts.length > 0,
         };
+    },
+    copilotChat: async (userId, taskId, message) => {
+        const task = await task_repository_1.taskRepository.findByIdForUser({
+            taskId,
+            userId: new mongoose_1.Types.ObjectId(userId),
+        });
+        if (!task) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        // 1. Thu thập ngữ cảnh các bước hiện tại của Task
+        const currentSubtasks = (task.aiBreakdown || []).map((s, idx) => `${idx + 1}. [${s.status === "completed" ? "ĐÃ HOÀN THÀNH" : "CHƯA HOÀN THÀNH"}] ${s.title} (${s.estimatedDuration || 30} phút)${s.description ? ` - ${s.description}` : ""}`);
+        const subtasksText = currentSubtasks.length > 0
+            ? currentSubtasks.join("\n")
+            : "Chưa có danh sách bước thực hiện.";
+        // 2. Thu thập lịch sử học tập/công việc liên quan đã hoàn thành của user
+        const recentCompletedTasks = await task_model_1.Task.find({
+            userId: new mongoose_1.Types.ObjectId(userId),
+            status: "completed",
+        })
+            .sort({ updatedAt: -1 })
+            .limit(5)
+            .lean()
+            .catch(() => []);
+        const completedHistory = (recentCompletedTasks || []).map((t) => `- ${t.title} (hoàn thành ${t.updatedAt ? new Date(t.updatedAt).toLocaleDateString("vi-VN") : ""})`);
+        const completedText = completedHistory.length > 0
+            ? completedHistory.join("\n")
+            : "Chưa có dữ liệu task cũ.";
+        // 3. Chuẩn bị system prompt
+        const systemPrompt = `Bạn là Trợ lý AI đồng hành (Task Copilot) thông minh và tận tâm cho người dùng.
+Bạn đang hỗ trợ người dùng thực hiện công việc cụ thể: "${task.title}".
+
+NGỮ CẢNH CÔNG VIỆC:
+- Tiêu đề: ${task.title}
+- Mô tả: ${task.description || "Chưa có mô tả"}
+- Thời lượng ước tính: ${task.estimatedDuration ? `${task.estimatedDuration} phút` : "Chưa đặt"}
+- Mục tiêu thực hiện mỗi ngày: ${task.dailyTargetDuration ? `${task.dailyTargetDuration} phút/ngày` : "Chưa đặt"}
+- Hạn chót (Deadline): ${task.deadline ? new Date(task.deadline).toLocaleString("vi-VN") : "Không có"}
+- Tiến độ các bước hiện tại:
+${subtasksText}
+- Lịch sử các công việc gần đây của người dùng (Bộ nhớ dài hạn):
+${completedText}
+
+HƯỚNG DẪN HÀNH XỬ:
+1. Giao tiếp tự nhiên, thân thiện, trả lời bằng tiếng Việt.
+2. Nếu người dùng hỏi kiến thức (ví dụ ngữ pháp, cách làm, tài liệu, mẹo nhớ), hãy giải thích cặn kẽ, đưa ví dụ sinh động.
+3. Ghi nhớ các trao đổi trước đó và các bước đã hoàn thành để tiếp tục hướng dẫn người dùng theo đúng lộ trình, không lặp lại kiến thức họ đã nắm.
+4. NẾU người dùng yêu cầu phân rã việc, lập lộ trình học/làm, tạo checklist, hoặc khi câu trả lời của bạn có đề xuất các bước hành động cụ thể:
+   - Hãy giải thích rõ lộ trình bằng lời trong câu trả lời.
+   - ĐỒNG THỜI ở CUỐI CÙNG của câu trả lời, hãy đính kèm khối JSON cấu trúc các bước theo đúng định dạng sau:
+\`\`\`json_breakdown
+[
+  {
+    "title": "Tên bước cụ thể, rõ ràng",
+    "estimatedDuration": 30,
+    "description": "Nội dung tóm tắt cách làm hoặc kiến thức trọng tâm",
+    "difficulty": "medium"
+  }
+]
+\`\`\`
+Lưu ý: Các bước cần có tổng thời gian phù hợp với mục tiêu ngày và thời lượng ước tính của công việc.`;
+        // 4. Lấy lịch sử chat của task
+        const pastChatHistory = (task.aiChatHistory || []).slice(-10).map((c) => ({
+            role: c.role,
+            content: c.content,
+        }));
+        const messages = [
+            { role: "system", content: systemPrompt },
+            ...pastChatHistory,
+            { role: "user", content: message },
+        ];
+        // 5. Gọi AI Provider (OpenAI gpt-4o-mini)
+        const { aiProvider } = await Promise.resolve().then(() => __importStar(require("../ai/ai.provider")));
+        const aiRes = await aiProvider.chat({
+            messages,
+            purpose: "chat",
+            temperature: 0.7,
+        });
+        const rawContent = aiRes.content || "";
+        // 6. Tách khối json_breakdown nếu có
+        let suggestedBreakdown;
+        let cleanReply = rawContent;
+        const breakdownMatch = rawContent.match(/```json_breakdown\s*([\s\S]*?)\s*```/);
+        if (breakdownMatch) {
+            try {
+                const parsed = JSON.parse(breakdownMatch[1]);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    suggestedBreakdown = parsed.map((item) => ({
+                        title: String(item.title || "").trim(),
+                        estimatedDuration: Number(item.estimatedDuration) || 30,
+                        description: item.description ? String(item.description) : undefined,
+                        difficulty: (item.difficulty || "medium"),
+                    }));
+                }
+            }
+            catch {
+                // ignore parse error
+            }
+            cleanReply = rawContent
+                .replace(/```json_breakdown\s*[\s\S]*?\s*```/, "")
+                .trim();
+        }
+        // 7. Lưu vào aiChatHistory của task
+        if (!task.aiChatHistory) {
+            task.aiChatHistory = [];
+        }
+        task.aiChatHistory.push({
+            role: "user",
+            content: message,
+            timestamp: new Date(),
+        });
+        task.aiChatHistory.push({
+            role: "assistant",
+            content: cleanReply,
+            suggestedBreakdown,
+            timestamp: new Date(),
+        });
+        await task.save();
+        return {
+            reply: cleanReply,
+            suggestedBreakdown,
+            task: toPublicTask(task),
+        };
+    },
+    applyCopilotBreakdown: async (userId, taskId, steps, mode = "replace") => {
+        const task = await task_repository_1.taskRepository.findByIdForUser({
+            taskId,
+            userId: new mongoose_1.Types.ObjectId(userId),
+        });
+        if (!task) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        const formattedSteps = steps
+            .filter((s) => s && s.title && s.title.trim())
+            .map((s) => ({
+            title: s.title.trim(),
+            status: "todo",
+            estimatedDuration: Number(s.estimatedDuration) || 30,
+            difficulty: (s.difficulty || "medium"),
+            description: s.description ? s.description.trim() : undefined,
+        }));
+        if (mode === "append") {
+            task.aiBreakdown = [...(task.aiBreakdown || []), ...formattedSteps];
+        }
+        else {
+            task.aiBreakdown = formattedSteps;
+        }
+        // Tự động cập nhật tổng thời lượng nếu chưa có
+        const totalStepMinutes = task.aiBreakdown.reduce((sum, s) => sum + (s.estimatedDuration || 30), 0);
+        if (!task.estimatedDuration || task.estimatedDuration < totalStepMinutes) {
+            task.estimatedDuration = totalStepMinutes;
+        }
+        await task.save();
+        return toPublicTask(task);
     },
 };

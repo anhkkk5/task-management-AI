@@ -1183,3 +1183,85 @@ export const clearAllScheduledTimes = async (
     res.status(500).json({ message: "Lỗi hệ thống", error: message });
   }
 };
+
+export const taskCopilotChat = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const taskId = String(req.params.id ?? "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Task ID không hợp lệ" });
+      return;
+    }
+
+    const { message } = req.body;
+    if (!message || typeof message !== "string" || !message.trim()) {
+      res.status(400).json({ message: "Nội dung tin nhắn không được để trống" });
+      return;
+    }
+
+    const result = await taskService.copilotChat(userId, taskId, message.trim());
+    res.status(200).json(result);
+  } catch (err: any) {
+    if (err?.message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền truy cập task này" });
+      return;
+    }
+    console.error("[taskCopilotChat] error:", err);
+    res.status(500).json({
+      message: err?.message || "Lỗi khi trao đổi với AI Copilot",
+    });
+  }
+};
+
+export const applyCopilotBreakdown = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const taskId = String(req.params.id ?? "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Task ID không hợp lệ" });
+      return;
+    }
+
+    const { steps, mode } = req.body;
+    if (!Array.isArray(steps) || steps.length === 0) {
+      res.status(400).json({ message: "Danh sách các bước không được để trống" });
+      return;
+    }
+
+    const task = await taskService.applyCopilotBreakdown(
+      userId,
+      taskId,
+      steps,
+      mode || "replace",
+    );
+    res.status(200).json({
+      task,
+      message: "Đã cập nhật các bước công việc thành công",
+    });
+  } catch (err: any) {
+    if (err?.message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Không có quyền truy cập task này" });
+      return;
+    }
+    console.error("[applyCopilotBreakdown] error:", err);
+    res.status(500).json({
+      message: err?.message || "Lỗi khi áp dụng các bước",
+    });
+  }
+};

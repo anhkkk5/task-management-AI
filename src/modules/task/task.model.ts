@@ -33,6 +33,17 @@ export type TaskAttrs = {
   meetingLink?: string;
   userId: Types.ObjectId;
   parentTaskId?: Types.ObjectId;
+  aiChatHistory?: {
+    role: "user" | "assistant";
+    content: string;
+    suggestedBreakdown?: {
+      title: string;
+      estimatedDuration?: number;
+      description?: string;
+      difficulty?: "easy" | "medium" | "hard";
+    }[];
+    timestamp?: Date;
+  }[];
   aiBreakdown?: {
     title: string;
     status?: TaskStatus;
@@ -83,6 +94,17 @@ export type TaskDoc = mongoose.Document & {
   meetingLink?: string;
   userId: Types.ObjectId;
   parentTaskId?: Types.ObjectId;
+  aiChatHistory?: {
+    role: "user" | "assistant";
+    content: string;
+    suggestedBreakdown?: {
+      title: string;
+      estimatedDuration?: number;
+      description?: string;
+      difficulty?: "easy" | "medium" | "hard";
+    }[];
+    timestamp?: Date;
+  }[];
   aiBreakdown: {
     title: string;
     status: TaskStatus;
@@ -200,6 +222,24 @@ const taskSchema = new Schema<TaskDoc>(
     tags: { type: [String], default: [] },
     userId: { type: Schema.Types.ObjectId, required: true, index: true },
     parentTaskId: { type: Schema.Types.ObjectId, index: true },
+    aiChatHistory: {
+      type: [
+        {
+          role: { type: String, enum: ["user", "assistant"], required: true },
+          content: { type: String, required: true },
+          suggestedBreakdown: [
+            {
+              title: { type: String, required: true },
+              estimatedDuration: { type: Number },
+              description: { type: String },
+              difficulty: { type: String, enum: ["easy", "medium", "hard"] },
+            },
+          ],
+          timestamp: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     aiBreakdown: {
       type: [
         {

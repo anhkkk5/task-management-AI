@@ -13,6 +13,8 @@ import {
   saveAISchedule,
   updateTask,
   updateTaskStatus,
+  taskCopilotChat,
+  applyCopilotBreakdown,
 } from "./task.controller";
 
 const taskRouter = Router();
@@ -26,6 +28,13 @@ taskRouter.get("/overdue", authMiddleware, listOverdueTasks);
 taskRouter.get("/:id", authMiddleware, getTaskById);
 
 taskRouter.post("/:id/ai-breakdown", authMiddleware, aiBreakdownTask);
+
+taskRouter.post("/:id/copilot/chat", authMiddleware, taskCopilotChat);
+taskRouter.post(
+  "/:id/copilot/apply-breakdown",
+  authMiddleware,
+  applyCopilotBreakdown,
+);
 
 taskRouter.get(
   "/:id/explain-estimation",

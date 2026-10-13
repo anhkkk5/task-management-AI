@@ -116,6 +116,24 @@ const taskSchema = new mongoose_1.Schema({
     tags: { type: [String], default: [] },
     userId: { type: mongoose_1.Schema.Types.ObjectId, required: true, index: true },
     parentTaskId: { type: mongoose_1.Schema.Types.ObjectId, index: true },
+    aiChatHistory: {
+        type: [
+            {
+                role: { type: String, enum: ["user", "assistant"], required: true },
+                content: { type: String, required: true },
+                suggestedBreakdown: [
+                    {
+                        title: { type: String, required: true },
+                        estimatedDuration: { type: Number },
+                        description: { type: String },
+                        difficulty: { type: String, enum: ["easy", "medium", "hard"] },
+                    },
+                ],
+                timestamp: { type: Date, default: Date.now },
+            },
+        ],
+        default: [],
+    },
     aiBreakdown: {
         type: [
             {
