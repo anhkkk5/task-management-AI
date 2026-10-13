@@ -1201,13 +1201,18 @@ export const taskCopilotChat = async (
       return;
     }
 
-    const { message } = req.body;
+    const { message, subtaskTitle } = req.body;
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ message: "Nội dung tin nhắn không được để trống" });
       return;
     }
 
-    const result = await taskService.copilotChat(userId, taskId, message.trim());
+    const result = await taskService.copilotChat(
+      userId,
+      taskId,
+      message.trim(),
+      subtaskTitle ? String(subtaskTitle).trim() : undefined,
+    );
     res.status(200).json(result);
   } catch (err: any) {
     if (err?.message === "TASK_FORBIDDEN") {
@@ -1238,7 +1243,7 @@ export const copilotChatStream = async (
       return;
     }
 
-    const { message } = req.body;
+    const { message, subtaskTitle } = req.body;
     if (!message || typeof message !== "string" || !message.trim()) {
       res.status(400).json({ message: "Nội dung câu hỏi không được để trống" });
       return;
@@ -1255,6 +1260,7 @@ export const copilotChatStream = async (
       userId,
       taskId,
       message.trim(),
+      subtaskTitle ? String(subtaskTitle).trim() : undefined,
     )) {
       res.write(`data: ${JSON.stringify(event)}\n\n`);
     }

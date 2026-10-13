@@ -938,12 +938,12 @@ const taskCopilotChat = async (req, res) => {
             res.status(400).json({ message: "Task ID không hợp lệ" });
             return;
         }
-        const { message } = req.body;
+        const { message, subtaskTitle } = req.body;
         if (!message || typeof message !== "string" || !message.trim()) {
             res.status(400).json({ message: "Nội dung tin nhắn không được để trống" });
             return;
         }
-        const result = await task_service_1.taskService.copilotChat(userId, taskId, message.trim());
+        const result = await task_service_1.taskService.copilotChat(userId, taskId, message.trim(), subtaskTitle ? String(subtaskTitle).trim() : undefined);
         res.status(200).json(result);
     }
     catch (err) {
@@ -970,7 +970,7 @@ const copilotChatStream = async (req, res) => {
             res.status(400).json({ message: "Task ID không hợp lệ" });
             return;
         }
-        const { message } = req.body;
+        const { message, subtaskTitle } = req.body;
         if (!message || typeof message !== "string" || !message.trim()) {
             res.status(400).json({ message: "Nội dung câu hỏi không được để trống" });
             return;
@@ -981,7 +981,7 @@ const copilotChatStream = async (req, res) => {
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
         res.flushHeaders?.();
-        for await (const event of task_service_1.taskService.copilotChatStream(userId, taskId, message.trim())) {
+        for await (const event of task_service_1.taskService.copilotChatStream(userId, taskId, message.trim(), subtaskTitle ? String(subtaskTitle).trim() : undefined)) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
         res.end();

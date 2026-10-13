@@ -1084,7 +1084,7 @@ exports.taskService = {
             hasConflicts: conflicts.length > 0,
         };
     },
-    copilotChat: async (userId, taskId, message) => {
+    copilotChat: async (userId, taskId, message, subtaskTitle) => {
         const task = await task_repository_1.taskRepository.findByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -1113,7 +1113,18 @@ exports.taskService = {
         // 3. Chuẩn bị system prompt
         const systemPrompt = `Bạn là Trợ lý AI đồng hành (Task Copilot) thông minh và tận tâm cho người dùng.
 Bạn đang hỗ trợ người dùng thực hiện công việc cụ thể: "${task.title}".
+${subtaskTitle
+            ? `
+🔴 ĐANG TẬP TRUNG HỎI ĐÁP CHO BƯỚC CON CỤ THỂ:
+- Tiêu đề công việc cha: "${task.title}"
+- Mô tả công việc cha: "${task.description || "Chưa có mô tả"}"
+- BƯỚC CON ĐANG ĐƯỢC CHỌN: "${subtaskTitle}"
 
+HƯỚNG DẪN TRỌNG TÂM:
+Người dùng đang bấm chọn và đặt câu hỏi chuyên sâu cho RIÊNG bước con "${subtaskTitle}" này.
+Hãy tập trung phân tích, giải thích cách làm, cung cấp hướng dẫn từng bước cụ thể, tài liệu hoặc code mẫu chi tiết nhất cho RIÊNG bước con này, đảm bảo giúp người dùng hoàn thành xuất sắc bước con này trong khuôn khổ của công việc cha "${task.title}".
+`
+            : ""}
 NGỮ CẢNH CÔNG VIỆC:
 - Tiêu đề: ${task.title}
 - Mô tả: ${task.description || "Chưa có mô tả"}
@@ -1206,7 +1217,7 @@ Lưu ý: Các bước cần có tổng thời gian phù hợp với mục tiêu 
             task: toPublicTask(task),
         };
     },
-    copilotChatStream: async function* (userId, taskId, message) {
+    copilotChatStream: async function* (userId, taskId, message, subtaskTitle) {
         const task = await task_repository_1.taskRepository.findByIdForUser({
             taskId,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -1258,7 +1269,18 @@ Nhiệm vụ của bạn là:
   }
 ]
 \`\`\`
+${subtaskTitle
+            ? `
+🔴 ĐANG TẬP TRUNG HỎI ĐÁP CHO BƯỚC CON CỤ THỂ:
+- Tiêu đề công việc cha: "${taskContext.title}"
+- Mô tả công việc cha: "${taskContext.description}"
+- BƯỚC CON ĐANG ĐƯỢC CHỌN: "${subtaskTitle}"
 
+HƯỚNG DẪN TRỌNG TÂM:
+Người dùng đang bấm chọn và đặt câu hỏi chuyên sâu cho RIÊNG bước con "${subtaskTitle}" này.
+Hãy tập trung phân tích, giải thích cách làm, cung cấp hướng dẫn từng bước cụ thể, tài liệu hoặc code mẫu chi tiết nhất cho RIÊNG bước con này, đảm bảo giúp người dùng hoàn thành xuất sắc bước con này trong khuôn khổ của công việc cha "${taskContext.title}".
+`
+            : ""}
 THÔNG TIN CÔNG VIỆC HIỆN TẠI:
 - Tiêu đề: "${taskContext.title}"
 - Mô tả: "${taskContext.description}"
