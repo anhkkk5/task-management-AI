@@ -164,6 +164,32 @@ exports.hybridScheduleService = {
                 estimationMetaMap.set(meta.taskId, meta);
             }
         }
+        // Query teams to determine leadership permissions for team tasks
+        const teamIds = tasks
+            .filter((t) => t.teamAssignment?.teamId &&
+            mongoose_1.Types.ObjectId.isValid(t.teamAssignment.teamId))
+            .map((t) => new mongoose_1.Types.ObjectId(t.teamAssignment.teamId));
+        const teamMap = new Map();
+        if (teamIds.length > 0) {
+            const teams = await team_model_1.Team.find({ _id: { $in: teamIds } });
+            teams.forEach((tm) => teamMap.set(String(tm._id), tm));
+        }
+        const checkIsTeamLeader = (task) => {
+            if (!task.teamAssignment?.teamId)
+                return false;
+            const teamIdStr = String(task.teamAssignment.teamId);
+            const team = teamMap.get(teamIdStr);
+            const currentUserIdStr = String(userObjectId);
+            const assignedByStr = String(task.teamAssignment.assignedBy || "");
+            if (assignedByStr === currentUserIdStr)
+                return true;
+            if (!team)
+                return false;
+            const isOwner = String(team.ownerId) === currentUserIdStr;
+            const isLeaderRole = (team.members || []).some((m) => String(m.userId) === currentUserIdStr &&
+                ["owner", "admin", "student_leader", "lecturer_leader"].includes(m.role));
+            return isOwner || isLeaderRole;
+        };
         // ✅ DEADLINE VALIDATION: Kiểm tra tính khả thi trước khi schedule
         const plannerStartDateOnly = new Date(`${toLocalDateStr(new Date(input.startDate))}T00:00:00`);
         const warnings = [];
@@ -219,6 +245,23 @@ exports.hybridScheduleService = {
                 const shortfallHours = parseFloat((shortfallMinutes / 60).toFixed(1));
                 const maxHours = parseFloat((maxPossibleMinutes / 60).toFixed(1));
                 const requiredHours = parseFloat((requiredMinutes / 60).toFixed(1));
+                const isTeam = !!task.teamAssignment?.teamId;
+                const isLeader = isTeam ? checkIsTeamLeader(task) : false;
+                let actionAdvice = "";
+                if (isTeam) {
+                    if (isLeader) {
+                        actionAdvice =
+                            "Bạn là Trưởng nhóm (Leader/Owner), bạn có thể chỉnh sửa và gia hạn deadline cho công việc nhóm này.";
+                    }
+                    else {
+                        actionAdvice =
+                            "Đây là công việc nhóm, thời gian deadline không đủ hoặc đã quá hạn. Vui lòng yêu cầu Chủ team (Trưởng nhóm) gia hạn deadline.";
+                    }
+                }
+                else {
+                    actionAdvice =
+                        "Đây là công việc cá nhân, bạn có thể tự chỉnh sửa hoặc gia hạn deadline trực tiếp.";
+                }
                 console.warn(`[Schedule Warning] Task "${task.title}": ` +
                     `Cần ${requiredHours}h nhưng chỉ có thể xếp tối đa ${maxHours}h ` +
                     `trong ${daysLeft} ngày còn lại. Thiếu ${shortfallHours}h.`);
@@ -230,7 +273,7 @@ exports.hybridScheduleService = {
                     maxPossibleHours: maxHours,
                     requiredHours: requiredHours,
                     shortfallHours: shortfallHours,
-                    message: `Không đủ thời gian: cần ${requiredHours}h nhưng chỉ còn ${daysLeft} ngày × ${dailyTargetMax / 60}h/ngày = ${maxHours}h. Thiếu ${shortfallHours}h.`,
+                    message: `Không đủ thời gian: cần ${requiredHours}h nhưng chỉ còn ${daysLeft} ngày × ${dailyTargetMax / 60}h/ngày = ${maxHours}h (thiếu ${shortfallHours}h). ${actionAdvice}`,
                 });
             }
         }
@@ -824,14 +867,66 @@ Format JSON:
             // Next day
             currentDate.setDate(currentDate.getDate() + 1);
         }
-        const remainingSummary = tasks
+        const remainingItems = tasks
             .map((t) => {
             const remaining = remainingMinutesByTaskId.get(String(t._id)) || 0;
-            return { id: String(t._id), title: String(t.title || ""), remaining };
+            const isTeam = !!t.teamAssignment?.teamId;
+            const isLeader = isTeam ? checkIsTeamLeader(t) : false;
+            return {
+                id: String(t._id),
+                title: String(t.title || ""),
+                remaining,
+                isTeam,
+                isLeader,
+            };
         })
-            .filter((x) => x.remaining > 0)
-            .map((x) => `${x.title}: còn thiếu ${x.remaining} phút`)
-            .join(", ");
+            .filter((x) => x.remaining > 0);
+        const remainingSummary = remainingItems
+            .map((x) => {
+            if (x.isTeam) {
+                if (x.isLeader) {
+                    return `[Việc nhóm] "${x.title}": còn thiếu ${x.remaining} phút (Bạn là Trưởng nhóm, có thể chỉnh sửa/gia hạn deadline)`;
+                }
+                else {
+                    return `[Việc nhóm] "${x.title}": còn thiếu ${x.remaining} phút (Thời gian deadline đã quá hạn/không đủ, yêu cầu Chủ team gia hạn deadline)`;
+                }
+            }
+            else {
+                return `[Việc cá nhân] "${x.title}": còn thiếu ${x.remaining} phút (Bạn có thể tự chỉnh sửa hoặc gia hạn deadline trực tiếp)`;
+            }
+        })
+            .join("; ");
+        // Ensure all remaining unfulfilled tasks are present in warnings
+        remainingItems.forEach((x) => {
+            const alreadyWarned = warnings.some((w) => w.taskId === x.id);
+            if (!alreadyWarned) {
+                let actionAdvice = "";
+                if (x.isTeam) {
+                    if (x.isLeader) {
+                        actionAdvice =
+                            "Bạn là Trưởng nhóm (Leader/Owner), bạn có thể chỉnh sửa và gia hạn deadline cho công việc nhóm này.";
+                    }
+                    else {
+                        actionAdvice =
+                            "Thời gian deadline đã quá hạn hoặc không đủ, yêu cầu Chủ team (Trưởng nhóm) gia hạn deadline.";
+                    }
+                }
+                else {
+                    actionAdvice =
+                        "Đối với công việc cá nhân, bạn có thể tự chỉnh sửa hoặc gia hạn deadline trực tiếp.";
+                }
+                warnings.push({
+                    taskId: x.id,
+                    title: x.title,
+                    feasible: false,
+                    daysLeft: 1,
+                    maxPossibleHours: 0,
+                    requiredHours: parseFloat((x.remaining / 60).toFixed(1)),
+                    shortfallHours: parseFloat((x.remaining / 60).toFixed(1)),
+                    message: `Không đủ thời gian rảnh trước deadline (còn thiếu ${x.remaining} phút). ${actionAdvice}`,
+                });
+            }
+        });
         // VALIDATION: Kiểm tra tổng thời gian và dailyTargetMax
         tasks.forEach((task) => {
             const taskId = String(task._id);
@@ -889,7 +984,7 @@ Format JSON:
                     ? ` | Đã tự động ước tính thời lượng cho ${estimationMetaMap.size} task thiếu dữ liệu.`
                     : "") +
                 (remainingSummary
-                    ? ` | ⚠️ Không đủ thời gian trước deadline: ${remainingSummary}. Bạn nên tăng mục tiêu/ngày hoặc gia hạn deadline.`
+                    ? ` | ⚠️ Không đủ thời gian trước deadline: ${remainingSummary}.`
                     : ""),
             stats,
             warnings: warnings.length > 0 ? warnings : undefined,

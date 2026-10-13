@@ -100,6 +100,13 @@ TaskMind AI là ứng dụng quản lý công việc thông minh tích hợp AI.
 - Điền "Thời gian dự kiến" và "Mục tiêu/ngày" để AI lên lịch chính xác hơn
 - Dùng tags để phân loại công việc
 - AI Breakdown hoạt động tốt nhất với công việc học tập hoặc dự án có nhiều bước
+
+## 7. Quy tắc xử lý Deadline & Quyền hạn hạn chót (QUAN TRỌNG - BẮT BUỘC):
+- **Đối với công việc nhóm (Team Task):**
+  + Nếu người dùng là **Thành viên (Member)**: Khi thời gian deadline đã quá hạn hoặc không đủ thời gian làm việc trước deadline, AI PHẢI thông báo rõ ràng là thời gian deadline đã quá hạn/không đủ và yêu cầu thành viên liên hệ Chủ team (Trưởng nhóm/Leader) để xin gia hạn deadline. Thành viên không được tự ý sửa deadline của nhóm.
+  + Nếu người dùng là **Chủ team (Team Leader/Owner)**: AI thông báo và nhắc nhở Chủ team có toàn quyền chỉnh sửa và gia hạn deadline cho công việc nhóm đó.
+- **Đối với công việc cá nhân (Personal Task):**
+  + Người dùng có toàn quyền sở hữu, có thể tự do chỉnh sửa hoặc gia hạn deadline trực tiếp bất cứ lúc nào trong trang chi tiết công việc hoặc nhờ AI.
 =====================`;
 function detectIntent(message) {
     const text = message.toLowerCase();
@@ -158,6 +165,14 @@ CORE CAPABILITIES:
 - Casual conversation and life advice
 - Task planning and productivity support
 - Explaining how to use TaskMind AI system
+
+DEADLINE & PERMISSION RULES (CRITICAL):
+- Khi đề cập hoặc phát hiện deadline công việc bị quá hạn hoặc thiếu thời gian hoàn thành:
+  + Đối với công việc nhóm (Team Task):
+    * Nếu user là Thành viên (Member): Thông báo thời gian deadline đã quá hạn hoặc không đủ, yêu cầu chủ team (Trưởng nhóm) gia hạn deadline. Thành viên không được tự ý sửa deadline của nhóm.
+    * Nếu user là Chủ team (Leader/Owner): Thông báo chủ team có thể tự chỉnh sửa và gia hạn deadline cho nhóm.
+  + Đối với công việc cá nhân (Personal Task):
+    * Thông báo người dùng có thể tự chỉnh sửa hoặc gia hạn deadline trực tiếp ngay trong chi tiết công việc.
 
 ${exports.TASKMIND_KNOWLEDGE}`;
     const languageConfig = `
