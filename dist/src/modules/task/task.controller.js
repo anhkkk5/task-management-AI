@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyCopilotBreakdown = exports.taskCopilotChat = exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.explainTaskEstimation = exports.aiBreakdownTask = void 0;
+exports.applyCopilotBreakdown = exports.copilotChatStream = exports.taskCopilotChat = exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.explainTaskEstimation = exports.aiBreakdownTask = void 0;
 const task_service_1 = require("./task.service");
 const ai_schedule_service_1 = require("../ai-schedule/ai-schedule.service");
 const search_helper_1 = __importDefault(require("../../common/utils/search-helper"));
@@ -958,6 +958,54 @@ const taskCopilotChat = async (req, res) => {
     }
 };
 exports.taskCopilotChat = taskCopilotChat;
+const copilotChatStream = async (req, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const taskId = String(req.params.id ?? "").trim();
+        if (!taskId) {
+            res.status(400).json({ message: "Task ID không hợp lệ" });
+            return;
+        }
+        const { message } = req.body;
+        if (!message || typeof message !== "string" || !message.trim()) {
+            res.status(400).json({ message: "Nội dung câu hỏi không được để trống" });
+            return;
+        }
+        // Set headers for SSE streaming
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders?.();
+        for await (const event of task_service_1.taskService.copilotChatStream(userId, taskId, message.trim())) {
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
+        }
+        res.end();
+    }
+    catch (err) {
+        if (err?.message === "TASK_FORBIDDEN") {
+            if (!res.headersSent) {
+                res.status(403).json({ message: "Không có quyền truy cập task này" });
+            }
+            return;
+        }
+        console.error("[copilotChatStream] error:", err);
+        if (!res.headersSent) {
+            res.status(500).json({
+                message: err?.message || "Lỗi khi trao đổi với AI Copilot",
+            });
+        }
+        else {
+            res.write(`data: ${JSON.stringify({ error: err?.message || "Lỗi AI" })}\n\n`);
+            res.end();
+        }
+    }
+};
+exports.copilotChatStream = copilotChatStream;
 const applyCopilotBreakdown = async (req, res) => {
     try {
         const userId = req.user?.userId;

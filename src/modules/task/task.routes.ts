@@ -14,6 +14,7 @@ import {
   updateTask,
   updateTaskStatus,
   taskCopilotChat,
+  copilotChatStream,
   applyCopilotBreakdown,
 } from "./task.controller";
 
@@ -30,6 +31,7 @@ taskRouter.get("/:id", authMiddleware, getTaskById);
 taskRouter.post("/:id/ai-breakdown", authMiddleware, aiBreakdownTask);
 
 taskRouter.post("/:id/copilot/chat", authMiddleware, taskCopilotChat);
+taskRouter.post("/:id/copilot/stream", authMiddleware, copilotChatStream);
 taskRouter.post(
   "/:id/copilot/apply-breakdown",
   authMiddleware,

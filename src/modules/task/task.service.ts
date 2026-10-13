@@ -68,6 +68,13 @@ export type PublicTask = {
     scheduledDate?: string;
     scheduledTime?: string;
   }[];
+  subtasks?: {
+    title: string;
+    status: string;
+    estimatedDuration?: number;
+    difficulty?: "easy" | "medium" | "hard";
+    description?: string;
+  }[];
   aiChatHistory?: Array<{
     role: "user" | "assistant";
     content: string;
@@ -138,6 +145,13 @@ const toPublicTask = (t: any): PublicTask => {
           }
         : undefined,
     aiBreakdown: (t.aiBreakdown ?? []).map((x: any) => ({
+      title: x.title,
+      status: x.status,
+      estimatedDuration: x.estimatedDuration,
+      difficulty: x.difficulty,
+      description: x.description,
+    })),
+    subtasks: (t.aiBreakdown ?? []).map((x: any) => ({
       title: x.title,
       status: x.status,
       estimatedDuration: x.estimatedDuration,
@@ -1703,6 +1717,180 @@ Lưu ý: Các bước cần có tổng thời gian phù hợp với mục tiêu 
 
     return {
       reply: cleanReply,
+      suggestedBreakdown,
+      task: toPublicTask(task),
+    };
+  },
+
+  copilotChatStream: async function* (
+    userId: string,
+    taskId: string,
+    message: string,
+  ): AsyncGenerator<
+    | { type: "delta"; delta: string }
+    | {
+        type: "done";
+        fullReply: string;
+        suggestedBreakdown?: Array<{
+          title: string;
+          estimatedDuration?: number;
+          description?: string;
+          difficulty?: "easy" | "medium" | "hard";
+        }>;
+        task: PublicTask;
+      }
+  > {
+    const task = await taskRepository.findByIdForUser({
+      taskId,
+      userId: new Types.ObjectId(userId),
+    });
+    if (!task) {
+      throw new Error("TASK_FORBIDDEN");
+    }
+
+    // 1. Lấy thông tin task ngữ cảnh
+    const taskContext = {
+      title: task.title,
+      description: task.description || "Không có mô tả",
+      priority: task.priority,
+      status: task.status,
+      estimatedDuration: task.estimatedDuration || 0,
+      dailyTargetDuration: task.dailyTargetDuration || 0,
+      currentSubtasks: (task.aiBreakdown || []).map((s) => ({
+        title: s.title,
+        status: s.status,
+        duration: s.estimatedDuration,
+      })),
+    };
+
+    // 2. Lấy 5 task đã hoàn thành gần nhất của user để hiểu thói quen & trình độ (User Memory)
+    const recentCompletedTasks = await Task.find({
+      userId: new Types.ObjectId(userId),
+      status: "completed",
+    })
+      .sort({ updatedAt: -1 })
+      .limit(5)
+      .lean()
+      .catch(() => []);
+
+    const completedTasksSummary = (recentCompletedTasks || []).map((t: any) => ({
+      title: t.title,
+      tags: t.tags,
+      completedAt: t.updatedAt,
+    }));
+
+    // 3. Xây dựng System Prompt
+    const systemPrompt = `Bạn là Trợ lý AI đồng hành thông minh (Task Copilot) chuyên sâu cho từng công việc của người dùng.
+Nhiệm vụ của bạn là:
+1. Giải đáp thắc mắc, hướng dẫn kiến thức, tư vấn phương pháp hoàn thành công việc cụ thể này.
+2. Ghi nhớ ngữ cảnh trao đổi trước đó và thói quen/lịch sử học tập của người dùng.
+3. Khi người dùng muốn chia nhỏ công việc, lập lộ trình học/làm, hãy phân tích và đưa ra kế hoạch rõ ràng, sau đó cung cấp một khối JSON đặc biệt ở CUỐI CÙNG câu trả lời theo cú pháp chính xác:
+\`\`\`json_breakdown
+[
+  {
+    "title": "Tên bước cụ thể, rõ ràng",
+    "estimatedDuration": 30,
+    "description": "Nội dung tóm tắt cách làm hoặc kiến thức trọng tâm",
+    "difficulty": "medium"
+  }
+]
+\`\`\`
+
+THÔNG TIN CÔNG VIỆC HIỆN TẠI:
+- Tiêu đề: "${taskContext.title}"
+- Mô tả: "${taskContext.description}"
+- Độ ưu tiên: ${taskContext.priority} | Trạng thái: ${taskContext.status}
+- Thời lượng ước tính: ${taskContext.estimatedDuration} phút
+- Mục tiêu mỗi ngày: ${taskContext.dailyTargetDuration} phút/ngày
+- Các bước đã có trong checklist: ${JSON.stringify(taskContext.currentSubtasks)}
+
+LỊCH SỬ CÔNG VIỆC ĐÃ HOÀN THÀNH GẦN ĐÂY CỦA USER:
+${JSON.stringify(completedTasksSummary, null, 2)}
+
+HÃY TRẢ LỜI BẰNG TIẾNG VIỆT, ngắn gọn, súc tích, định dạng Markdown đẹp mắt, động viên người dùng.`;
+
+    // 4. Lấy lịch sử chat của task
+    const pastChatHistory = (task.aiChatHistory || []).slice(-10).map((c) => ({
+      role: c.role as "user" | "assistant",
+      content: c.content,
+    }));
+
+    const messages = [
+      { role: "system" as const, content: systemPrompt },
+      ...pastChatHistory,
+      { role: "user" as const, content: message },
+    ];
+
+    // 5. Gọi AI Provider Streaming (OpenAI gpt-4o-mini)
+    const { aiProvider } = await import("../ai/ai.provider");
+    let accumulatedContent = "";
+
+    for await (const event of aiProvider.chatStream({
+      messages,
+      purpose: "chat",
+      temperature: 0.7,
+    })) {
+      if (event.type === "delta" && event.delta) {
+        accumulatedContent += event.delta;
+        yield { type: "delta", delta: event.delta };
+      }
+    }
+
+    // 6. Tách khối json_breakdown nếu có
+    let suggestedBreakdown: Array<{
+      title: string;
+      estimatedDuration?: number;
+      description?: string;
+      difficulty?: "easy" | "medium" | "hard";
+    }> | undefined;
+
+    let cleanReply = accumulatedContent;
+    const breakdownMatch = accumulatedContent.match(
+      /```json_breakdown\s*([\s\S]*?)\s*```/,
+    );
+    if (breakdownMatch) {
+      try {
+        const parsed = JSON.parse(breakdownMatch[1]);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          suggestedBreakdown = parsed.map((item) => ({
+            title: String(item.title || "").trim(),
+            estimatedDuration: Number(item.estimatedDuration) || 30,
+            description: item.description ? String(item.description) : undefined,
+            difficulty: (item.difficulty || "medium") as
+              | "easy"
+              | "medium"
+              | "hard",
+          }));
+        }
+      } catch {
+        // ignore parse error
+      }
+      cleanReply = accumulatedContent
+        .replace(/```json_breakdown\s*[\s\S]*?\s*```/, "")
+        .trim();
+    }
+
+    // 7. Lưu vào aiChatHistory của task
+    if (!task.aiChatHistory) {
+      task.aiChatHistory = [];
+    }
+    task.aiChatHistory.push({
+      role: "user",
+      content: message,
+      timestamp: new Date(),
+    });
+    task.aiChatHistory.push({
+      role: "assistant",
+      content: cleanReply,
+      suggestedBreakdown,
+      timestamp: new Date(),
+    });
+
+    await task.save();
+
+    yield {
+      type: "done",
+      fullReply: cleanReply,
       suggestedBreakdown,
       task: toPublicTask(task),
     };

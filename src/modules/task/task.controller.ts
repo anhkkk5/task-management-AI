@@ -1221,6 +1221,64 @@ export const taskCopilotChat = async (
   }
 };
 
+export const copilotChatStream = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const taskId = String(req.params.id ?? "").trim();
+    if (!taskId) {
+      res.status(400).json({ message: "Task ID không hợp lệ" });
+      return;
+    }
+
+    const { message } = req.body;
+    if (!message || typeof message !== "string" || !message.trim()) {
+      res.status(400).json({ message: "Nội dung câu hỏi không được để trống" });
+      return;
+    }
+
+    // Set headers for SSE streaming
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    (res as any).flushHeaders?.();
+
+    for await (const event of taskService.copilotChatStream(
+      userId,
+      taskId,
+      message.trim(),
+    )) {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+
+    res.end();
+  } catch (err: any) {
+    if (err?.message === "TASK_FORBIDDEN") {
+      if (!res.headersSent) {
+        res.status(403).json({ message: "Không có quyền truy cập task này" });
+      }
+      return;
+    }
+    console.error("[copilotChatStream] error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        message: err?.message || "Lỗi khi trao đổi với AI Copilot",
+      });
+    } else {
+      res.write(`data: ${JSON.stringify({ error: err?.message || "Lỗi AI" })}\n\n`);
+      res.end();
+    }
+  }
+};
+
 export const applyCopilotBreakdown = async (
   req: Request,
   res: Response,

@@ -10,6 +10,7 @@ taskRouter.get("/overdue", auth_middleware_1.authMiddleware, task_controller_1.l
 taskRouter.get("/:id", auth_middleware_1.authMiddleware, task_controller_1.getTaskById);
 taskRouter.post("/:id/ai-breakdown", auth_middleware_1.authMiddleware, task_controller_1.aiBreakdownTask);
 taskRouter.post("/:id/copilot/chat", auth_middleware_1.authMiddleware, task_controller_1.taskCopilotChat);
+taskRouter.post("/:id/copilot/stream", auth_middleware_1.authMiddleware, task_controller_1.copilotChatStream);
 taskRouter.post("/:id/copilot/apply-breakdown", auth_middleware_1.authMiddleware, task_controller_1.applyCopilotBreakdown);
 taskRouter.get("/:id/explain-estimation", auth_middleware_1.authMiddleware, task_controller_1.explainTaskEstimation);
 taskRouter.patch("/:id", auth_middleware_1.authMiddleware, task_controller_1.updateTask);
