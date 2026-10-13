@@ -1161,9 +1161,16 @@ HƯỚNG DẪN HÀNH XỬ:
   }
 ]
 \`\`\`
-Lưu ý: Các bước cần có tổng thời gian phù hợp với mục tiêu ngày và thời lượng ước tính của công việc.`;
-        // 4. Lấy lịch sử chat của task
-        const pastChatHistory = (task.aiChatHistory || []).slice(-10).map((c) => ({
+Lưu ý: Các bước cần có tổng thời gian phù hợp với mục tiêu ngày và thời lượng ước tính của công việc.
+
+5. 🔴 NGUYÊN TẮC BẢO VỆ PHẠM VI & TIẾT KIỆM TÀI NGUYÊN (QUAN TRỌNG NHẤT):
+   - Bạn CHỈ ĐƯỢC PHÉP hỗ trợ các nội dung liên quan trực tiếp đến công việc "${task.title}", các bước con hoặc kiến thức/kỹ thuật cần thiết để hoàn thành công việc này.
+   - NẾU người dùng hỏi các câu hỏi LẠC ĐỀ, KHÔNG LIÊN QUAN (như giải toán phổ thông, kể chuyện phiếm, làm thơ, hỏi thời tiết, tin tức giải trí, chit-chat cá nhân hoặc yêu cầu ngoài phạm vi công việc):
+     BẠN BẮT BUỘC PHẢI TỪ CHỐI LỊCH SỰ, NGẮN GỌN TRONG TỐI ĐA 1-2 CÂU:
+     "Dạ, tôi là Trợ lý AI chuyên biệt cho công việc \"${task.title}\". Tôi chỉ hỗ trợ các câu hỏi và kỹ thuật liên quan đến công việc này thôi ạ. Bạn hãy đặt câu hỏi liên quan đến công việc này nhé! 😊"
+     TUYỆT ĐỐI KHÔNG giải thích dông dài, KHÔNG trả lời thêm bất kỳ nội dung lạc đề nào.`;
+        // 4. Lấy lịch sử chat của task (Cắt tỉa Context Window: Giữ 3 tin nhắn gần nhất để tối ưu token)
+        const pastChatHistory = (task.aiChatHistory || []).slice(-3).map((c) => ({
             role: c.role,
             content: c.content,
         }));
@@ -1178,6 +1185,7 @@ Lưu ý: Các bước cần có tổng thời gian phù hợp với mục tiêu 
             messages,
             purpose: "chat",
             temperature: 0.7,
+            maxTokens: 700,
         });
         const rawContent = aiRes.content || "";
         // 6. Tách khối json_breakdown nếu có
@@ -1300,9 +1308,16 @@ THÔNG TIN CÔNG VIỆC HIỆN TẠI:
 LỊCH SỬ CÔNG VIỆC ĐÃ HOÀN THÀNH GẦN ĐÂY CỦA USER:
 ${JSON.stringify(completedTasksSummary, null, 2)}
 
+🔴 NGUYÊN TẮC BẢO VỆ PHẠM VI & TIẾT KIỆM TÀI NGUYÊN (QUAN TRỌNG NHẤT):
+- Bạn CHỈ ĐƯỢC PHÉP hỗ trợ các nội dung liên quan trực tiếp đến công việc "${taskContext.title}", các bước con hoặc kiến thức/kỹ thuật cần thiết để hoàn thành công việc này.
+- NẾU người dùng hỏi các câu hỏi LẠC ĐỀ, KHÔNG LIÊN QUAN (như giải toán phổ thông, kể chuyện phiếm, làm thơ, hỏi thời tiết, tin tức giải trí, chit-chat cá nhân hoặc yêu cầu ngoài phạm vi công việc):
+  BẠN BẮT BUỘC PHẢI TỪ CHỐI LỊCH SỰ, NGẮN GỌN TRONG TỐI ĐA 1-2 CÂU:
+  "Dạ, tôi là Trợ lý AI chuyên biệt cho công việc \"${taskContext.title}\". Tôi chỉ hỗ trợ các câu hỏi và kỹ thuật liên quan đến công việc này thôi ạ. Bạn hãy đặt câu hỏi liên quan đến công việc này nhé! 😊"
+  TUYỆT ĐỐI KHÔNG giải thích dông dài, KHÔNG trả lời thêm bất kỳ nội dung lạc đề nào để tránh lãng phí tài nguyên.
+
 HÃY TRẢ LỜI BẰNG TIẾNG VIỆT, ngắn gọn, súc tích, định dạng Markdown đẹp mắt, động viên người dùng.`;
-        // 4. Lấy lịch sử chat của task
-        const pastChatHistory = (task.aiChatHistory || []).slice(-10).map((c) => ({
+        // 4. Lấy lịch sử chat của task (Cắt tỉa Context Window: Giữ 3 tin nhắn gần nhất để tối ưu token)
+        const pastChatHistory = (task.aiChatHistory || []).slice(-3).map((c) => ({
             role: c.role,
             content: c.content,
         }));
@@ -1318,6 +1333,7 @@ HÃY TRẢ LỜI BẰNG TIẾNG VIỆT, ngắn gọn, súc tích, định dạng
             messages,
             purpose: "chat",
             temperature: 0.7,
+            maxTokens: 700,
         })) {
             if (event.type === "delta" && event.delta) {
                 accumulatedContent += event.delta;
