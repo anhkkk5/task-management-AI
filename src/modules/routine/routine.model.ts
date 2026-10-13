@@ -10,6 +10,7 @@ export interface IDailyRoutine extends Document {
   category: string;  // "personal" | "health" | "work" | "study" | "lifestyle"
   color: string;     // Mã màu hiển thị trên lịch
   isActive: boolean;
+  excludedDates?: string[]; // Danh sách các ngày ngoại lệ không áp dụng (YYYY-MM-DD)
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +30,10 @@ const DailyRoutineSchema = new Schema<IDailyRoutine>(
     category: { type: String, default: "personal" },
     color: { type: String, default: "#10b981" },
     isActive: { type: Boolean, default: true, index: true },
+    excludedDates: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true }
 );

@@ -21,6 +21,7 @@ const ai_context_1 = require("./ai-context");
 const user_memory_service_1 = require("./user-memory.service");
 const ai_chat_helpers_1 = require("./ai-chat-helpers");
 const ai_chat_calendar_1 = require("./ai-chat-calendar");
+const ai_calendar_context_service_1 = require("./ai-calendar-context.service");
 exports.aiChatService = {
     /**
      * Main non-streaming chat endpoint.
@@ -125,6 +126,9 @@ exports.aiChatService = {
             memories,
             history: freshHistory,
         });
+        const calendarContext = await ai_calendar_context_service_1.aiCalendarContextService
+            .getAIOrchestratorContext(userId)
+            .catch(() => "");
         const systemContent = (0, ai_intent_1.buildSystemPrompt)({
             userLang,
             targetLang,
@@ -134,6 +138,7 @@ exports.aiChatService = {
             memoryHints: (0, ai_context_1.toMemoryHints)(memories),
             discussedSubtasks,
             pendingSlots,
+            calendarContext,
         });
         // ── Prepare LLM messages ─────────────────────────────────────────
         const HISTORY_TURN_CAP = 12;

@@ -844,3 +844,167 @@ export const renameConversation = async (
     res.status(500).json({ message: "Lỗi hệ thống" });
   }
 };
+
+export const applyCalendarAction = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+    const { Types } = await import("mongoose");
+    const { DailyRoutine } = await import("../routine/routine.model");
+    const { Task } = await import("../task/task.model");
+
+    const body = (req as any).body ?? {};
+    const targetDate = String(body.targetDate || "").trim(); // "YYYY-MM-DD"
+    const actions: any[] = Array.isArray(body.actions) ? body.actions : [];
+
+    if (!targetDate && actions.length === 0) {
+      res.status(400).json({ message: "Dữ liệu hành động không hợp lệ" });
+      return;
+    }
+
+    const userObjectId = new Types.ObjectId(userId);
+    let appliedCount = 0;
+    const results: string[] = [];
+
+    for (const item of actions) {
+      if (item.checked === false) continue; // Bỏ qua nếu user bỏ tích
+
+      if (item.action === "cancel_routine") {
+        // Exclude routine for targetDate
+        let routineMatch = null;
+        if (item.routineId && Types.ObjectId.isValid(item.routineId)) {
+          routineMatch = await DailyRoutine.findOne({
+            _id: new Types.ObjectId(item.routineId),
+            userId: userObjectId,
+          });
+        }
+        if (!routineMatch && item.title) {
+          routineMatch = await DailyRoutine.findOne({
+            userId: userObjectId,
+            title: {
+              $regex: new RegExp(
+                item.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                "i",
+              ),
+            },
+          });
+        }
+
+        if (routineMatch) {
+          const dateToExclude = targetDate || item.date;
+          if (dateToExclude) {
+            await DailyRoutine.updateOne(
+              { _id: routineMatch._id },
+              { $addToSet: { excludedDates: dateToExclude } },
+            );
+            appliedCount++;
+            results.push(
+              `Đã bỏ thói quen "${routineMatch.title}" ngày ${dateToExclude}`,
+            );
+          }
+        }
+      } else if (item.action === "replace") {
+        // 1. Exclude old routine if matching oldTitle
+        if (item.oldTitle) {
+          const oldRoutine = await DailyRoutine.findOne({
+            userId: userObjectId,
+            title: {
+              $regex: new RegExp(
+                item.oldTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+                "i",
+              ),
+            },
+          });
+          const dateToExclude =
+            targetDate || (item.start ? item.start.slice(0, 10) : "");
+          if (oldRoutine && dateToExclude) {
+            await DailyRoutine.updateOne(
+              { _id: oldRoutine._id },
+              { $addToSet: { excludedDates: dateToExclude } },
+            );
+          }
+        }
+
+        // 2. Create the replacement task
+        const title = item.newTitle || item.title;
+        if (title && item.start && item.end) {
+          await Task.create({
+            userId: userObjectId,
+            title,
+            type: "event",
+            priority: "medium",
+            status: "scheduled",
+            scheduledTime: {
+              start: new Date(item.start),
+              end: new Date(item.end),
+              aiPlanned: true,
+              reason:
+                item.reason ||
+                (item.oldTitle ? `Thay thế ${item.oldTitle}` : "AI điều phối"),
+            },
+          });
+          appliedCount++;
+          results.push(`Đã đổi thành "${title}" (${item.time || ""})`);
+        }
+      } else if (item.action === "create_event" || item.action === "create") {
+        const title = item.title;
+        if (title && item.start && item.end) {
+          if (item.taskId && Types.ObjectId.isValid(item.taskId)) {
+            // Update existing backlog task
+            await Task.updateOne(
+              { _id: new Types.ObjectId(item.taskId), userId: userObjectId },
+              {
+                $set: {
+                  status: "scheduled",
+                  scheduledTime: {
+                    start: new Date(item.start),
+                    end: new Date(item.end),
+                    aiPlanned: true,
+                    reason: item.reason || "Lên lịch theo đề xuất AI",
+                  },
+                },
+              },
+            );
+            appliedCount++;
+            results.push(`Đã lên lịch cho task "${title}"`);
+          } else {
+            // Create new task event
+            await Task.create({
+              userId: userObjectId,
+              title,
+              type: "event",
+              priority: item.category === "work" ? "high" : "medium",
+              status: "scheduled",
+              scheduledTime: {
+                start: new Date(item.start),
+                end: new Date(item.end),
+                aiPlanned: true,
+                reason: item.reason || "Lên lịch theo đề xuất AI",
+              },
+            });
+            appliedCount++;
+            results.push(`Đã thêm lịch "${title}" (${item.time || ""})`);
+          }
+        }
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      appliedCount,
+      message: `Đã áp dụng thành công ${appliedCount} thay đổi lên lịch trình!`,
+      details: results,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      message: "Lỗi khi áp dụng lịch trình",
+      error: error?.message || String(error),
+    });
+  }
+};

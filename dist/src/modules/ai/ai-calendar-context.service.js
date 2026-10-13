@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.aiCalendarContextService = void 0;
 const mongoose_1 = require("mongoose");
 const task_model_1 = require("../task/task.model");
+const routine_model_1 = require("../routine/routine.model");
 const free_time_service_1 = require("../free-time/free-time.service");
 const WEEKDAY_KEYS = [
     "sunday",
@@ -219,5 +220,113 @@ exports.aiCalendarContextService = {
             lines.push(`- ${day.date} (${day.weekday}) | busy: ${busyStr} | free: ${freeStr}`);
         }
         return lines.join("\n");
+    },
+    /**
+     * Generates a comprehensive real-time context of the user's habits, scheduled
+     * events, and backlog tasks to empower the AI Calendar & Habit Orchestrator.
+     */
+    getAIOrchestratorContext: async (userId) => {
+        if (!mongoose_1.Types.ObjectId.isValid(userId))
+            return "";
+        const userObjectId = new mongoose_1.Types.ObjectId(userId);
+        // Current time in Vietnam (UTC+7)
+        const now = new Date();
+        const vnNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+        const VI_WEEKDAYS = [
+            "Chủ Nhật",
+            "Thứ Hai",
+            "Thứ Ba",
+            "Thứ Tư",
+            "Thứ Năm",
+            "Thứ Sáu",
+            "Thứ Bảy",
+        ];
+        const nowDayVi = VI_WEEKDAYS[vnNow.getUTCDay()];
+        const nowStr = `${nowDayVi}, ngày ${pad2(vnNow.getUTCDate())}/${pad2(vnNow.getUTCMonth() + 1)}/${vnNow.getUTCFullYear()} ${pad2(vnNow.getUTCHours())}:${pad2(vnNow.getUTCMinutes())} (Giờ Việt Nam, GMT+7)`;
+        // 7 days calendar overview (starting today)
+        const daysList = [];
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(vnNow.getTime() + i * 24 * 60 * 60 * 1000);
+            const dayVi = VI_WEEKDAYS[d.getUTCDay()];
+            const yyyy = d.getUTCFullYear();
+            const mm = pad2(d.getUTCMonth() + 1);
+            const dd = pad2(d.getUTCDate());
+            const label = i === 0 ? "Hôm nay" : i === 1 ? "Ngày mai" : "";
+            daysList.push(`  + ${label ? label + " - " : ""}${dayVi} (${dd}/${mm}/${yyyy}, ISO date: ${yyyy}-${mm}-${dd})`);
+        }
+        // Load active Daily Routines
+        const routines = await routine_model_1.DailyRoutine.find({
+            userId: userObjectId,
+            isActive: true,
+        })
+            .sort({ startTime: 1 })
+            .lean();
+        const routineLines = routines.length
+            ? routines.map((r) => {
+                const daysStr = r.daysOfWeek?.length === 7
+                    ? "Mọi ngày"
+                    : r.daysOfWeek
+                        ?.map((d) => (d === 7 ? "CN" : `T${d + 1}`))
+                        .join(", ");
+                const excluded = r.excludedDates?.length
+                    ? ` [Đã bỏ các ngày: ${r.excludedDates.join(", ")}]`
+                    : "";
+                return `  - [RoutineID: ${r._id}] ${r.startTime} - ${r.endTime}: "${r.title}" (${daysStr})${excluded}`;
+            })
+            : ["  (Chưa có thói quen nào)"];
+        // Load scheduled tasks in 7 days
+        const from = new Date(now);
+        const to = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+        const scheduledDocs = await task_model_1.Task.find({
+            userId: userObjectId,
+            isArchived: { $ne: true },
+            status: { $nin: ["completed", "cancelled"] },
+            "scheduledTime.start": { $gte: from, $lte: to },
+        })
+            .sort({ "scheduledTime.start": 1 })
+            .lean();
+        const scheduledLines = scheduledDocs.length
+            ? scheduledDocs.map((t) => {
+                const s = t.scheduledTime?.start
+                    ? new Date(t.scheduledTime.start)
+                    : null;
+                const e = t.scheduledTime?.end
+                    ? new Date(t.scheduledTime.end)
+                    : null;
+                const timeStr = s && e ? `${toHHmm(s)} - ${toHHmm(e)}` : "";
+                const dateStr = s ? toDateKey(s) : "";
+                return `  - [TaskID: ${t._id}] [${dateStr} ${timeStr}] "${t.title}" (Loại: ${t.type || "task"}, Ưu tiên: ${t.priority || "trung bình"})`;
+            })
+            : ["  (Chưa có sự kiện nào lên lịch trong 7 ngày tới)"];
+        // Load pending/backlog tasks
+        const pendingDocs = await task_model_1.Task.find({
+            userId: userObjectId,
+            isArchived: { $ne: true },
+            status: { $in: ["pending", "in_progress"] },
+            "scheduledTime.start": { $exists: false },
+        })
+            .limit(6)
+            .lean();
+        const pendingLines = pendingDocs.length
+            ? pendingDocs.map((t) => `  - [BacklogTaskID: ${t._id}] "${t.title}" (Ưu tiên: ${t.priority || "trung bình"}, Ước lượng: ${t.estimatedDuration || 60}p)`)
+            : ["  (Không có task tồn đọng)"];
+        return `
+=====================
+NGỮ CẢNH THỜI GIAN & LỊCH TRÌNH CỦA NGƯỜI DÙNG:
+1. Thời gian hiện tại:
+${nowStr}
+
+2. Lịch các ngày trong tuần này:
+${daysList.join("\n")}
+
+3. Thói quen sinh hoạt hàng ngày cố định (Daily Routines):
+${routineLines.join("\n")}
+
+4. Sự kiện & Công việc đã lên lịch trên Calendar (7 ngày tới):
+${scheduledLines.join("\n")}
+
+5. Công việc còn tồn đọng / Chưa lên lịch (Backlog để nhặt vào khi rảnh):
+${pendingLines.join("\n")}
+=====================`;
     },
 };

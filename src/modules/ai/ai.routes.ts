@@ -13,6 +13,7 @@ import {
   taskBreakdown,
   deleteConversation,
   renameConversation,
+  applyCalendarAction,
 } from "./ai.controller";
 
 const aiRouter = Router();
@@ -23,6 +24,7 @@ aiRouter.use(aiLimiter);
 
 aiRouter.post("/chat", chat);
 aiRouter.post("/chat/stream", chatStream);
+aiRouter.post("/apply-calendar-action", applyCalendarAction);
 aiRouter.get("/conversations", listConversations);
 aiRouter.get(
   "/conversations/by-parent/:parentTaskId",

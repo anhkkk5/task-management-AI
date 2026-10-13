@@ -49,6 +49,10 @@ const DailyRoutineSchema = new mongoose_1.Schema({
     category: { type: String, default: "personal" },
     color: { type: String, default: "#10b981" },
     isActive: { type: Boolean, default: true, index: true },
+    excludedDates: {
+        type: [String],
+        default: [],
+    },
 }, { timestamps: true });
 DailyRoutineSchema.index({ userId: 1, isActive: 1 });
 exports.DailyRoutine = mongoose_1.default.model("DailyRoutine", DailyRoutineSchema);

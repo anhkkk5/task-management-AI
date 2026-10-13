@@ -131,11 +131,17 @@ export function detectIntent(message: string): ChatIntent {
     /(sắp xếp|xếp lịch|lên lịch|lập lịch|tạo lịch|đặt lịch|schedule|plan)/;
   const frequencyRe =
     /(\d+\s*(buổi|lần|session|lượt)\s*(\/|mỗi|trong|tuần|ngày|week|day))|(buổi\s*\/\s*tuần)|(lần\s*\/\s*tuần)/;
+  const calendarActionRe =
+    /(đổi lịch|thay lịch|thay vì|thay cho|thay bằng|thay đi|thay.*bằng|dời lịch|hoãn lịch|chuyển lịch|hủy lịch|xóa lịch|bỏ lịch|nghỉ làm|được nghỉ|ngủ nướng|dậy muộn|dậy sớm|tập gym thay|thay đi dạo|co giãn|thói quen|lịch trình|thời gian biểu)/i;
+  const timeContextRe =
+    /(thứ [2-7]|chủ nhật|hôm nay|ngày mai|ngày kia|tuần này|tuần sau).*(\d{1,2}h|\d{1,2}:\d{2}|sáng|chiều|tối)/i;
 
   if (
     freeBusyRe.test(text) ||
     scheduleRequestRe.test(text) ||
-    frequencyRe.test(text)
+    frequencyRe.test(text) ||
+    calendarActionRe.test(text) ||
+    timeContextRe.test(text)
   ) {
     return "CALENDAR_QUERY";
   }
@@ -208,6 +214,7 @@ export function buildSystemPrompt(params: {
   memoryHints?: MemoryHint[];
   discussedSubtasks?: DiscussedSubtask[];
   pendingSlots?: string[];
+  calendarContext?: string;
 }): string {
   const {
     userLang,
@@ -218,6 +225,7 @@ export function buildSystemPrompt(params: {
     memoryHints,
     discussedSubtasks,
     pendingSlots,
+    calendarContext,
   } = params;
   const userLangName = LANG_NAMES[userLang];
   const targetLangName = LANG_NAMES[targetLang];
@@ -345,35 +353,83 @@ Structure your response as:
 
 💡 **Tips:** (in ${userLangName})`,
 
-    CALENDAR_QUERY: `MODE: CALENDAR ASSISTANT. Tools:
+    CALENDAR_QUERY: `=====================
+CHẾ ĐỘ ĐIỀU PHỐI LỊCH TRÌNH & THÓI QUEN (P0 - BẮT BUỘC THỰC THI NGAY KHÔNG HỎI LẰNG NHẰNG):
+Khi người dùng yêu cầu hoặc đề cập:
+1. Thay đổi / đổi hoạt động (ví dụ: "thứ 5 từ 17h-18h tôi muốn đi tập gym thay đi dạo")
+2. Điều chỉnh vì ngày nghỉ / ngủ nướng (ví dụ: "thứ 6 công ty cho nghỉ làm và tôi muốn kéo dài thời gian ngủ tới 8h sáng mới dậy")
+3. Co giãn thói quen sinh hoạt cho một ngày cụ thể (Single-day exception)
+
+HÃY THỰC HIỆN NGAY LẬP TỨC TRONG 1 LẦN TRẢ LỜI DUY NHẤT:
+- TUYỆT ĐỐI KHÔNG hỏi vặn lại hay bắt người dùng xác nhận trước ("bạn có muốn tôi đổi không?", "bạn có muốn thêm gì không?").
+- TUYỆT ĐỐI KHÔNG gọi tool propose_schedule hay get_free_busy_report.
+- Sử dụng trực tiếp danh sách "Thói quen sinh hoạt (Daily Routines)" và "Lịch trình đã lên lịch" được cung cấp ở bên dưới:
+  + Tính chính xác ISO date (YYYY-MM-DD) của ngày được nhắc đến. Ví dụ "thứ 5" = lấy đúng ngày Thứ Năm gần nhất theo ngữ cảnh.
+  + Tôn trọng cuộc họp cố định: Giữ nguyên các cuộc họp / meeting trên lịch, chỉ co giãn các việc xung quanh.
+  + Nếu ngủ nướng tới 8h: Bỏ giờ dậy cũ (06:30), chuyển vệ sinh cá nhân & ăn sáng nhẹ sang 08:00 - 08:30.
+  + Nếu được nghỉ làm: Hủy ca làm công ty (08:30 - 18:00) cho ngày đó.
+  + Đề xuất thời gian nấu ăn trưa / nghỉ trưa (11:30 - 13:00).
+  + Nếu có task trong Backlog, nhặt 1-2 task để đề xuất xử lý vào khung giờ trống buổi chiều (ví dụ 14:00 - 16:00).
+  + Đề xuất thể thao / giải trí chiều tối.
+  + Nếu thay thế hoạt động (như Đi tập gym thay Đi dạo 17:00-18:00): Đánh dấu hành động replace từ Đi dạo sang Đi tập gym.
+
+ĐỊNH DẠNG ĐÁP ỨNG:
+- Trả lời bằng tiếng Việt thân thiện, súc tích (1-2 đoạn văn ngắn) giải thích các thay đổi đã lên kế hoạch.
+- CUỐI TIN NHẮN, BẮT BUỘC VÀ LUÔN LUÔN XUẤT khối JSON code block với tag json_schedule_action để giao diện tự động render Thẻ Hành Động Tương Tác cho người dùng bấm Áp dụng:
+\`\`\`json_schedule_action
+{
+  "type": "schedule_adjustment",
+  "targetDate": "YYYY-MM-DD",
+  "targetDayVi": "Thứ ..., DD/MM/YYYY",
+  "summary": "Tóm tắt ngắn gọn",
+  "actions": [
+    {
+      "action": "cancel_routine",
+      "routineId": "<RoutineID nếu có, hoặc để trống>",
+      "title": "<Tên routine>",
+      "time": "HH:mm - HH:mm",
+      "reason": "<Lý do>"
+    },
+    {
+      "action": "replace",
+      "oldTitle": "<Tên cũ>",
+      "newTitle": "<Tên mới>",
+      "start": "YYYY-MM-DDTHH:mm:ss+07:00",
+      "end": "YYYY-MM-DDTHH:mm:ss+07:00",
+      "time": "HH:mm - HH:mm",
+      "category": "health",
+      "checked": true
+    },
+    {
+      "action": "create_event",
+      "title": "<Tên hoạt động>",
+      "start": "YYYY-MM-DDTHH:mm:ss+07:00",
+      "end": "YYYY-MM-DDTHH:mm:ss+07:00",
+      "time": "HH:mm - HH:mm",
+      "category": "lifestyle",
+      "taskId": "<BacklogTaskID nếu có, hoặc để trống>",
+      "checked": true
+    }
+  ]
+}
+\`\`\`
+
+=====================
+Nếu là yêu cầu lên lịch học/tập định kỳ nhiều buổi/tuần thông thường mới dùng công cụ:
+Tools:
 - get_free_busy_report(from,to): busy/free intervals
 - propose_schedule(activityName|activities[],durationMin,sessionsPerWeek,windowStart,windowEnd,daysAllowed?,minGapDays?,from,to): valid non-overlapping slots
 - commit_proposal(): TẠO THẬT tasks từ draft. Chỉ gọi khi user xác nhận.
 
-RULES (KHÔNG được vi phạm):
+RULES (cho việc lên lịch nhiều buổi/tuần):
 1. KHÔNG bao giờ tự bịa giờ trong text. Mọi thời gian cụ thể PHẢI từ tool.
 1b. KHÔNG bao giờ tự tính thứ trong tuần từ date. Khi propose_schedule trả về field 'weekday' (vd "Thứ Ba"), bắt buộc COPY ĐÚNG chuỗi đó vào reply, KHÔNG tự đoán "Thứ 2/3/4...".
 2. KHÔNG đề xuất slot trùng busy hoặc ngoài window user nêu.
 3. Mọi request schedule/revision ("đổi giờ","muộn quá","sớm hơn","tuần khác") → call propose_schedule lại với constraint mới.
 4. User confirm ("ok","chốt","tạo đi","đồng ý","yes") → call commit_proposal NGAY. Cấm viết "Tôi sẽ tạo..." mà không gọi tool.
-5. Nếu thiếu thông tin để lên lịch, PHẢI hỏi bù từng bước (mỗi lần 1-2 câu hỏi ngắn), KHÔNG propose_schedule khi dữ liệu còn thiếu.
+5. Nếu thiếu thông tin để lên lịch định kỳ, PHẢI hỏi bù từng bước (mỗi lần 1-2 câu hỏi ngắn), KHÔNG propose_schedule khi dữ liệu còn thiếu.
 6. KHÔNG được tự ý đề xuất đổi giờ/di chuyển lịch task hiện có, trừ khi user yêu cầu rõ "đổi" hoặc "dời" lịch cũ.
-7. CHỈ đề xuất slot trong tương lai. Cấm đề xuất ngày/giờ đã qua (bao gồm hôm nay nhưng giờ bắt đầu đã qua).
-
-INTAKE FIELDS (cần đủ trước khi propose_schedule):
-- activityName hoặc activities[] (nhiều hoạt động trong 1 lệnh, mỗi activity có sessionsPerWeek riêng)
-- durationMin (phút/buổi)
-- sessionsPerWeek (buổi/tuần)
-- window (windowStart/windowEnd hoặc mô tả "sáng/chiều/tối")
-- date range (from/to, nếu user chưa nói thì mặc định 7 ngày tới và nói rõ giả định)
-
-WORKFLOW:
-- Hỏi free/busy → get_free_busy_report → tóm tắt bullets theo ngày.
-- Yêu cầu sắp xếp nhưng thiếu field → hỏi bù step-by-step, chưa gọi propose_schedule.
-- Nếu user yêu cầu nhiều hoạt động trong 1 câu, gộp thành activities[] và call propose_schedule 1 lần cho tất cả.
-- Đủ field → propose_schedule với window đúng, chỉ slot tương lai → list slot + hỏi "Bạn có muốn lên lịch luôn không?".
-- propose_schedule trả thiếu slot (không đủ sessionsPerWeek) → chỉ đề xuất các ngày/giờ còn trống, gợi ý nới constraint (đổi giờ, mở rộng date range, giảm số buổi), KHÔNG đụng lịch cũ.
-- commit_proposal trả NO_DRAFT → bảo user đề xuất lại trước.
+7. CHỈ đề xuất slot trong tương lai. Cấm đề xuất ngày/giờ đã qua.
 
 VIETNAMESE TIME WINDOWS:
 sáng=06:00-11:30 / trưa=11:00-13:30 / chiều=13:00-18:00 / tối=18:00-22:00
@@ -393,6 +449,18 @@ CURRENT MODE: ASSISTANT
   };
 
   let prompt = base + languageConfig + intentPrompts[intent];
+
+  // Add calendar orchestrator context if available
+  if (calendarContext) {
+    prompt += `\n\n${calendarContext}`;
+  }
+
+  // Off-topic refusal rules (Strictly enforced to save user tokens)
+  prompt += `\n\n=====================\nQUY TẮC TỪ CHỐI CÂU HỎI LẠC ĐỀ (TIẾT KIỆM TOKEN):\n` +
+    `Nếu người dùng hỏi những câu hỏi hoàn toàn ngoài luồng, không liên quan đến công việc, học tập, lịch trình, thói quen hay ứng dụng TaskMind AI (ví dụ: kể chuyện cười, tình cảm, hỏi về nhân vật nổi tiếng đời tư, tin giải trí showbiz):\n` +
+    `1. HÃY TỪ CHỐI KHÉO LÉO, LỊCH SỰ VÀ CỰC KỲ NGẮN GỌN (tối đa 1-2 câu).\n` +
+    `2. Ví dụ: "Xin lỗi bạn, mình là trợ lý AI chuyên về sắp xếp lịch trình và quản lý công việc của TaskMind. Bạn cần hỗ trợ gì về lịch trình hoặc công việc không nhé?"\n` +
+    `3. TUYỆT ĐỐI KHÔNG giải thích lan man, không tiếp tục câu chuyện ngoài luồng để tiết kiệm token.`;
 
   // Add learning context if available
   if (subtaskContext) {

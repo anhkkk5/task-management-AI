@@ -339,10 +339,14 @@ async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
     await saveDraftToContext(ctx, proposalDraft);
   }
 
+  const hasScheduleAction = /```(?:json_)?schedule_action/.test(
+    toolResult.content || "",
+  );
+
   const content =
     commitProposalReply ??
     forcedCommitReply ??
-    (shouldShowCalendarOnboarding
+    (shouldShowCalendarOnboarding && !hasScheduleAction
       ? `${CALENDAR_ONBOARDING_GUIDE}\n\n${toolResult.content}`
       : toolResult.content);
 

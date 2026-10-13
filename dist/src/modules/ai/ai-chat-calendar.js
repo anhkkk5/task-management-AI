@@ -229,9 +229,10 @@ async function runModelToolLoop(ctx) {
     if (proposalDraft) {
         await saveDraftToContext(ctx, proposalDraft);
     }
+    const hasScheduleAction = /```(?:json_)?schedule_action/.test(toolResult.content || "");
     const content = commitProposalReply ??
         forcedCommitReply ??
-        (shouldShowCalendarOnboarding
+        (shouldShowCalendarOnboarding && !hasScheduleAction
             ? `${ai_chat_helpers_1.CALENDAR_ONBOARDING_GUIDE}\n\n${toolResult.content}`
             : toolResult.content);
     return {

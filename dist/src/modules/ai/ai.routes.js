@@ -10,6 +10,7 @@ aiRouter.use(auth_middleware_1.authMiddleware);
 aiRouter.use(rate_limit_middleware_1.aiLimiter);
 aiRouter.post("/chat", ai_controller_1.chat);
 aiRouter.post("/chat/stream", ai_controller_1.chatStream);
+aiRouter.post("/apply-calendar-action", ai_controller_1.applyCalendarAction);
 aiRouter.get("/conversations", ai_controller_1.listConversations);
 aiRouter.get("/conversations/by-parent/:parentTaskId", ai_controller_1.getOrCreateConversationByParent);
 aiRouter.get("/conversations/:id", ai_controller_1.getConversationById);

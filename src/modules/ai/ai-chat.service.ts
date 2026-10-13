@@ -42,6 +42,7 @@ import {
   type ChatInput,
 } from "./ai-chat-helpers";
 import { handleCalendarIntent } from "./ai-chat-calendar";
+import { aiCalendarContextService } from "./ai-calendar-context.service";
 
 export const aiChatService = {
   /**
@@ -180,6 +181,10 @@ export const aiChatService = {
       history: freshHistory,
     });
 
+    const calendarContext = await aiCalendarContextService
+      .getAIOrchestratorContext(userId)
+      .catch(() => "");
+
     const systemContent = buildSystemPrompt({
       userLang,
       targetLang,
@@ -189,6 +194,7 @@ export const aiChatService = {
       memoryHints: toMemoryHints(memories),
       discussedSubtasks,
       pendingSlots,
+      calendarContext,
     });
 
     // ── Prepare LLM messages ─────────────────────────────────────────
