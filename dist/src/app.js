@@ -25,6 +25,8 @@ const colors_routes_1 = __importDefault(require("./modules/colors/colors.routes"
 const team_routes_1 = __importDefault(require("./modules/team/team.routes"));
 const catalog_routes_1 = __importDefault(require("./modules/catalog/catalog.routes"));
 const passport_2 = require("./config/passport");
+const helmet_1 = __importDefault(require("helmet"));
+const rate_limit_middleware_1 = require("./middleware/rate-limit.middleware");
 const getAllowedCorsOrigins = () => {
     const envOrigins = [process.env.CLIENT_URL, process.env.FRONTEND_URL]
         .filter((value) => Boolean(value))
@@ -35,6 +37,13 @@ const getAllowedCorsOrigins = () => {
 };
 const createApp = () => {
     const app = (0, express_1.default)();
+    // 1. Security Headers (Bảo vệ HTTP headers tiêu chuẩn, cấu hình tương thích Swagger & frontend)
+    app.use((0, helmet_1.default)({
+        contentSecurityPolicy: false,
+        crossOriginResourcePolicy: { policy: "cross-origin" },
+    }));
+    // 2. Global Rate Limiter (Chống DoS/DDoS diện rộng)
+    app.use(rate_limit_middleware_1.globalLimiter);
     app.use((0, cors_1.default)({
         origin: getAllowedCorsOrigins(),
         credentials: true,

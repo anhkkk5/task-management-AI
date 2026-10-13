@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authMiddleware } from "../../middleware/auth.middleware";
+import { aiLimiter } from "../../middleware/rate-limit.middleware";
 import {
   chat,
   chatStream,
@@ -16,24 +17,24 @@ import {
 
 const aiRouter = Router();
 
-aiRouter.post("/chat", authMiddleware, chat);
-aiRouter.post("/chat/stream", authMiddleware, chatStream);
-aiRouter.get("/conversations", authMiddleware, listConversations);
+// Toàn bộ các API AI đều yêu cầu xác thực và áp dụng hạn mức gọi LLM (key theo userId)
+aiRouter.use(authMiddleware);
+aiRouter.use(aiLimiter);
+
+aiRouter.post("/chat", chat);
+aiRouter.post("/chat/stream", chatStream);
+aiRouter.get("/conversations", listConversations);
 aiRouter.get(
   "/conversations/by-parent/:parentTaskId",
-  authMiddleware,
   getOrCreateConversationByParent,
 );
-aiRouter.get("/conversations/:id", authMiddleware, getConversationById);
-aiRouter.delete("/conversations/:id", authMiddleware, deleteConversation);
-aiRouter.patch("/conversations/:id", authMiddleware, renameConversation);
+aiRouter.get("/conversations/:id", getConversationById);
+aiRouter.delete("/conversations/:id", deleteConversation);
+aiRouter.patch("/conversations/:id", renameConversation);
 
-aiRouter.post("/task-breakdown", authMiddleware, taskBreakdown);
-
-aiRouter.post("/priority-suggest", authMiddleware, prioritySuggest);
-
-aiRouter.post("/schedule-plan", authMiddleware, schedulePlan);
-
-aiRouter.post("/smart-reschedule", authMiddleware, smartReschedule);
+aiRouter.post("/task-breakdown", taskBreakdown);
+aiRouter.post("/priority-suggest", prioritySuggest);
+aiRouter.post("/schedule-plan", schedulePlan);
+aiRouter.post("/smart-reschedule", smartReschedule);
 
 export default aiRouter;

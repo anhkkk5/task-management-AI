@@ -25,6 +25,7 @@ import {
   getGoogleStatus,
 } from "./google-auth.controller";
 import { authMiddleware } from "../../middleware/auth.middleware";
+import { authLimiter } from "../../middleware/rate-limit.middleware";
 
 const authRouter = Router();
 
@@ -34,11 +35,11 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
-authRouter.post("/register", register);
-authRouter.post("/send-otp", sendOtp);
-authRouter.post("/resend-otp", resendOtp);
-authRouter.post("/verify-otp", verifyOtp);
-authRouter.post("/login", login);
+authRouter.post("/register", authLimiter, register);
+authRouter.post("/send-otp", authLimiter, sendOtp);
+authRouter.post("/resend-otp", authLimiter, resendOtp);
+authRouter.post("/verify-otp", authLimiter, verifyOtp);
+authRouter.post("/login", authLimiter, login);
 authRouter.post("/refresh-token", refreshToken);
 authRouter.post("/logout", logout);
 authRouter.post("/logout-all", authMiddleware, logoutAll);
@@ -52,9 +53,13 @@ authRouter.post(
 );
 
 // Forgot password routes
-authRouter.post("/forgot-password", forgotPassword);
-authRouter.post("/verify-forgot-password-otp", verifyForgotPasswordOtp);
-authRouter.post("/reset-password", resetPassword);
+authRouter.post("/forgot-password", authLimiter, forgotPassword);
+authRouter.post(
+  "/verify-forgot-password-otp",
+  authLimiter,
+  verifyForgotPasswordOtp,
+);
+authRouter.post("/reset-password", authLimiter, resetPassword);
 
 // Google OAuth routes
 authRouter.get(

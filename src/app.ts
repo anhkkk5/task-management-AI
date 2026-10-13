@@ -19,6 +19,8 @@ import colorsRouter from "./modules/colors/colors.routes";
 import teamRouter from "./modules/team/team.routes";
 import catalogRouter from "./modules/catalog/catalog.routes";
 import { setupPassport } from "./config/passport";
+import helmet from "helmet";
+import { globalLimiter } from "./middleware/rate-limit.middleware";
 
 const getAllowedCorsOrigins = (): string[] => {
   const envOrigins = [process.env.CLIENT_URL, process.env.FRONTEND_URL]
@@ -34,6 +36,17 @@ const getAllowedCorsOrigins = (): string[] => {
 
 export const createApp = (): Express => {
   const app: Express = express();
+
+  // 1. Security Headers (Bảo vệ HTTP headers tiêu chuẩn, cấu hình tương thích Swagger & frontend)
+  app.use(
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    }),
+  );
+
+  // 2. Global Rate Limiter (Chống DoS/DDoS diện rộng)
+  app.use(globalLimiter);
 
   app.use(
     cors({

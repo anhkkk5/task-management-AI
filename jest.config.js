@@ -9,6 +9,7 @@ module.exports = {
     "!src/**/*.d.ts",
     "!src/**/__tests__/**",
   ],
+  transformIgnorePatterns: ["node_modules/(?!(uuid)/)"],
   globals: {
     "ts-jest": {
       tsconfig: {
