@@ -547,7 +547,7 @@ export class TeamService {
 
     const tasks = await Task.find({
       "teamAssignment.teamId": new Types.ObjectId(teamId),
-      isArchived: false,
+      isArchived: { $ne: true },
     }).lean();
     return {
       todo: tasks.filter((t) => t.status === "todo"),
