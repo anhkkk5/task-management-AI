@@ -446,7 +446,7 @@ const listTasks = async (_req, res) => {
             limitItem: 20,
         }, _req.query, 0);
         const page = initialPagination.currentPage;
-        const limit = Math.min(initialPagination.limitItem, 100);
+        const limit = Math.min(initialPagination.limitItem, 500);
         const deadlineFromTo = deadlineQuery && String(deadlineQuery) === "today"
             ? getTodayRange()
             : null;

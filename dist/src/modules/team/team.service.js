@@ -375,7 +375,7 @@ class TeamService {
             throw { status: 404, message: "Team không tồn tại" };
         const tasks = await task_model_1.Task.find({
             "teamAssignment.teamId": new mongoose_1.Types.ObjectId(teamId),
-            isArchived: false,
+            isArchived: { $ne: true },
         }).lean();
         return {
             todo: tasks.filter((t) => t.status === "todo"),

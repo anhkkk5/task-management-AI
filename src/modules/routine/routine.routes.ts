@@ -16,6 +16,7 @@ routineRouter.get("/", getRoutines);
 routineRouter.post("/", createRoutine);
 routineRouter.post("/seed", seedDefaultRoutines);
 routineRouter.put("/:id", updateRoutine);
+routineRouter.patch("/:id", updateRoutine);
 routineRouter.delete("/:id", deleteRoutine);
 
 export default routineRouter;

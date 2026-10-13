@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 
+// Server entry point - auto reloaded
 dotenv.config();
 
 import http from "http";

@@ -24,6 +24,7 @@ const guest_routes_1 = __importDefault(require("./modules/guest/routes/guest.rou
 const colors_routes_1 = __importDefault(require("./modules/colors/colors.routes"));
 const team_routes_1 = __importDefault(require("./modules/team/team.routes"));
 const catalog_routes_1 = __importDefault(require("./modules/catalog/catalog.routes"));
+const routine_routes_1 = __importDefault(require("./modules/routine/routine.routes"));
 const passport_2 = require("./config/passport");
 const helmet_1 = __importDefault(require("helmet"));
 const rate_limit_middleware_1 = require("./middleware/rate-limit.middleware");
@@ -91,6 +92,7 @@ const createApp = () => {
     app.use("/colors", colors_routes_1.default);
     app.use("/teams", team_routes_1.default);
     app.use("/catalog", catalog_routes_1.default);
+    app.use("/routines", routine_routes_1.default);
     return app;
 };
 exports.createApp = createApp;

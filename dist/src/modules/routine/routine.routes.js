@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../../middleware/auth.middleware");
+const routine_controller_1 = require("./routine.controller");
+const routineRouter = (0, express_1.Router)();
+routineRouter.use(auth_middleware_1.authMiddleware);
+routineRouter.get("/", routine_controller_1.getRoutines);
+routineRouter.post("/", routine_controller_1.createRoutine);
+routineRouter.post("/seed", routine_controller_1.seedDefaultRoutines);
+routineRouter.put("/:id", routine_controller_1.updateRoutine);
+routineRouter.patch("/:id", routine_controller_1.updateRoutine);
+routineRouter.delete("/:id", routine_controller_1.deleteRoutine);
+exports.default = routineRouter;
