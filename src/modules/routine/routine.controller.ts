@@ -1,13 +1,23 @@
 import { Request, Response } from "express";
 import { routineService } from "./routine.service";
 
+const getUserId = (req: Request): string | null => {
+  const user = (req as any).user;
+  const id = user?.userId || user?._id || user?.id;
+  return id ? String(id) : null;
+};
+
 export const getRoutines = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?._id || (req as any).user?.id;
+    const userId = getUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Chưa xác thực người dùng" });
     }
-    const routines = await routineService.getRoutines(String(userId));
+    let routines = await routineService.getRoutines(userId);
+    // Nếu chưa có routine nào, tự động nạp 7 thói quen sinh hoạt mẫu mặc định
+    if (routines.length === 0) {
+      routines = await routineService.seedDefaultRoutines(userId);
+    }
     return res.status(200).json({ routines });
   } catch (err: any) {
     return res.status(500).json({ message: err.message || "Lỗi khi lấy danh sách lịch lặp lại" });
@@ -16,7 +26,7 @@ export const getRoutines = async (req: Request, res: Response) => {
 
 export const createRoutine = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?._id || (req as any).user?.id;
+    const userId = getUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Chưa xác thực người dùng" });
     }
@@ -24,7 +34,7 @@ export const createRoutine = async (req: Request, res: Response) => {
     if (!title || !startTime || !endTime) {
       return res.status(400).json({ message: "Tiêu đề, giờ bắt đầu và giờ kết thúc là bắt buộc" });
     }
-    const routine = await routineService.createRoutine(String(userId), {
+    const routine = await routineService.createRoutine(userId, {
       title,
       description,
       startTime,
@@ -41,12 +51,12 @@ export const createRoutine = async (req: Request, res: Response) => {
 
 export const updateRoutine = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?._id || (req as any).user?.id;
+    const userId = getUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Chưa xác thực người dùng" });
     }
     const id = String(req.params.id);
-    const routine = await routineService.updateRoutine(String(userId), id, req.body);
+    const routine = await routineService.updateRoutine(userId, id, req.body);
     if (!routine) {
       return res.status(404).json({ message: "Không tìm thấy lịch lặp lại" });
     }
@@ -58,12 +68,12 @@ export const updateRoutine = async (req: Request, res: Response) => {
 
 export const deleteRoutine = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?._id || (req as any).user?.id;
+    const userId = getUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Chưa xác thực người dùng" });
     }
     const id = String(req.params.id);
-    const success = await routineService.deleteRoutine(String(userId), id);
+    const success = await routineService.deleteRoutine(userId, id);
     if (!success) {
       return res.status(404).json({ message: "Không tìm thấy lịch lặp lại để xóa" });
     }
@@ -75,11 +85,11 @@ export const deleteRoutine = async (req: Request, res: Response) => {
 
 export const seedDefaultRoutines = async (req: Request, res: Response) => {
   try {
-    const userId = (req as any).user?._id || (req as any).user?.id;
+    const userId = getUserId(req);
     if (!userId) {
       return res.status(401).json({ message: "Chưa xác thực người dùng" });
     }
-    const routines = await routineService.seedDefaultRoutines(String(userId));
+    const routines = await routineService.seedDefaultRoutines(userId);
     return res.status(200).json({ routines, message: "Đã nạp bộ lịch lặp lại hàng ngày mẫu thành công" });
   } catch (err: any) {
     return res.status(500).json({ message: err.message || "Lỗi khi nạp lịch lặp lại mẫu" });
