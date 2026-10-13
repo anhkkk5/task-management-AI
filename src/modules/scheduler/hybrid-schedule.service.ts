@@ -5,6 +5,7 @@ import { taskRepository } from "../task/task.repository";
 import { userHabitRepository } from "../user/user-habit.repository";
 import { aiScheduleRepository } from "../ai-schedule/ai-schedule.repository";
 import { freeTimeService } from "../free-time/free-time.service";
+import { DailyRoutine } from "../routine/routine.model";
 import { extractJson } from "../ai/ai-utils";
 import { getRedis } from "../../services/redis.service";
 import { Team } from "../team/team.model";
@@ -650,6 +651,11 @@ Format JSON:
     const activeSchedules =
       await aiScheduleRepository.findAllActiveByUserId(userId);
 
+    const userRoutines = await DailyRoutine.find({
+      userId: userObjectId,
+      isActive: true,
+    });
+
     for (const s of activeSchedules) {
       const days: any[] = Array.isArray((s as any).schedule)
         ? (s as any).schedule
@@ -774,6 +780,7 @@ Format JSON:
 
       // Lấy busy slots của ngày này (từ các ngày trước đã schedule)
       // + block toàn bộ thời gian ngoài availability của user trong ngày
+      // + block toàn bộ lịch sinh hoạt thường nhật (Daily Routines) của user trong ngày
       const baseBusySlots = busySlotsByDate.get(dateStr) || [];
       const availableSlots = await freeTimeService.getAvailableSlotsForDate(
         userId,
@@ -783,9 +790,40 @@ Format JSON:
         new Date(currentDate),
         availableSlots,
       );
+
+      // Convert user routines on this weekday to busy slots (lịch cá nhân)
+      const dayNum = currentDate.getDay() === 0 ? 7 : currentDate.getDay();
+      const routineBusySlots: TimeInterval[] = [];
+      for (const r of userRoutines) {
+        if (!r.daysOfWeek?.includes(dayNum)) continue;
+        if (r.excludedDates && r.excludedDates.includes(dateStr)) continue;
+
+        const [sh, sm] = (r.startTime || "")
+          .split(":")
+          .map((x) => parseInt(x, 10));
+        const [eh, em] = (r.endTime || "")
+          .split(":")
+          .map((x) => parseInt(x, 10));
+        if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) continue;
+
+        const rStart = new Date(currentDate);
+        rStart.setHours(sh, sm, 0, 0);
+        const rEnd = new Date(currentDate);
+        rEnd.setHours(eh, em, 0, 0);
+
+        if (rEnd.getTime() > rStart.getTime()) {
+          routineBusySlots.push({
+            start: rStart,
+            end: rEnd,
+            taskId: `ROUTINE_${r._id}`,
+          });
+        }
+      }
+
       const existingBusySlots = [
         ...baseBusySlots,
         ...outsideAvailabilityBusySlots,
+        ...routineBusySlots,
       ];
       busySlotsByDate.set(dateStr, existingBusySlots);
 

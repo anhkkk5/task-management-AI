@@ -2,6 +2,7 @@ import { Types } from "mongoose";
 import { taskRepository } from "../task/task.repository";
 import { userHabitRepository } from "../user/user-habit.repository";
 import { freeTimeService } from "../free-time/free-time.service";
+import { DailyRoutine } from "../routine/routine.model";
 import {
   slotFinder,
   productivityScorer,
@@ -221,6 +222,11 @@ export const aiRescheduleService = {
       ),
     });
 
+    const userRoutines = await DailyRoutine.find({
+      userId: userObjectId,
+      isActive: true,
+    });
+
     type ScoredSlot = {
       start: Date;
       end: Date;
@@ -258,7 +264,32 @@ export const aiRescheduleService = {
         availableSlots,
       );
 
-      const allBusy = [...dayBusy, ...outsideBusy];
+      // Add user routines (lịch sinh hoạt cá nhân)
+      const dayNum = currentDate.getDay() === 0 ? 7 : currentDate.getDay();
+      const routineBusy: TimeInterval[] = [];
+      for (const r of userRoutines) {
+        if (!r.daysOfWeek?.includes(dayNum)) continue;
+        if (r.excludedDates && r.excludedDates.includes(dateStr)) continue;
+
+        const [sh, sm] = (r.startTime || "").split(":").map((x) => parseInt(x, 10));
+        const [eh, em] = (r.endTime || "").split(":").map((x) => parseInt(x, 10));
+        if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) continue;
+
+        const rStart = new Date(currentDate);
+        rStart.setHours(sh, sm, 0, 0);
+        const rEnd = new Date(currentDate);
+        rEnd.setHours(eh, em, 0, 0);
+
+        if (rEnd.getTime() > rStart.getTime()) {
+          routineBusy.push({
+            start: rStart,
+            end: rEnd,
+            taskId: `ROUTINE_${r._id}`,
+          });
+        }
+      }
+
+      const allBusy = [...dayBusy, ...outsideBusy, ...routineBusy];
 
       // Find optimal slot using productivity scores
       const optimalSlot = slotFinder.findOptimalSlot({

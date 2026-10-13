@@ -4,6 +4,7 @@ exports.aiRescheduleService = void 0;
 const mongoose_1 = require("mongoose");
 const task_repository_1 = require("../task/task.repository");
 const free_time_service_1 = require("../free-time/free-time.service");
+const routine_model_1 = require("../routine/routine.model");
 const scheduler_1 = require("../scheduler");
 // ───── Helpers ─────
 function toLocalDateStr(date) {
@@ -139,6 +140,10 @@ exports.aiRescheduleService = {
             endDate: searchEnd,
             excludeTaskIds: [missedTask.id].filter((id) => mongoose_1.Types.ObjectId.isValid(id)),
         });
+        const userRoutines = await routine_model_1.DailyRoutine.find({
+            userId: userObjectId,
+            isActive: true,
+        });
         const scoredSlots = [];
         const todayStr = toLocalDateStr(now);
         let currentDate = new Date(now);
@@ -159,7 +164,31 @@ exports.aiRescheduleService = {
             // Add user availability constraints
             const availableSlots = await free_time_service_1.freeTimeService.getAvailableSlotsForDate(userId, new Date(currentDate));
             const outsideBusy = buildOutsideAvailabilityBusySlots(new Date(currentDate), availableSlots);
-            const allBusy = [...dayBusy, ...outsideBusy];
+            // Add user routines (lịch sinh hoạt cá nhân)
+            const dayNum = currentDate.getDay() === 0 ? 7 : currentDate.getDay();
+            const routineBusy = [];
+            for (const r of userRoutines) {
+                if (!r.daysOfWeek?.includes(dayNum))
+                    continue;
+                if (r.excludedDates && r.excludedDates.includes(dateStr))
+                    continue;
+                const [sh, sm] = (r.startTime || "").split(":").map((x) => parseInt(x, 10));
+                const [eh, em] = (r.endTime || "").split(":").map((x) => parseInt(x, 10));
+                if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em))
+                    continue;
+                const rStart = new Date(currentDate);
+                rStart.setHours(sh, sm, 0, 0);
+                const rEnd = new Date(currentDate);
+                rEnd.setHours(eh, em, 0, 0);
+                if (rEnd.getTime() > rStart.getTime()) {
+                    routineBusy.push({
+                        start: rStart,
+                        end: rEnd,
+                        taskId: `ROUTINE_${r._id}`,
+                    });
+                }
+            }
+            const allBusy = [...dayBusy, ...outsideBusy, ...routineBusy];
             // Find optimal slot using productivity scores
             const optimalSlot = scheduler_1.slotFinder.findOptimalSlot({
                 taskDuration: duration,
