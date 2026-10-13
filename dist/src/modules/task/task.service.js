@@ -447,8 +447,16 @@ exports.taskService = {
             throw new Error("TASK_FORBIDDEN");
         }
         if (currentTask.teamAssignment?.teamId) {
-            const teamId = String(currentTask.teamAssignment.teamId);
-            throw new Error(`TEAM_TASK_EDIT_RESTRICTED:${teamId}`);
+            const isCoreTeamFieldUpdate = dto.title !== undefined ||
+                dto.description !== undefined ||
+                dto.priority !== undefined ||
+                dto.status !== undefined ||
+                dto.deadline !== undefined ||
+                dto.startAt !== undefined;
+            if (isCoreTeamFieldUpdate) {
+                const teamId = String(currentTask.teamAssignment.teamId);
+                throw new Error(`TEAM_TASK_EDIT_RESTRICTED:${teamId}`);
+            }
         }
         const guestDetails = dto.guestDetails
             ? dto.guestDetails.map((g) => ({
