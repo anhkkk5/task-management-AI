@@ -850,6 +850,8 @@ Format JSON:
       for (const r of userRoutines) {
         if (!r.daysOfWeek?.includes(dayNum)) continue;
         if (r.excludedDates && r.excludedDates.includes(dateStr)) continue;
+        // Nếu thói quen cho phép chèn công việc (VD: Giờ làm việc tại nhà, Tự học), AI được phép xếp lịch vào đây
+        if (r.allowTaskOverlap) continue;
 
         const [sh, sm] = (r.startTime || "")
           .split(":")

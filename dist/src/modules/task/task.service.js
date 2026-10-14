@@ -53,10 +53,10 @@ const toPublicTask = (t) => {
         id: String(t._id),
         title: t.title,
         description: t.description,
-        status: t.status,
+        status: (t.status === "todo" && t.scheduledTime?.start) ? "scheduled" : t.status,
         priority: t.priority,
-        startAt: t.startAt ?? t.teamAssignment?.startAt,
-        deadline: t.deadline,
+        startAt: t.startAt ?? t.teamAssignment?.startAt ?? t.scheduledTime?.start,
+        deadline: t.deadline ?? t.scheduledTime?.end,
         tags: t.tags ?? [],
         type: t.type,
         allDay: t.allDay,
@@ -115,6 +115,24 @@ const toPublicTask = (t) => {
         dailyTargetDuration: t.dailyTargetDuration,
         dailyTargetMin: t.dailyTargetMin,
         scheduledTime: t.scheduledTime,
+        isOverdue: Boolean((t.deadline ?? t.scheduledTime?.end) &&
+            new Date(t.deadline ?? t.scheduledTime?.end).getTime() < Date.now() &&
+            t.status !== "completed" &&
+            t.status !== "cancelled"),
+        extensionRequest: t.extensionRequest
+            ? {
+                requestedBy: String(t.extensionRequest.requestedBy),
+                requestedByName: t.extensionRequest.requestedByName,
+                requestedAt: t.extensionRequest.requestedAt,
+                requestedDeadline: t.extensionRequest.requestedDeadline,
+                reason: t.extensionRequest.reason,
+                status: t.extensionRequest.status,
+                reviewedBy: t.extensionRequest.reviewedBy
+                    ? String(t.extensionRequest.reviewedBy)
+                    : undefined,
+                reviewedAt: t.extensionRequest.reviewedAt,
+            }
+            : undefined,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
     };
@@ -196,8 +214,12 @@ const resolveBreakdownProfile = async (task) => {
     }
 };
 const generateInviteEmailHtml = (params) => {
-    const timeStr = params.startTime
-        ? `${params.startTime.toLocaleString("vi-VN")}${params.endTime ? ` - ${params.endTime.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}` : ""}`
+    const startDate = params.startTime ? new Date(params.startTime) : null;
+    const endDate = params.endTime ? new Date(params.endTime) : null;
+    const timeStr = startDate && !isNaN(startDate.getTime())
+        ? `${startDate.toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", dateStyle: "full", timeStyle: "short" })}${endDate && !isNaN(endDate.getTime())
+            ? ` - ${endDate.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Ho_Chi_Minh" })}`
+            : ""}`
         : "Không có thời gian cụ thể";
     return `<!DOCTYPE html>
 <html>
@@ -205,37 +227,82 @@ const generateInviteEmailHtml = (params) => {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lời mời tham gia: ${params.taskTitle}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-    .container { background: #f9f9f9; border-radius: 8px; padding: 30px; }
-    .header { border-bottom: 2px solid #4CAF50; padding-bottom: 15px; margin-bottom: 20px; }
-    .title { font-size: 24px; font-weight: bold; color: #333; margin: 0; }
-    .content { font-size: 16px; color: #555; margin: 20px 0; }
-    .detail { background: #fff; border-radius: 4px; padding: 15px; margin: 15px 0; }
-    .detail-item { margin: 8px 0; }
-    .detail-label { font-weight: bold; color: #666; }
-    .button { display: inline-block; background: #4CAF50; color: white; text-decoration: none; padding: 12px 24px; border-radius: 4px; margin-top: 20px; }
-    .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd; font-size: 12px; color: #999; }
-  </style>
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1 class="title">Bạn được mời tham gia: ${params.taskTitle}</h1>
-    </div>
-    <div class="content">
-      <p><strong>${params.organizerName}</strong> (${params.organizerEmail}) đã mời bạn tham gia sự kiện.</p>
-    </div>
-    <div class="detail">
-      <div class="detail-item"><span class="detail-label">Thời gian:</span> ${timeStr}</div>
-      ${params.location ? `<div class="detail-item"><span class="detail-label">Địa điểm:</span> ${params.location}</div>` : ""}
-      ${params.meetingLink ? `<div class="detail-item"><span class="detail-label">Link họp:</span> <a href="${params.meetingLink}">${params.meetingLink}</a></div>` : ""}
-      ${params.description ? `<div class="detail-item"><span class="detail-label">Mô tả:</span> ${params.description}</div>` : ""}
-    </div>
-    <div class="footer">
-      <p>Email này được gửi tự động từ Task Management System.</p>
-    </div>
-  </div>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #202124;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f4f6f8; padding: 30px 10px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width: 580px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+          <!-- Header Bar -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%); padding: 24px 32px; color: #ffffff;">
+              <span style="font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.85; display: block; margin-bottom: 6px;">LỜI MỜI CUỘC HỌP</span>
+              <h1 style="margin: 0; font-size: 22px; font-weight: 700; line-height: 1.3; color: #ffffff;">${params.taskTitle}</h1>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 28px 32px;">
+              <p style="margin: 0 0 20px 0; font-size: 15px; line-height: 1.6; color: #3c4043;">
+                Xin chào,<br>
+                <strong>${params.organizerName}</strong> (<a href="mailto:${params.organizerEmail}" style="color: #1a73e8; text-decoration: none;">${params.organizerEmail}</a>) đã mời bạn tham gia một cuộc họp với thông tin chi tiết dưới đây:
+              </p>
+
+              <!-- Info Card -->
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f8fafd; border: 1px solid #e1e7f0; border-radius: 8px; margin-bottom: 24px;">
+                <tr>
+                  <td style="padding: 18px 20px;">
+                    <div style="margin-bottom: 12px; font-size: 14px; line-height: 1.5;">
+                      <span style="font-weight: 600; color: #5f6368; display: inline-block; width: 100px;">📅 Thời gian:</span>
+                      <strong style="color: #1a73e8;">${timeStr}</strong>
+                    </div>
+                    ${params.location
+        ? `<div style="margin-bottom: 12px; font-size: 14px; line-height: 1.5;">
+                            <span style="font-weight: 600; color: #5f6368; display: inline-block; width: 100px;">📍 Địa điểm:</span>
+                            <span style="color: #202124;">${params.location}</span>
+                          </div>`
+        : ""}
+                    ${params.meetingLink
+        ? `<div style="margin-bottom: 12px; font-size: 14px; line-height: 1.5;">
+                            <span style="font-weight: 600; color: #5f6368; display: inline-block; width: 100px;">📹 Link họp:</span>
+                            <a href="${params.meetingLink}" target="_blank" style="color: #1a73e8; font-weight: 600; text-decoration: underline;">${params.meetingLink}</a>
+                          </div>`
+        : ""}
+                    ${params.description
+        ? `<div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d2dbe8; font-size: 14px; line-height: 1.5;">
+                            <span style="font-weight: 600; color: #5f6368; display: block; margin-bottom: 4px;">📝 Ghi chú:</span>
+                            <span style="color: #3c4043; white-space: pre-wrap;">${params.description}</span>
+                          </div>`
+        : ""}
+                  </td>
+                </tr>
+              </table>
+
+              ${params.meetingLink
+        ? `<div style="text-align: center; margin-bottom: 24px;">
+                      <a href="${params.meetingLink}" target="_blank" style="display: inline-block; background-color: #1a73e8; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 15px; box-shadow: 0 2px 6px rgba(26,115,232,0.3);">
+                        👉 Tham gia cuộc họp ngay
+                      </a>
+                    </div>`
+        : ""}
+
+              <p style="margin: 0; font-size: 13px; color: #70757a; line-height: 1.5;">
+                Vui lòng kiểm tra và sắp xếp thời gian tham gia đúng giờ.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #fafbfc; border-top: 1px solid #edf0f5; padding: 18px 32px; text-align: center; font-size: 12px; color: #9aa0a6;">
+              Email thông báo tự động từ hệ thống TaskMind. Vui lòng không phản hồi trực tiếp email này.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 };
@@ -264,13 +331,29 @@ const sendGuestInvites = async (params) => {
             meetingLink: task.meetingLink,
             description: task.description,
         });
-        await notification_queue_1.notificationQueueService.addInviteEmail({
-            to: guestEmail,
-            subject: `Lời mời tham gia: ${task.title}`,
-            html,
-            taskTitle: task.title,
-            organizerEmail,
-        });
+        try {
+            await notification_queue_1.notificationQueueService.addInviteEmail({
+                to: guestEmail,
+                subject: `Lời mời tham gia: ${task.title}`,
+                html,
+                taskTitle: task.title,
+                organizerEmail,
+            });
+        }
+        catch (queueErr) {
+            console.warn("[TaskService] Queue failed, sending invite email directly:", queueErr);
+            try {
+                const { emailService } = await Promise.resolve().then(() => __importStar(require("../notification/email.service")));
+                await emailService.send({
+                    to: guestEmail,
+                    subject: `Lời mời tham gia: ${task.title}`,
+                    html,
+                });
+            }
+            catch (directErr) {
+                console.error("[TaskService] Direct invite email send failed:", directErr);
+            }
+        }
     }
 };
 const removeTaskSessionsFromActiveSchedules = async (userId, taskIds) => {
@@ -381,9 +464,15 @@ exports.taskService = {
                 status: g.status,
             }))
             : undefined;
+        const effectiveStartAt = dto.startAt ??
+            (dto.scheduledTime?.start ? new Date(dto.scheduledTime.start) : undefined);
+        const effectiveDeadline = dto.deadline ??
+            (dto.scheduledTime?.end ? new Date(dto.scheduledTime.end) : undefined);
+        const effectiveStatus = dto.status ?? (dto.scheduledTime?.start ? "scheduled" : "todo");
         const doc = await task_repository_1.taskRepository.create({
             title,
             description: dto.description,
+            status: effectiveStatus,
             type: dto.type,
             allDay: dto.allDay,
             guests: dto.guests,
@@ -393,8 +482,8 @@ exports.taskService = {
             reminderMinutes: dto.reminderMinutes,
             recurrence: dto.recurrence,
             meetingLink: dto.meetingLink,
-            startAt: dto.startAt,
-            deadline: dto.deadline,
+            startAt: effectiveStartAt,
+            deadline: effectiveDeadline,
             priority: dto.priority,
             tags: dto.tags,
             userId: new mongoose_1.Types.ObjectId(userId),
@@ -574,6 +663,70 @@ exports.taskService = {
         ]);
         await invalidateTasksCache(userId);
         return { message: "Xóa task thành công" };
+    },
+    deleteMany: async (userId, taskIds) => {
+        const userObjectId = new mongoose_1.Types.ObjectId(userId);
+        let deletedCount = 0;
+        const allDeletedIds = [];
+        for (const taskId of taskIds) {
+            if (!mongoose_1.Types.ObjectId.isValid(taskId))
+                continue;
+            const currentTask = await task_repository_1.taskRepository.findByIdForUser({
+                taskId,
+                userId: userObjectId,
+            });
+            if (!currentTask)
+                continue;
+            if (currentTask.teamAssignment?.teamId)
+                continue;
+            const childTaskIds = await task_repository_1.taskRepository.findTaskIdsByParentTaskId({
+                parentTaskId: taskId,
+                userId: userObjectId,
+            });
+            const deleted = await task_repository_1.taskRepository.deleteByIdForUser({
+                taskId,
+                userId: userObjectId,
+            });
+            if (deleted) {
+                deletedCount++;
+                allDeletedIds.push(taskId, ...childTaskIds);
+                await task_repository_1.taskRepository.deleteManyByParentTaskId({
+                    parentTaskId: taskId,
+                    userId: userObjectId,
+                });
+            }
+        }
+        if (allDeletedIds.length > 0) {
+            await removeTaskSessionsFromActiveSchedules(userId, allDeletedIds);
+            await invalidateTasksCache(userId);
+        }
+        return {
+            deletedCount,
+            message: `Đã xóa thành công ${deletedCount} công việc`,
+        };
+    },
+    deleteAll: async (userId) => {
+        const userObjectId = new mongoose_1.Types.ObjectId(userId);
+        const personalTasks = await task_model_1.Task.find({
+            userId: userObjectId,
+            $or: [
+                { "teamAssignment.teamId": { $exists: false } },
+                { "teamAssignment.teamId": null },
+            ],
+        }).select("_id");
+        const taskIds = personalTasks.map((t) => String(t._id));
+        if (taskIds.length === 0) {
+            return { deletedCount: 0, message: "Không có công việc cá nhân nào để xóa" };
+        }
+        const res = await task_model_1.Task.deleteMany({
+            _id: { $in: personalTasks.map((t) => t._id) },
+        });
+        await removeTaskSessionsFromActiveSchedules(userId, taskIds);
+        await invalidateTasksCache(userId);
+        return {
+            deletedCount: res.deletedCount || 0,
+            message: `Đã xóa sạch toàn bộ ${res.deletedCount || 0} công việc cá nhân`,
+        };
     },
     aiBreakdown: async (userId, taskId) => {
         const task = await task_repository_1.taskRepository.findByIdForUser({
@@ -1416,5 +1569,205 @@ HÃY TRẢ LỜI BẰNG TIẾNG VIỆT, ngắn gọn, súc tích, định dạng
         }
         await task.save();
         return toPublicTask(task);
+    },
+    /**
+     * Gia hạn deadline cho task:
+     * - Nếu là task cá nhân: người dùng tự gia hạn trực tiếp.
+     * - Nếu là task của team:
+     *   + Leader / Admin / Owner / Người giao việc (assignedBy): Tự gia hạn trực tiếp và gửi thông báo cho assignee.
+     *   + Thành viên (Member): Lưu yêu cầu gia hạn và bắn thông báo tới Leader để chờ duyệt.
+     */
+    extendDeadline: async (userId, taskId, params) => {
+        if (!mongoose_1.Types.ObjectId.isValid(taskId) || !mongoose_1.Types.ObjectId.isValid(userId)) {
+            throw new Error("INVALID_ID");
+        }
+        const task = await task_model_1.Task.findById(taskId);
+        if (!task) {
+            throw new Error("TASK_NOT_FOUND");
+        }
+        const newDeadlineDate = new Date(params.newDeadline);
+        if (isNaN(newDeadlineDate.getTime())) {
+            throw new Error("INVALID_DEADLINE");
+        }
+        const teamId = task.teamAssignment?.teamId;
+        // TH1: Task cá nhân (không thuộc team)
+        if (!teamId) {
+            if (String(task.userId) !== String(userId)) {
+                throw new Error("TASK_FORBIDDEN");
+            }
+            task.deadline = newDeadlineDate;
+            if (task.scheduledTime) {
+                task.scheduledTime.end = newDeadlineDate;
+            }
+            task.extensionRequest = undefined;
+            await task.save();
+            await invalidateTasksCache(userId);
+            return {
+                task: toPublicTask(task),
+                message: "Đã gia hạn công việc thành công",
+            };
+        }
+        // TH2: Task của Team
+        const team = await team_model_1.Team.findById(teamId);
+        if (!team) {
+            throw new Error("TEAM_NOT_FOUND");
+        }
+        const member = team.members.find((m) => String(m.userId) === String(userId));
+        const isLeader = String(team.ownerId) === String(userId) ||
+            String(task.teamAssignment?.assignedBy) === String(userId) ||
+            member?.role === "owner" ||
+            member?.role === "admin" ||
+            member?.role === "student_leader" ||
+            member?.role === "lecturer_leader";
+        // TH2.1: Chủ dự án / Trưởng nhóm -> Gia hạn trực tiếp
+        if (isLeader) {
+            task.deadline = newDeadlineDate;
+            if (task.scheduledTime) {
+                task.scheduledTime.end = newDeadlineDate;
+            }
+            if (task.extensionRequest) {
+                task.extensionRequest.status = "approved";
+                task.extensionRequest.reviewedBy = new mongoose_1.Types.ObjectId(userId);
+                task.extensionRequest.reviewedAt = new Date();
+            }
+            await task.save();
+            await invalidateTasksCache(userId);
+            // Thông báo cho thành viên nhận task (nếu khác leader)
+            const assigneeId = task.teamAssignment?.assigneeId;
+            if (assigneeId && String(assigneeId) !== String(userId)) {
+                await notification_repository_1.notificationRepository.create({
+                    userId: assigneeId,
+                    type: notification_model_1.NotificationType.TEAM_TASK_UPDATED,
+                    priority: notification_model_1.NotificationPriority.HIGH,
+                    title: "Công việc đã được gia hạn",
+                    content: `Trưởng nhóm đã gia hạn công việc "${task.title}" đến ngày ${newDeadlineDate.toLocaleDateString("vi-VN")}.`,
+                    data: { taskId: task._id, teamId: team._id, newDeadline: params.newDeadline },
+                    isRead: false,
+                    channels: { inApp: true, email: false },
+                }).catch(() => { });
+            }
+            return {
+                task: toPublicTask(task),
+                message: "Trưởng nhóm đã gia hạn công việc thành công",
+            };
+        }
+        // TH2.2: Thành viên trong nhóm -> Gửi thông báo yêu cầu cần được gia hạn thêm
+        const isAssignee = String(task.teamAssignment?.assigneeId) === String(userId);
+        if (!isAssignee && !member) {
+            throw new Error("TASK_FORBIDDEN");
+        }
+        const requester = await user_repository_1.userRepository.findById(userId);
+        const requesterName = member?.name || requester?.name || "Thành viên";
+        const reasonText = params.reason?.trim() || "Cần thêm thời gian để hoàn thành tốt hơn";
+        task.extensionRequest = {
+            requestedBy: new mongoose_1.Types.ObjectId(userId),
+            requestedByName: requesterName,
+            requestedAt: new Date(),
+            requestedDeadline: newDeadlineDate,
+            reason: reasonText,
+            status: "pending",
+        };
+        await task.save();
+        // Gửi thông báo đến Trưởng nhóm / Người giao việc
+        const recipientLeaderId = task.teamAssignment?.assignedBy || team.ownerId;
+        if (recipientLeaderId) {
+            await notification_repository_1.notificationRepository.create({
+                userId: recipientLeaderId,
+                type: notification_model_1.NotificationType.TASK_EXTENSION_REQUEST,
+                priority: notification_model_1.NotificationPriority.HIGH,
+                title: "Yêu cầu gia hạn công việc mới",
+                content: `${requesterName} gửi yêu cầu gia hạn công việc "${task.title}" đến ngày ${newDeadlineDate.toLocaleDateString("vi-VN")}. Lý do: ${reasonText}`,
+                data: {
+                    taskId: task._id,
+                    teamId: team._id,
+                    requestedDeadline: params.newDeadline,
+                    requestedBy: userId,
+                    reason: reasonText,
+                },
+                isRead: false,
+                channels: { inApp: true, email: true },
+            }).catch(() => { });
+        }
+        return {
+            task: toPublicTask(task),
+            message: "Đã gửi thông báo yêu cầu gia hạn đến Trưởng nhóm",
+            requiresReview: true,
+        };
+    },
+    /**
+     * Trưởng nhóm / Chủ dự án duyệt hoặc từ chối yêu cầu gia hạn
+     */
+    reviewExtension: async (userId, taskId, params) => {
+        if (!mongoose_1.Types.ObjectId.isValid(taskId) || !mongoose_1.Types.ObjectId.isValid(userId)) {
+            throw new Error("INVALID_ID");
+        }
+        const task = await task_model_1.Task.findById(taskId);
+        if (!task || !task.extensionRequest) {
+            throw new Error("NO_PENDING_EXTENSION");
+        }
+        const teamId = task.teamAssignment?.teamId;
+        if (!teamId) {
+            throw new Error("NOT_A_TEAM_TASK");
+        }
+        const team = await team_model_1.Team.findById(teamId);
+        const member = team?.members.find((m) => String(m.userId) === String(userId));
+        const isLeader = String(team?.ownerId) === String(userId) ||
+            String(task.teamAssignment?.assignedBy) === String(userId) ||
+            member?.role === "owner" ||
+            member?.role === "admin" ||
+            member?.role === "student_leader" ||
+            member?.role === "lecturer_leader";
+        if (!isLeader) {
+            throw new Error("LEADER_ONLY");
+        }
+        if (params.action === "approve") {
+            const finalDeadline = params.newDeadline
+                ? new Date(params.newDeadline)
+                : task.extensionRequest.requestedDeadline;
+            task.deadline = finalDeadline;
+            if (task.scheduledTime) {
+                task.scheduledTime.end = finalDeadline;
+            }
+            task.extensionRequest.status = "approved";
+            task.extensionRequest.reviewedBy = new mongoose_1.Types.ObjectId(userId);
+            task.extensionRequest.reviewedAt = new Date();
+            await task.save();
+            // Thông báo cho thành viên
+            await notification_repository_1.notificationRepository.create({
+                userId: task.extensionRequest.requestedBy,
+                type: notification_model_1.NotificationType.TASK_EXTENSION_RESOLVED,
+                priority: notification_model_1.NotificationPriority.HIGH,
+                title: "Yêu cầu gia hạn được chấp thuận",
+                content: `Yêu cầu gia hạn công việc "${task.title}" đã được duyệt đến ngày ${finalDeadline.toLocaleDateString("vi-VN")}.`,
+                data: { taskId: task._id, teamId: team?._id, action: "approve" },
+                isRead: false,
+                channels: { inApp: true, email: true },
+            }).catch(() => { });
+            return {
+                task: toPublicTask(task),
+                message: "Đã duyệt gia hạn công việc",
+            };
+        }
+        else {
+            task.extensionRequest.status = "rejected";
+            task.extensionRequest.reviewedBy = new mongoose_1.Types.ObjectId(userId);
+            task.extensionRequest.reviewedAt = new Date();
+            await task.save();
+            // Thông báo từ chối cho thành viên
+            await notification_repository_1.notificationRepository.create({
+                userId: task.extensionRequest.requestedBy,
+                type: notification_model_1.NotificationType.TASK_EXTENSION_RESOLVED,
+                priority: notification_model_1.NotificationPriority.NORMAL,
+                title: "Yêu cầu gia hạn bị từ chối",
+                content: `Yêu cầu gia hạn công việc "${task.title}" của bạn không được chấp thuận.`,
+                data: { taskId: task._id, teamId: team?._id, action: "reject" },
+                isRead: false,
+                channels: { inApp: true, email: false },
+            }).catch(() => { });
+            return {
+                task: toPublicTask(task),
+                message: "Đã từ chối yêu cầu gia hạn",
+            };
+        }
     },
 };

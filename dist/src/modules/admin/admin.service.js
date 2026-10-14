@@ -99,11 +99,10 @@ exports.adminService = {
         const user = await auth_model_1.User.findById(userId);
         if (!user)
             return null;
-        // Toggle isBanned field (cần thêm vào schema nếu chưa có)
-        const isBanned = user.isBanned;
+        const isBanned = Boolean(user.isBanned);
         user.isBanned = !isBanned;
-        user.banReason = !isBanned ? reason : null;
-        user.bannedAt = !isBanned ? new Date() : null;
+        user.banReason = !isBanned ? reason : undefined;
+        user.bannedAt = !isBanned ? new Date() : undefined;
         await user.save();
         return {
             id: String(user._id),

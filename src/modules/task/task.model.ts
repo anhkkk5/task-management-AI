@@ -14,6 +14,17 @@ export type GuestSummary = {
   status?: "pending" | "accepted" | "declined";
 };
 
+export type TaskExtensionRequest = {
+  requestedBy: Types.ObjectId;
+  requestedByName: string;
+  requestedAt: Date;
+  requestedDeadline: Date;
+  reason?: string;
+  status: "pending" | "approved" | "rejected";
+  reviewedBy?: Types.ObjectId;
+  reviewedAt?: Date;
+};
+
 export type TaskAttrs = {
   title: string;
   description?: string;
@@ -33,6 +44,7 @@ export type TaskAttrs = {
   meetingLink?: string;
   userId: Types.ObjectId;
   parentTaskId?: Types.ObjectId;
+  extensionRequest?: TaskExtensionRequest;
   aiChatHistory?: {
     role: "user" | "assistant";
     content: string;
@@ -136,6 +148,7 @@ export type TaskDoc = mongoose.Document & {
     assignedAt: Date;
     startAt?: Date;
   };
+  extensionRequest?: TaskExtensionRequest;
 };
 
 type TaskModel = mongoose.Model<TaskDoc>;
@@ -278,6 +291,20 @@ const taskSchema = new Schema<TaskDoc>(
       assignedBy: { type: Schema.Types.ObjectId },
       assignedAt: { type: Date },
       startAt: { type: Date },
+    },
+    extensionRequest: {
+      requestedBy: { type: Schema.Types.ObjectId },
+      requestedByName: { type: String },
+      requestedAt: { type: Date },
+      requestedDeadline: { type: Date },
+      reason: { type: String },
+      status: {
+        type: String,
+        enum: ["pending", "approved", "rejected"],
+        default: "pending",
+      },
+      reviewedBy: { type: Schema.Types.ObjectId },
+      reviewedAt: { type: Date },
     },
   },
   { timestamps: true },

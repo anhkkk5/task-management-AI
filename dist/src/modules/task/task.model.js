@@ -173,6 +173,20 @@ const taskSchema = new mongoose_1.Schema({
         assignedAt: { type: Date },
         startAt: { type: Date },
     },
+    extensionRequest: {
+        requestedBy: { type: mongoose_1.Schema.Types.ObjectId },
+        requestedByName: { type: String },
+        requestedAt: { type: Date },
+        requestedDeadline: { type: Date },
+        reason: { type: String },
+        status: {
+            type: String,
+            enum: ["pending", "approved", "rejected"],
+            default: "pending",
+        },
+        reviewedBy: { type: mongoose_1.Schema.Types.ObjectId },
+        reviewedAt: { type: Date },
+    },
 }, { timestamps: true });
 // ─── Compound indexes tuned to real query patterns (see task.repository.ts).
 // Order matters: equality fields first, then range/sort field last.

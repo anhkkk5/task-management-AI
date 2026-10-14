@@ -122,11 +122,15 @@ function detectIntent(message) {
     const frequencyRe = /(\d+\s*(buổi|lần|session|lượt)\s*(\/|mỗi|trong|tuần|ngày|week|day))|(buổi\s*\/\s*tuần)|(lần\s*\/\s*tuần)/;
     const calendarActionRe = /(đổi lịch|thay lịch|thay vì|thay cho|thay bằng|thay đi|thay.*bằng|dời lịch|hoãn lịch|chuyển lịch|hủy lịch|xóa lịch|bỏ lịch|nghỉ làm|được nghỉ|ngủ nướng|dậy muộn|dậy sớm|tập gym thay|thay đi dạo|co giãn|thói quen|lịch trình|thời gian biểu)/i;
     const timeContextRe = /(thứ [2-7]|chủ nhật|hôm nay|ngày mai|ngày kia|tuần này|tuần sau).*(\d{1,2}h|\d{1,2}:\d{2}|sáng|chiều|tối)/i;
+    const createTaskRe = /(tạo công việc|thêm công việc|công việc|tạo task|thêm task|tạo việc|thêm việc|tạo đi|tạo luôn|tạo ngay|tạo hộ|làm đi|tiến hành tạo|không cần mô tả|không mô tả|tạo giúp|tạo luôn đi|ok tạo|ừ tạo|có tạo)/i;
+    const taskWithTimeRe = /(công việc|task|việc).*(\d{1,2}h|\d{1,2}:\d{2})/i;
     if (freeBusyRe.test(text) ||
         scheduleRequestRe.test(text) ||
         frequencyRe.test(text) ||
         calendarActionRe.test(text) ||
-        timeContextRe.test(text)) {
+        timeContextRe.test(text) ||
+        createTaskRe.test(text) ||
+        taskWithTimeRe.test(text)) {
         return "CALENDAR_QUERY";
     }
     // System help - check next
@@ -333,18 +337,26 @@ HÃY THỰC HIỆN NGAY LẬP TỨC TRONG 1 LẦN TRẢ LỜI DUY NHẤT:
 \`\`\`
 
 =====================
-Nếu là yêu cầu lên lịch học/tập định kỳ nhiều buổi/tuần thông thường mới dùng công cụ:
+Nếu là yêu cầu quản lý lịch / tạo công việc / lên lịch:
 Tools:
 - get_free_busy_report(from,to): busy/free intervals
 - propose_schedule(activityName|activities[],durationMin,sessionsPerWeek,windowStart,windowEnd,daysAllowed?,minGapDays?,from,to): valid non-overlapping slots
-- commit_proposal(): TẠO THẬT tasks từ draft. Chỉ gọi khi user xác nhận.
+- commit_proposal(): TẠO THẬT tasks từ draft lên lịch định kỳ. Chỉ gọi khi user xác nhận chốt draft.
+- create_task(title,date,startTime?,endTime?,description?,priority?,category?): TẠO THẬT một công việc hoặc sự kiện vào database và hiển thị lên trang Lịch & Công việc ngay lập tức!
+
+QUY TẮC TẠO CÔNG VIỆC CỤ THỂ (create_task) - BẮT BUỘC THỰC THI NGAY:
+1. Khi người dùng yêu cầu tạo công việc (ví dụ: "công việc mua sắm 20h-22h tối", "tạo task X", "thêm việc Y...") HOẶC xác nhận tạo việc (ví dụ: "tạo đi", "không cần mô tả tạo đi", "tạo luôn", "đồng ý tạo", "làm đi"):
+   -> BẮT BUỘC PHẢI GỌI TOOL 'create_task' NGAY LẬP TỨC!
+2. Tính toán chính xác ngày date (YYYY-MM-DD theo giờ Việt Nam hiện tại GMT+7), startTime (HH:mm) và endTime (HH:mm) nếu có.
+3. TUYỆT ĐỐI KHÔNG hỏi vặn vẹo về mô tả hay bắt người dùng xác nhận lằng nhằng nếu đã có tên việc. Nếu người dùng không đưa mô tả, để trống description.
+4. TUYỆT ĐỐI KHÔNG chỉ trả lời bằng lời hứa ("Tôi sẽ tạo...") mà KHÔNG gọi tool 'create_task'.
 
 RULES (cho việc lên lịch nhiều buổi/tuần):
 1. KHÔNG bao giờ tự bịa giờ trong text. Mọi thời gian cụ thể PHẢI từ tool.
 1b. KHÔNG bao giờ tự tính thứ trong tuần từ date. Khi propose_schedule trả về field 'weekday' (vd "Thứ Ba"), bắt buộc COPY ĐÚNG chuỗi đó vào reply, KHÔNG tự đoán "Thứ 2/3/4...".
 2. KHÔNG đề xuất slot trùng busy hoặc ngoài window user nêu.
 3. Mọi request schedule/revision ("đổi giờ","muộn quá","sớm hơn","tuần khác") → call propose_schedule lại với constraint mới.
-4. User confirm ("ok","chốt","tạo đi","đồng ý","yes") → call commit_proposal NGAY. Cấm viết "Tôi sẽ tạo..." mà không gọi tool.
+4. User confirm ("ok","chốt","tạo đi","đồng ý","yes") → call commit_proposal hoặc create_task NGAY. Cấm viết "Tôi sẽ tạo..." mà không gọi tool.
 5. Nếu thiếu thông tin để lên lịch định kỳ, PHẢI hỏi bù từng bước (mỗi lần 1-2 câu hỏi ngắn), KHÔNG propose_schedule khi dữ liệu còn thiếu.
 6. KHÔNG được tự ý đề xuất đổi giờ/di chuyển lịch task hiện có, trừ khi user yêu cầu rõ "đổi" hoặc "dời" lịch cũ.
 7. CHỈ đề xuất slot trong tương lai. Cấm đề xuất ngày/giờ đã qua.

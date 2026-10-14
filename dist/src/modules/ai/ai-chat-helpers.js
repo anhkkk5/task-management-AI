@@ -63,6 +63,8 @@ const isCommitConfirmationMessage = (text) => {
         /\bconfirm(ed)?\b/,
         // "tạo (lịch) ngay/luôn/đi", "tạo cho tôi", "tạo task"
         /\btao( ra)?( lich| task| cong viec)?( ngay| luon| di| nhe| cho toi)?\b/,
+        // "không cần mô tả", "tạo đi", "tạo luôn"
+        /\b(khong can mo ta|khong mo ta|cu tao|tao di|tao luon|tao ho|tao giup|tao task di|tao viec di)\b/,
         // "xếp/sắp/lập/đặt lịch ..."
         /\b(xep lich|sap xep lich|lap lich|dat lich)( ngay| luon| di| nhe| cho toi)?\b/,
         // "lên lịch (ngay/luôn/đi/giúp/cho)"

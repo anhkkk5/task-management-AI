@@ -9,6 +9,7 @@ export interface IDailyRoutine extends Document {
   daysOfWeek: number[]; // 1=Thứ 2, 2=Thứ 3, ..., 6=Thứ 7, 7=Chủ Nhật
   category: string;  // "personal" | "health" | "work" | "study" | "lifestyle"
   color: string;     // Mã màu hiển thị trên lịch
+  allowTaskOverlap: boolean; // true = Cho phép AI chèn task vào khung giờ này; false = Cố định, không cho chèn
   isActive: boolean;
   excludedDates?: string[]; // Danh sách các ngày ngoại lệ không áp dụng (YYYY-MM-DD)
   createdAt: Date;
@@ -29,6 +30,7 @@ const DailyRoutineSchema = new Schema<IDailyRoutine>(
     },
     category: { type: String, default: "personal" },
     color: { type: String, default: "#10b981" },
+    allowTaskOverlap: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },
     excludedDates: {
       type: [String],

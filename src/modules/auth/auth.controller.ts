@@ -231,6 +231,13 @@ export const refreshToken = async (
     const token = extractRefreshToken(_req);
     const result = await authService.refreshToken({ refreshToken: token });
 
+    res.cookie("token", result.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
     setRefreshCookie(res, result.refreshToken, cookieInput());
 
     res.status(200).json({ accessToken: result.accessToken });

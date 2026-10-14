@@ -27,6 +27,7 @@ export type GuestSummaryDto = {
 export type CreateTaskDto = {
   title: string;
   description?: string;
+  status?: TaskStatus;
   startAt?: Date;
   deadline?: Date;
   priority?: TaskPriority;

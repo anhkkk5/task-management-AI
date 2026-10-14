@@ -34,6 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.executeToolCall = exports.AI_TOOL_DEFINITIONS = void 0;
+const mongoose_1 = require("mongoose");
+const task_model_1 = require("../task/task.model");
 const ai_calendar_context_service_1 = require("./ai-calendar-context.service");
 const activity_scheduler_service_1 = require("./activity-scheduler.service");
 const SCHEDULE_DEBUG_PREFIX = "[AI_SCHEDULE_DEBUG]";
@@ -158,6 +160,48 @@ exports.AI_TOOL_DEFINITIONS = [
             parameters: {
                 type: "object",
                 properties: {},
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
+            name: "create_task",
+            description: "Tạo một công việc (task/sự kiện) thật vào hệ thống và lịch trình của user. Dùng khi user yêu cầu tạo công việc cụ thể (ví dụ: 'công việc mua sắm 20h-22h tối', 'tạo task học tiếng Anh', 'thêm việc...') hoặc khi user xác nhận tạo việc ('tạo đi', 'không cần mô tả tạo đi', 'tạo luôn'). CẤM hứa suông trong tin nhắn mà không gọi tool này.",
+            parameters: {
+                type: "object",
+                properties: {
+                    title: {
+                        type: "string",
+                        description: "Tiêu đề công việc (ví dụ: 'Mua sắm', 'Học từ vựng').",
+                    },
+                    description: {
+                        type: "string",
+                        description: "Mô tả công việc (tùy chọn, để trống nếu user không yêu cầu).",
+                    },
+                    date: {
+                        type: "string",
+                        description: "Ngày thực hiện dạng YYYY-MM-DD (Ví dụ: '2026-10-17'). Bắt buộc tính theo ngày hiện tại ở Việt Nam (GMT+7).",
+                    },
+                    startTime: {
+                        type: "string",
+                        description: "Giờ bắt đầu dạng HH:mm (Ví dụ: '20:00').",
+                    },
+                    endTime: {
+                        type: "string",
+                        description: "Giờ kết thúc dạng HH:mm (Ví dụ: '22:00').",
+                    },
+                    priority: {
+                        type: "string",
+                        enum: ["urgent", "high", "medium", "low"],
+                        description: "Độ ưu tiên. Mặc định 'medium'.",
+                    },
+                    category: {
+                        type: "string",
+                        description: "Thể loại hoặc tag (ví dụ: 'personal', 'work', 'shopping').",
+                    },
+                },
+                required: ["title", "date"],
             },
         },
     },
@@ -433,6 +477,103 @@ const executeToolCall = async (call, ctx) => {
         }
         catch (err) {
             const message = err instanceof Error ? err.message : "TOOL_EXECUTION_FAILED";
+            return {
+                id: call.id,
+                name: call.name,
+                content: JSON.stringify({ error: message }),
+            };
+        }
+    }
+    if (call.name === "create_task") {
+        const title = String(args.title || "").trim();
+        const description = String(args.description || "").trim();
+        const dateStr = String(args.date || "").trim();
+        const startTime = args.startTime ? String(args.startTime).trim() : undefined;
+        const endTime = args.endTime ? String(args.endTime).trim() : undefined;
+        const priority = (args.priority || "medium");
+        const category = String(args.category || "personal").trim();
+        try {
+            const userObjectId = new mongoose_1.Types.ObjectId(ctx.userId);
+            let startAt;
+            let deadline;
+            let scheduledTime;
+            let durationMinutes = 60;
+            if (dateStr) {
+                if (startTime) {
+                    const padTime = (t) => {
+                        const clean = t.replace(/h/i, ":").replace(/[^0-9:]/g, "");
+                        const parts = clean.split(":");
+                        const h = (parts[0] || "0").padStart(2, "0");
+                        const m = (parts[1] || "00").padEnd(2, "0");
+                        return `${h}:${m}`;
+                    };
+                    const cleanStart = padTime(startTime);
+                    startAt = new Date(`${dateStr}T${cleanStart}:00+07:00`);
+                    if (endTime) {
+                        const cleanEnd = padTime(endTime);
+                        deadline = new Date(`${dateStr}T${cleanEnd}:00+07:00`);
+                    }
+                    else {
+                        deadline = new Date(startAt.getTime() + 60 * 60 * 1000);
+                    }
+                    if (deadline.getTime() > startAt.getTime()) {
+                        durationMinutes = Math.max(15, Math.round((deadline.getTime() - startAt.getTime()) / 60000));
+                        scheduledTime = {
+                            start: startAt,
+                            end: deadline,
+                            aiPlanned: true,
+                            reason: "Được tạo tự động qua Chat AI",
+                        };
+                    }
+                }
+                else {
+                    deadline = new Date(`${dateStr}T23:59:59+07:00`);
+                }
+            }
+            const createdTask = await task_model_1.Task.create({
+                userId: userObjectId,
+                title: title || "Công việc mới",
+                description,
+                status: scheduledTime ? "scheduled" : "pending",
+                priority: ["urgent", "high", "medium", "low"].includes(priority)
+                    ? priority
+                    : "medium",
+                type: scheduledTime ? "event" : "todo",
+                tags: [category, "chat-ai"],
+                startAt,
+                deadline,
+                scheduledTime,
+                estimatedDuration: durationMinutes,
+            });
+            logScheduleDebug("create_task.success", {
+                callId: call.id,
+                user: shortUser(ctx.userId),
+                taskId: String(createdTask._id),
+                title: createdTask.title,
+                scheduledTime: scheduledTime ? `${startTime} - ${endTime}` : "none",
+            });
+            return {
+                id: call.id,
+                name: call.name,
+                content: JSON.stringify({
+                    ok: true,
+                    taskId: String(createdTask._id),
+                    title: createdTask.title,
+                    status: createdTask.status,
+                    date: dateStr,
+                    startTime,
+                    endTime,
+                    message: `Đã tạo thành công công việc '${createdTask.title}' vào ngày ${dateStr}${startTime ? ` từ ${startTime} đến ${endTime || ''}` : ''}.`,
+                }),
+            };
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : "CREATE_TASK_FAILED";
+            logScheduleDebug("create_task.error", {
+                callId: call.id,
+                user: shortUser(ctx.userId),
+                message,
+            });
             return {
                 id: call.id,
                 name: call.name,

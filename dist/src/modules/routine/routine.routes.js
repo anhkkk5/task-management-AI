@@ -10,5 +10,7 @@ routineRouter.post("/", routine_controller_1.createRoutine);
 routineRouter.post("/seed", routine_controller_1.seedDefaultRoutines);
 routineRouter.put("/:id", routine_controller_1.updateRoutine);
 routineRouter.patch("/:id", routine_controller_1.updateRoutine);
+routineRouter.delete("/clear-all", routine_controller_1.clearAllRoutines);
 routineRouter.delete("/:id", routine_controller_1.deleteRoutine);
+routineRouter.delete("/", routine_controller_1.clearAllRoutines);
 exports.default = routineRouter;

@@ -94,6 +94,19 @@ const userSchema = new mongoose_1.Schema({
         required: false,
         select: false,
     },
+    isBanned: {
+        type: Boolean,
+        required: false,
+        default: false,
+    },
+    banReason: {
+        type: String,
+        required: false,
+    },
+    bannedAt: {
+        type: Date,
+        required: false,
+    },
 }, {
     timestamps: true,
 });

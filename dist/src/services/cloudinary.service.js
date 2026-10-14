@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.uploadImageBuffer = void 0;
+exports.uploadLargeVideoFile = exports.uploadVideoBuffer = exports.uploadImageBuffer = void 0;
 const cloudinary_1 = require("cloudinary");
 const streamifier_1 = __importDefault(require("streamifier"));
 const ensureConfigured = () => {
@@ -40,3 +40,45 @@ const uploadImageBuffer = async (buffer, opts) => {
     });
 };
 exports.uploadImageBuffer = uploadImageBuffer;
+const uploadVideoBuffer = async (buffer, opts) => {
+    ensureConfigured();
+    return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary_1.v2.uploader.upload_stream({
+            folder: opts.folder,
+            public_id: opts.publicId,
+            resource_type: "video",
+        }, (error, result) => {
+            if (error || !result) {
+                reject(error ?? new Error("UPLOAD_FAILED"));
+                return;
+            }
+            resolve({
+                url: result.secure_url || result.url,
+                publicId: result.public_id,
+            });
+        });
+        streamifier_1.default.createReadStream(buffer).pipe(uploadStream);
+    });
+};
+exports.uploadVideoBuffer = uploadVideoBuffer;
+const uploadLargeVideoFile = async (filePath, opts) => {
+    ensureConfigured();
+    return new Promise((resolve, reject) => {
+        cloudinary_1.v2.uploader.upload_large(filePath, {
+            folder: opts.folder,
+            public_id: opts.publicId,
+            resource_type: "video",
+            chunk_size: 20 * 1024 * 1024, // 20MB chunks
+        }, (error, result) => {
+            if (error || !result) {
+                reject(error ?? new Error("UPLOAD_FAILED"));
+                return;
+            }
+            resolve({
+                url: result.secure_url || result.url,
+                publicId: result.public_id,
+            });
+        });
+    });
+};
+exports.uploadLargeVideoFile = uploadLargeVideoFile;

@@ -6,6 +6,7 @@ import {
   updateRoutine,
   deleteRoutine,
   seedDefaultRoutines,
+  clearAllRoutines,
 } from "./routine.controller";
 
 const routineRouter = Router();
@@ -17,6 +18,8 @@ routineRouter.post("/", createRoutine);
 routineRouter.post("/seed", seedDefaultRoutines);
 routineRouter.put("/:id", updateRoutine);
 routineRouter.patch("/:id", updateRoutine);
+routineRouter.delete("/clear-all", clearAllRoutines);
 routineRouter.delete("/:id", deleteRoutine);
+routineRouter.delete("/", clearAllRoutines);
 
 export default routineRouter;

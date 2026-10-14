@@ -186,7 +186,13 @@ exports.taskRepository = {
             parentTaskId: { $exists: false },
         };
         if (params.status) {
-            filter.status = params.status;
+            if (params.status === "overdue") {
+                filter.deadline = { $lt: new Date() };
+                filter.status = { $nin: ["completed", "cancelled"] };
+            }
+            else {
+                filter.status = params.status;
+            }
         }
         if (params.priority) {
             filter.priority = params.priority;

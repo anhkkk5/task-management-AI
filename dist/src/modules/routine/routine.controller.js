@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.seedDefaultRoutines = exports.deleteRoutine = exports.updateRoutine = exports.createRoutine = exports.getRoutines = void 0;
+exports.clearAllRoutines = exports.seedDefaultRoutines = exports.deleteRoutine = exports.updateRoutine = exports.createRoutine = exports.getRoutines = void 0;
 const routine_service_1 = require("./routine.service");
 const getUserId = (req) => {
     const user = req.user;
@@ -13,11 +13,7 @@ const getRoutines = async (req, res) => {
         if (!userId) {
             return res.status(401).json({ message: "Chưa xác thực người dùng" });
         }
-        let routines = await routine_service_1.routineService.getRoutines(userId);
-        // Nếu chưa có routine nào, tự động nạp 7 thói quen sinh hoạt mẫu mặc định
-        if (routines.length === 0) {
-            routines = await routine_service_1.routineService.seedDefaultRoutines(userId);
-        }
+        const routines = await routine_service_1.routineService.getRoutines(userId);
         return res.status(200).json({ routines });
     }
     catch (err) {
@@ -101,3 +97,17 @@ const seedDefaultRoutines = async (req, res) => {
     }
 };
 exports.seedDefaultRoutines = seedDefaultRoutines;
+const clearAllRoutines = async (req, res) => {
+    try {
+        const userId = getUserId(req);
+        if (!userId) {
+            return res.status(401).json({ message: "Chưa xác thực người dùng" });
+        }
+        await routine_service_1.routineService.clearAllRoutines(userId);
+        return res.status(200).json({ success: true, message: "Đã xóa toàn bộ lịch lặp lại thành công" });
+    }
+    catch (err) {
+        return res.status(500).json({ message: err.message || "Lỗi khi xóa tất cả lịch lặp lại" });
+    }
+};
+exports.clearAllRoutines = clearAllRoutines;

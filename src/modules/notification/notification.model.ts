@@ -12,6 +12,8 @@ export enum NotificationType {
   TEAM_TASK_UPDATED = "team_task_updated",
   TEAM_TASK_COMMENT = "team_task_comment",
   TEAM_TASK_MENTION = "team_task_mention",
+  TASK_EXTENSION_REQUEST = "task_extension_request",
+  TASK_EXTENSION_RESOLVED = "task_extension_resolved",
   SYSTEM = "system",
 }
 

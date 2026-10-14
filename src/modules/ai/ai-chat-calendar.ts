@@ -199,6 +199,85 @@ async function runFastPath(
   };
 }
 
+function extractPendingTaskFromHistory(messages: AiChatMessage[]): {
+  title: string;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+} | null {
+  const recent = messages.slice(-5);
+  for (let i = recent.length - 1; i >= 0; i--) {
+    const text = recent[i].content || "";
+
+    // Pattern 1: Assistant từng bảo: "Tôi sẽ tạo công việc "Mua sắm" cho bạn với thời gian từ 20h đến 22h vào thứ Bảy (17/10/2026)..."
+    const matchAssistant =
+      /công việc\s+["“']([^"“”']+)["”'].*?từ\s*(\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})\s*đến\s*(\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2}).*?(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4})/i.exec(
+        text,
+      );
+    if (matchAssistant) {
+      const title = matchAssistant[1].trim();
+      const rawStart = matchAssistant[2];
+      const rawEnd = matchAssistant[3];
+      const rawDate = matchAssistant[4];
+
+      const dateParts = rawDate.split(/[\/\-]/);
+      const yyyy = dateParts[2];
+      const mm = dateParts[1].padStart(2, "0");
+      const dd = dateParts[0].padStart(2, "0");
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
+      const normalizeTime = (t: string) => {
+        const clean = t.replace(/h/i, ":").replace(/[^0-9:]/g, "");
+        const parts = clean.split(":");
+        const h = (parts[0] || "0").padStart(2, "0");
+        const m = (parts[1] || "00").padEnd(2, "0");
+        return `${h}:${m}`;
+      };
+
+      return {
+        title,
+        date: dateStr,
+        startTime: normalizeTime(rawStart),
+        endTime: normalizeTime(rawEnd),
+      };
+    }
+
+    // Pattern 2: User từng nói: "công việc mua sắm 20h-22h tối"
+    const matchUser =
+      /công việc\s+([^0-9\n"“']+?)\s+(\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}h(?:\d{2})?|\d{1,2}:\d{2})/i.exec(
+        text,
+      );
+    if (matchUser) {
+      const title = matchUser[1].trim();
+      const rawStart = matchUser[2];
+      const rawEnd = matchUser[3];
+
+      const now = new Date();
+      const vnNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+      const yyyy = vnNow.getUTCFullYear();
+      const mm = String(vnNow.getUTCMonth() + 1).padStart(2, "0");
+      const dd = String(vnNow.getUTCDate()).padStart(2, "0");
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+
+      const normalizeTime = (t: string) => {
+        const clean = t.replace(/h/i, ":").replace(/[^0-9:]/g, "");
+        const parts = clean.split(":");
+        const h = (parts[0] || "0").padStart(2, "0");
+        const m = (parts[1] || "00").padEnd(2, "0");
+        return `${h}:${m}`;
+      };
+
+      return {
+        title,
+        date: dateStr,
+        startTime: normalizeTime(rawStart),
+        endTime: normalizeTime(rawEnd),
+      };
+    }
+  }
+  return null;
+}
+
 // ─── MODEL TOOL LOOP ─────────────────────────────────────────────────────────
 
 async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
@@ -208,6 +287,8 @@ async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
   let toolResult: Awaited<ReturnType<typeof aiProvider.chatWithTools>>;
   let proposalDraft: ProposalDraft | undefined = undefined;
   let didCommitProposalCall = false;
+  let didCreateTaskCall = false;
+  let createTaskReply: string | undefined = undefined;
   let commitProposalReply: string | undefined = undefined;
   let forcedCommitReply: string | undefined = undefined;
   const shouldShowCalendarOnboarding = ctx.historyForAILength === 0;
@@ -244,6 +325,9 @@ async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
       if (call.name === "commit_proposal") {
         didCommitProposalCall = true;
       }
+      if (call.name === "create_task") {
+        didCreateTaskCall = true;
+      }
 
       const executed = await executeToolCall(call, {
         userId: ctx.userId,
@@ -277,6 +361,17 @@ async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
         } catch {
           commitProposalReply =
             "Mình vừa chốt lịch nhưng không đọc được kết quả tool. Bạn mở tab Lịch để kiểm tra giúp mình.";
+        }
+      }
+
+      if (call.name === "create_task") {
+        try {
+          const payload = JSON.parse(executed.content);
+          if (payload.ok && payload.message) {
+            createTaskReply = payload.message;
+          }
+        } catch {
+          /* ignore */
         }
       }
     }
@@ -319,19 +414,50 @@ async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
     }
   }
 
-  // ── Forced commit when user confirmed but model didn't call commit_proposal
+  // ── Forced commit / task creation when user confirmed but model didn't call tool
   if (
     !didCommitProposalCall &&
+    !didCreateTaskCall &&
     isCommitConfirmationMessage(ctx.input.message)
   ) {
-    forcedCommitReply = await runForcedCommitFlow(
-      ctx,
-      toolMessages,
-      proposalDraft,
-      (draft) => {
-        proposalDraft = draft;
-      },
-    );
+    const pendingTask = extractPendingTaskFromHistory(toolMessages);
+    if (pendingTask) {
+      logScheduleDebug("chat.calendar.forced_create_task.detected", {
+        user: shortUser(ctx.userId),
+        pendingTask,
+      });
+      const forcedTaskExec = await executeToolCall(
+        {
+          id: `force_task_${Date.now()}`,
+          name: "create_task",
+          arguments: JSON.stringify(pendingTask),
+        },
+        { userId: ctx.userId, conversationId: String(ctx.conversationObjectId) },
+      );
+      await persistToolMessage(
+        ctx.conversationObjectId,
+        ctx.userObjectId,
+        forcedTaskExec,
+      );
+      try {
+        const payload = JSON.parse(forcedTaskExec.content);
+        if (payload.ok) {
+          didCreateTaskCall = true;
+          createTaskReply = payload.message || `Đã tạo thành công công việc '${pendingTask.title}' vào lịch!`;
+        }
+      } catch {
+        /* ignore */
+      }
+    } else {
+      forcedCommitReply = await runForcedCommitFlow(
+        ctx,
+        toolMessages,
+        proposalDraft,
+        (draft) => {
+          proposalDraft = draft;
+        },
+      );
+    }
   }
 
   // Save proposal draft to conversation context
@@ -343,18 +469,27 @@ async function runModelToolLoop(ctx: CalendarContext): Promise<CalendarResult> {
     toolResult.content || "",
   );
 
-  const content =
+  let content =
     commitProposalReply ??
     forcedCommitReply ??
     (shouldShowCalendarOnboarding && !hasScheduleAction
       ? `${CALENDAR_ONBOARDING_GUIDE}\n\n${toolResult.content}`
       : toolResult.content);
 
+  // If create_task was executed, ensure user receives a clear confirmation
+  if (didCreateTaskCall) {
+    if (!content || content.trim().length === 0 || /không có mô tả|xác nhận để tôi tiến hành/i.test(content)) {
+      content = createTaskReply || "✅ Đã tạo thành công công việc vào hệ thống và lịch của bạn!";
+    } else if (createTaskReply && !content.includes(createTaskReply)) {
+      content = `${createTaskReply}\n\n${content}`;
+    }
+  }
+
   return {
     content,
     model: toolResult.model,
     usage: toolResult.usage,
-    tasksCreatedCount: 0, // tool-loop commit counts are in the reply text
+    tasksCreatedCount: didCreateTaskCall ? 1 : 0,
   };
 }
 

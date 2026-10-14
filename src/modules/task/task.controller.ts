@@ -173,6 +173,13 @@ const parseStatus = (value: unknown): TaskStatus | undefined => {
   return undefined;
 };
 
+const parseListStatus = (
+  value: unknown,
+): TaskStatus | "overdue" | undefined => {
+  if (value === "overdue") return "overdue";
+  return parseStatus(value);
+};
+
 const parsePositiveInt = (value: unknown, defaultValue: number): number => {
   if (value === undefined || value === null) return defaultValue;
   const n = Number(value);
@@ -450,6 +457,7 @@ export const createTask = async (
       _req.body?.meetingLink !== undefined
         ? String(_req.body.meetingLink)
         : undefined;
+    const status = parseStatus(_req.body?.status);
 
     const task = await taskService.create(userId, {
       title: String(_req.body?.title ?? ""),
@@ -457,6 +465,7 @@ export const createTask = async (
         _req.body?.description !== undefined
           ? String(_req.body.description)
           : undefined,
+      status,
       startAt,
       deadline,
       priority: parsePriority(_req.body?.priority),
@@ -528,7 +537,7 @@ export const listTasks = async (
       return;
     }
 
-    const status = parseStatus((_req.query as any)?.status);
+    const status = parseListStatus((_req.query as any)?.status);
     const priority = parsePriority((_req.query as any)?.priority);
     const deadlineQuery = (_req.query as any)?.deadline;
 
@@ -890,6 +899,48 @@ export const deleteTask = async (
     }
 
     res.status(500).json({ message: "Lỗi hệ thống" });
+  }
+};
+
+export const deleteTasksBatch = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const { taskIds } = req.body;
+    if (!Array.isArray(taskIds) || taskIds.length === 0) {
+      res.status(400).json({ message: "Danh sách công việc cần xóa không hợp lệ" });
+      return;
+    }
+
+    const result = await taskService.deleteMany(userId, taskIds);
+    res.status(200).json(result);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || "Lỗi khi xóa các công việc đã chọn" });
+  }
+};
+
+export const deleteAllTasks = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+
+    const result = await taskService.deleteAll(userId);
+    res.status(200).json(result);
+  } catch (err: any) {
+    res.status(500).json({ message: err?.message || "Lỗi khi xóa tất cả công việc" });
   }
 };
 
@@ -1327,5 +1378,85 @@ export const applyCopilotBreakdown = async (
     res.status(500).json({
       message: err?.message || "Lỗi khi áp dụng các bước",
     });
+  }
+};
+
+export const extendTaskDeadline = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+    const taskId = String(_req.params.id ?? "").trim();
+    const newDeadline = String(_req.body?.newDeadline ?? "").trim();
+    const reason = _req.body?.reason ? String(_req.body.reason).trim() : undefined;
+
+    if (!taskId || !newDeadline) {
+      res.status(400).json({ message: "Vui lòng cung cấp hạn chót mới" });
+      return;
+    }
+
+    const result = await taskService.extendDeadline(userId, taskId, {
+      newDeadline,
+      reason,
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "TASK_NOT_FOUND") {
+      res.status(404).json({ message: "Không tìm thấy công việc" });
+      return;
+    }
+    if (message === "TASK_FORBIDDEN") {
+      res.status(403).json({ message: "Bạn không có quyền thực hiện trên công việc này" });
+      return;
+    }
+    if (message === "INVALID_DEADLINE") {
+      res.status(400).json({ message: "Hạn chót không hợp lệ" });
+      return;
+    }
+    res.status(500).json({ message: "Không thể gia hạn công việc", error: message });
+  }
+};
+
+export const reviewTaskExtension = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const userId = _req.user?.userId;
+    if (!userId) {
+      res.status(401).json({ message: "Chưa đăng nhập" });
+      return;
+    }
+    const taskId = String(_req.params.id ?? "").trim();
+    const action = _req.body?.action;
+    const newDeadline = _req.body?.newDeadline ? String(_req.body.newDeadline).trim() : undefined;
+
+    if (!taskId || (action !== "approve" && action !== "reject")) {
+      res.status(400).json({ message: "Hành động duyệt không hợp lệ" });
+      return;
+    }
+
+    const result = await taskService.reviewExtension(userId, taskId, {
+      action,
+      newDeadline,
+    });
+    res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "UNKNOWN";
+    if (message === "LEADER_ONLY") {
+      res.status(403).json({ message: "Chỉ Trưởng nhóm/Chủ dự án mới có quyền duyệt gia hạn" });
+      return;
+    }
+    if (message === "NO_PENDING_EXTENSION") {
+      res.status(400).json({ message: "Không có yêu cầu gia hạn nào đang chờ duyệt" });
+      return;
+    }
+    res.status(500).json({ message: "Lỗi duyệt yêu cầu gia hạn", error: message });
   }
 };

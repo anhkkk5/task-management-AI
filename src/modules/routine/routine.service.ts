@@ -9,6 +9,7 @@ export interface CreateRoutineDto {
   daysOfWeek?: number[];
   category?: string;
   color?: string;
+  allowTaskOverlap?: boolean;
 }
 
 export interface UpdateRoutineDto {
@@ -19,6 +20,7 @@ export interface UpdateRoutineDto {
   daysOfWeek?: number[];
   category?: string;
   color?: string;
+  allowTaskOverlap?: boolean;
   isActive?: boolean;
 }
 
@@ -49,6 +51,7 @@ export const routineService = {
       daysOfWeek: dto.daysOfWeek || [1, 2, 3, 4, 5, 6, 7],
       category: dto.category || "personal",
       color: dto.color || "#10b981",
+      allowTaskOverlap: Boolean(dto.allowTaskOverlap),
       isActive: true,
     });
     return routine;
@@ -79,6 +82,16 @@ export const routineService = {
       userId: new Types.ObjectId(userId),
     });
     return !!res;
+  },
+
+  async clearAllRoutines(userId: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new Error("INVALID_USER_ID");
+    }
+    await DailyRoutine.deleteMany({
+      userId: new Types.ObjectId(userId),
+    });
+    return true;
   },
 
   /**
@@ -164,12 +177,13 @@ export const routineService = {
       {
         userId: userObjectId,
         title: "Làm việc tại nhà & Tự học",
-        description: "Khung giờ vàng rảnh rỗi tập trung cao độ mỗi tối",
+        description: "Khung giờ vàng rảnh rỗi tập trung cao độ mỗi tối (AI được xếp việc vào đây)",
         startTime: "21:00",
         endTime: "23:30",
         daysOfWeek: [1, 2, 3, 4, 5, 6, 7],
         category: "study",
         color: "#8b5cf6",
+        allowTaskOverlap: true,
         isActive: true,
       },
     ];

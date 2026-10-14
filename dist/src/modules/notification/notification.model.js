@@ -48,6 +48,8 @@ var NotificationType;
     NotificationType["TEAM_TASK_UPDATED"] = "team_task_updated";
     NotificationType["TEAM_TASK_COMMENT"] = "team_task_comment";
     NotificationType["TEAM_TASK_MENTION"] = "team_task_mention";
+    NotificationType["TASK_EXTENSION_REQUEST"] = "task_extension_request";
+    NotificationType["TASK_EXTENSION_RESOLVED"] = "task_extension_resolved";
     NotificationType["SYSTEM"] = "system";
 })(NotificationType || (exports.NotificationType = NotificationType = {}));
 var NotificationPriority;

@@ -143,6 +143,14 @@ export const aiCalendarContextService = {
       )
       .exec();
 
+    // Fetch active daily routines of the user
+    const routines = await DailyRoutine.find({
+      userId: userObjectId,
+      isActive: true,
+    })
+      .sort({ startTime: 1 })
+      .lean();
+
     const tasks: CalendarTaskItem[] = [];
     for (const t of docs) {
       if (t.scheduledTime?.start && t.scheduledTime?.end) {
@@ -183,6 +191,29 @@ export const aiCalendarContextService = {
     for (const day of eachDay(from, to)) {
       const dateKey = toDateKey(day);
       const weekday = WEEKDAY_KEYS[day.getDay()];
+      // DailyRoutine daysOfWeek: 1=Monday, 2=Tuesday, ..., 6=Saturday, 7=Sunday
+      const dayOfWeekNum = day.getDay() === 0 ? 7 : day.getDay();
+
+      const activeRoutinesForDay = routines.filter((r) => {
+        if (!r.daysOfWeek || !r.daysOfWeek.includes(dayOfWeekNum)) return false;
+        if (r.excludedDates && r.excludedDates.includes(dateKey)) return false;
+        return true;
+      });
+
+      // Add routines as items in tasks array for LLM context
+      for (const r of activeRoutinesForDay) {
+        tasks.push({
+          id: `routine-${r._id}-${dateKey}`,
+          title: `[Lịch sinh hoạt] ${r.title}`,
+          status: "scheduled",
+          priority: "high",
+          type: "routine",
+          start: `${dateKey}T${r.startTime}:00+07:00`,
+          end: `${dateKey}T${r.endTime}:00+07:00`,
+          source: "scheduled",
+          reason: r.description || "Lịch sinh hoạt lặp lại hàng ngày",
+        });
+      }
 
       const freePattern = await freeTimeService
         .getAvailableSlotsForDate(userId, day)
@@ -193,9 +224,10 @@ export const aiCalendarContextService = {
       const dayEnd = new Date(day);
       dayEnd.setHours(23, 59, 59, 999);
 
-      // Busy intervals that intersect this day
+      // Busy intervals from scheduled tasks
       const busyForDay = tasks
         .filter((t) => {
+          if (t.type === "routine") return false; // Handled directly below with clean HH:mm
           const s = new Date(t.start).getTime();
           const e = new Date(t.end).getTime();
           return e > dayStart.getTime() && s < dayEnd.getTime();
@@ -213,8 +245,26 @@ export const aiCalendarContextService = {
             startMin: minutesOfDay(toHHmm(sClamped)),
             endMin: minutesOfDay(toHHmm(eClamped)),
           };
-        })
-        .sort((a, b) => a.startMin - b.startMin);
+        });
+
+      // Add busy intervals from active routines of this day
+      for (const r of activeRoutinesForDay) {
+        const startMin = minutesOfDay(r.startTime);
+        const endMin = minutesOfDay(r.endTime);
+        if (endMin > startMin) {
+          busyForDay.push({
+            start: r.startTime,
+            end: r.endTime,
+            title: `[Lịch sinh hoạt] ${r.title}`,
+            taskId: `routine-${r._id}`,
+            startMin,
+            endMin,
+          });
+        }
+      }
+
+      // Sort busy slots chronologically
+      busyForDay.sort((a, b) => a.startMin - b.startMin);
 
       const freeSlots: { start: string; end: string }[] = [];
       for (const slot of freePattern) {
@@ -346,7 +396,10 @@ export const aiCalendarContextService = {
           const excluded = r.excludedDates?.length
             ? ` [Đã bỏ các ngày: ${r.excludedDates.join(", ")}]`
             : "";
-          return `  - [RoutineID: ${r._id}] ${r.startTime} - ${r.endTime}: "${r.title}" (${daysStr})${excluded}`;
+          const overlapNote = (r as any).allowTaskOverlap
+            ? " [Cho phép chèn công việc/AI được xếp lịch vào]"
+            : " [Cố định - Không cho chèn việc]";
+          return `  - [RoutineID: ${r._id}] ${r.startTime} - ${r.endTime}: "${r.title}" (${daysStr})${overlapNote}${excluded}`;
         })
       : ["  (Chưa có thói quen nào)"];
 

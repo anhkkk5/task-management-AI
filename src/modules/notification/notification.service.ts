@@ -248,6 +248,8 @@ function buildGroupSummary(
     [NotificationType.TEAM_TASK_UPDATED]: "cập nhật công việc nhóm",
     [NotificationType.TEAM_TASK_COMMENT]: "bình luận mới trong công việc nhóm",
     [NotificationType.TEAM_TASK_MENTION]: "lượt nhắc tên trong công việc nhóm",
+    [NotificationType.TASK_EXTENSION_REQUEST]: "yêu cầu gia hạn công việc",
+    [NotificationType.TASK_EXTENSION_RESOLVED]: "kết quả phê duyệt gia hạn",
     [NotificationType.SYSTEM]: "cập nhật hệ thống",
   };
   const label = labelMap[type] || "thông báo";

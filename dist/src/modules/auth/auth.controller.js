@@ -200,6 +200,13 @@ const refreshToken = async (_req, res) => {
     try {
         const token = (0, extract_refresh_token_1.extractRefreshToken)(_req);
         const result = await auth_service_1.authService.refreshToken({ refreshToken: token });
+        res.cookie("token", result.accessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+            path: "/",
+        });
         (0, refresh_cookie_1.setRefreshCookie)(res, result.refreshToken, cookieInput());
         res.status(200).json({ accessToken: result.accessToken });
     }

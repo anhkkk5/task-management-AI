@@ -270,6 +270,7 @@ export const aiRescheduleService = {
       for (const r of userRoutines) {
         if (!r.daysOfWeek?.includes(dayNum)) continue;
         if (r.excludedDates && r.excludedDates.includes(dateStr)) continue;
+        if (r.allowTaskOverlap) continue;
 
         const [sh, sm] = (r.startTime || "").split(":").map((x) => parseInt(x, 10));
         const [eh, em] = (r.endTime || "").split(":").map((x) => parseInt(x, 10));

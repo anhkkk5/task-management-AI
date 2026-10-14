@@ -15,6 +15,9 @@ export type UserAttrs = {
   settings?: Record<string, unknown>;
   isVerified?: boolean;
   googleAccessToken?: string;
+  isBanned?: boolean;
+  banReason?: string;
+  bannedAt?: Date;
 };
 
 export type UserDoc = {
@@ -31,6 +34,9 @@ export type UserDoc = {
   settings?: Record<string, unknown>;
   isVerified: boolean;
   googleAccessToken?: string;
+  isBanned?: boolean;
+  banReason?: string;
+  bannedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -96,6 +102,19 @@ const userSchema = new Schema<UserDoc>(
       type: String,
       required: false,
       select: false,
+    },
+    isBanned: {
+      type: Boolean,
+      required: false,
+      default: false,
+    },
+    banReason: {
+      type: String,
+      required: false,
+    },
+    bannedAt: {
+      type: Date,
+      required: false,
     },
   },
   {

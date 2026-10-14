@@ -13,11 +13,7 @@ export const getRoutines = async (req: Request, res: Response) => {
     if (!userId) {
       return res.status(401).json({ message: "Chưa xác thực người dùng" });
     }
-    let routines = await routineService.getRoutines(userId);
-    // Nếu chưa có routine nào, tự động nạp 7 thói quen sinh hoạt mẫu mặc định
-    if (routines.length === 0) {
-      routines = await routineService.seedDefaultRoutines(userId);
-    }
+    const routines = await routineService.getRoutines(userId);
     return res.status(200).json({ routines });
   } catch (err: any) {
     return res.status(500).json({ message: err.message || "Lỗi khi lấy danh sách lịch lặp lại" });
@@ -93,5 +89,18 @@ export const seedDefaultRoutines = async (req: Request, res: Response) => {
     return res.status(200).json({ routines, message: "Đã nạp bộ lịch lặp lại hàng ngày mẫu thành công" });
   } catch (err: any) {
     return res.status(500).json({ message: err.message || "Lỗi khi nạp lịch lặp lại mẫu" });
+  }
+};
+
+export const clearAllRoutines = async (req: Request, res: Response) => {
+  try {
+    const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: "Chưa xác thực người dùng" });
+    }
+    await routineService.clearAllRoutines(userId);
+    return res.status(200).json({ success: true, message: "Đã xóa toàn bộ lịch lặp lại thành công" });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message || "Lỗi khi xóa tất cả lịch lặp lại" });
   }
 };

@@ -6,6 +6,8 @@ import {
   clearScheduledTime,
   createTask,
   deleteTask,
+  deleteTasksBatch,
+  deleteAllTasks,
   explainTaskEstimation,
   getTaskById,
   listTasks,
@@ -16,9 +18,14 @@ import {
   taskCopilotChat,
   copilotChatStream,
   applyCopilotBreakdown,
+  extendTaskDeadline,
+  reviewTaskExtension,
 } from "./task.controller";
 
 const taskRouter = Router();
+
+taskRouter.post("/:id/extend", authMiddleware, extendTaskDeadline);
+taskRouter.post("/:id/extension-review", authMiddleware, reviewTaskExtension);
 
 taskRouter.post("/", authMiddleware, createTask);
 
@@ -48,6 +55,10 @@ taskRouter.patch("/:id", authMiddleware, updateTask);
 
 // Quick status update endpoint (must be before /:id/... routes)
 taskRouter.patch("/:id/status", authMiddleware, updateTaskStatus);
+
+// Batch delete and clear all tasks
+taskRouter.post("/batch-delete", authMiddleware, deleteTasksBatch);
+taskRouter.delete("/clear-all-tasks", authMiddleware, deleteAllTasks);
 
 taskRouter.delete("/:id", authMiddleware, deleteTask);
 

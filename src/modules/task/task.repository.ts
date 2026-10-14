@@ -312,7 +312,7 @@ export const taskRepository = {
 
   listByUser: async (params: {
     userId: string | Types.ObjectId;
-    status?: TaskStatus;
+    status?: TaskStatus | "overdue";
     priority?: TaskPriority;
     title?: RegExp;
     deadlineFrom?: Date;
@@ -327,7 +327,12 @@ export const taskRepository = {
     };
 
     if (params.status) {
-      filter.status = params.status;
+      if (params.status === "overdue") {
+        filter.deadline = { $lt: new Date() };
+        filter.status = { $nin: ["completed", "cancelled"] };
+      } else {
+        filter.status = params.status;
+      }
     }
     if (params.priority) {
       filter.priority = params.priority;

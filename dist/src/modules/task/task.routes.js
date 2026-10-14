@@ -4,6 +4,8 @@ const express_1 = require("express");
 const auth_middleware_1 = require("../../middleware/auth.middleware");
 const task_controller_1 = require("./task.controller");
 const taskRouter = (0, express_1.Router)();
+taskRouter.post("/:id/extend", auth_middleware_1.authMiddleware, task_controller_1.extendTaskDeadline);
+taskRouter.post("/:id/extension-review", auth_middleware_1.authMiddleware, task_controller_1.reviewTaskExtension);
 taskRouter.post("/", auth_middleware_1.authMiddleware, task_controller_1.createTask);
 taskRouter.get("/", auth_middleware_1.authMiddleware, task_controller_1.listTasks);
 taskRouter.get("/overdue", auth_middleware_1.authMiddleware, task_controller_1.listOverdueTasks);
@@ -16,6 +18,9 @@ taskRouter.get("/:id/explain-estimation", auth_middleware_1.authMiddleware, task
 taskRouter.patch("/:id", auth_middleware_1.authMiddleware, task_controller_1.updateTask);
 // Quick status update endpoint (must be before /:id/... routes)
 taskRouter.patch("/:id/status", auth_middleware_1.authMiddleware, task_controller_1.updateTaskStatus);
+// Batch delete and clear all tasks
+taskRouter.post("/batch-delete", auth_middleware_1.authMiddleware, task_controller_1.deleteTasksBatch);
+taskRouter.delete("/clear-all-tasks", auth_middleware_1.authMiddleware, task_controller_1.deleteAllTasks);
 taskRouter.delete("/:id", auth_middleware_1.authMiddleware, task_controller_1.deleteTask);
 taskRouter.post("/save-ai-schedule", auth_middleware_1.authMiddleware, task_controller_1.saveAISchedule);
 // Clear scheduled time endpoints

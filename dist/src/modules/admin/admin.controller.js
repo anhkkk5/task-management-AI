@@ -252,4 +252,115 @@ exports.adminController = {
             res.status(500).json({ message: "Failed to cleanup cache" });
         }
     },
+    // Guide video management
+    getGuideVideo: async (_req, res) => {
+        try {
+            const { SystemSetting } = await Promise.resolve().then(() => __importStar(require("./system-setting.model")));
+            const setting = await SystemSetting.findOne({ key: "guide_video" }).lean();
+            const videoUrl = setting?.value?.url || "/videos/guide-tasks.mp4";
+            const videoType = setting?.value?.type ||
+                (videoUrl.includes("youtube") || videoUrl.includes("youtu.be")
+                    ? "youtube"
+                    : "video");
+            const rawEmbed = setting?.value?.rawEmbed || "";
+            res.status(200).json({ ok: true, videoUrl, videoType, rawEmbed });
+        }
+        catch (err) {
+            console.error("[AdminController] getGuideVideo error:", err);
+            res.status(200).json({ ok: true, videoUrl: "/videos/guide-tasks.mp4", videoType: "video" });
+        }
+    },
+    updateGuideVideoEmbed: async (req, res) => {
+        try {
+            const { embedCode, videoUrl } = req.body;
+            const rawInput = (embedCode || videoUrl || "").trim();
+            if (!rawInput) {
+                res.status(400).json({ message: "Vui lòng nhập mã nhúng iframe hoặc liên kết video YouTube" });
+                return;
+            }
+            let parsedEmbedUrl = "";
+            // 1. Phân tích nếu dán đoạn mã iframe (ví dụ: <iframe ... src="https://www.youtube.com/embed/..." ...></iframe>)
+            const iframeSrcMatch = rawInput.match(/src=["']([^"']+)["']/i);
+            if (iframeSrcMatch && iframeSrcMatch[1]) {
+                parsedEmbedUrl = iframeSrcMatch[1];
+            }
+            else {
+                // 2. Phân tích nếu dán trực tiếp link YouTube (watch, embed, youtu.be, shorts)
+                const ytMatch = rawInput.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/))([\w-]{11})/i);
+                if (ytMatch && ytMatch[1]) {
+                    parsedEmbedUrl = `https://www.youtube.com/embed/${ytMatch[1]}`;
+                }
+                else if (rawInput.startsWith("http://") || rawInput.startsWith("https://")) {
+                    parsedEmbedUrl = rawInput;
+                }
+            }
+            if (!parsedEmbedUrl) {
+                res.status(400).json({ message: "Mã nhúng hoặc liên kết YouTube không hợp lệ" });
+                return;
+            }
+            const { SystemSetting } = await Promise.resolve().then(() => __importStar(require("./system-setting.model")));
+            await SystemSetting.findOneAndUpdate({ key: "guide_video" }, {
+                $set: {
+                    value: {
+                        url: parsedEmbedUrl,
+                        type: "youtube",
+                        rawEmbed: rawInput,
+                        updatedAt: new Date(),
+                    },
+                },
+            }, { upsert: true, new: true });
+            res.status(200).json({
+                ok: true,
+                message: "Cập nhật video nhúng YouTube thành công",
+                videoUrl: parsedEmbedUrl,
+                videoType: "youtube",
+            });
+        }
+        catch (err) {
+            console.error("[AdminController] updateGuideVideoEmbed error:", err);
+            res.status(500).json({ message: err?.message || "Cập nhật video nhúng thất bại" });
+        }
+    },
+    uploadGuideVideo: async (req, res) => {
+        const file = req.file;
+        if (!file) {
+            res.status(400).json({ message: "Vui lòng chọn file video" });
+            return;
+        }
+        const filePath = file.path;
+        const { uploadLargeVideoFile } = await Promise.resolve().then(() => __importStar(require("../../services/cloudinary.service")));
+        const { SystemSetting } = await Promise.resolve().then(() => __importStar(require("./system-setting.model")));
+        const fs = await Promise.resolve().then(() => __importStar(require("fs")));
+        try {
+            const uploaded = await uploadLargeVideoFile(filePath, {
+                folder: "taskmind-guide-videos",
+                publicId: `guide_video_${Date.now()}`,
+            });
+            await SystemSetting.findOneAndUpdate({ key: "guide_video" }, {
+                $set: {
+                    value: {
+                        url: uploaded.url,
+                        publicId: uploaded.publicId,
+                        type: "video",
+                        updatedAt: new Date(),
+                    },
+                },
+            }, { upsert: true, new: true });
+            res.status(200).json({
+                ok: true,
+                message: "Tải lên video hướng dẫn lên Cloudinary thành công",
+                videoUrl: uploaded.url,
+                videoType: "video",
+            });
+        }
+        catch (err) {
+            console.error("[AdminController] uploadGuideVideo error:", err);
+            res.status(500).json({ message: err?.message || "Tải lên video thất bại" });
+        }
+        finally {
+            if (filePath) {
+                fs.unlink(filePath, () => { });
+            }
+        }
+    },
 };

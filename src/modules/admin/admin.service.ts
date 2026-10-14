@@ -121,17 +121,16 @@ export const adminService = {
     const user = await User.findById(userId);
     if (!user) return null;
 
-    // Toggle isBanned field (cần thêm vào schema nếu chưa có)
-    const isBanned = (user as any).isBanned;
-    (user as any).isBanned = !isBanned;
-    (user as any).banReason = !isBanned ? reason : null;
-    (user as any).bannedAt = !isBanned ? new Date() : null;
+    const isBanned = Boolean(user.isBanned);
+    user.isBanned = !isBanned;
+    user.banReason = !isBanned ? reason : undefined;
+    user.bannedAt = !isBanned ? new Date() : undefined;
 
     await user.save();
     return {
       id: String(user._id),
-      isBanned: (user as any).isBanned,
-      banReason: (user as any).banReason,
+      isBanned: user.isBanned,
+      banReason: user.banReason,
     };
   },
 

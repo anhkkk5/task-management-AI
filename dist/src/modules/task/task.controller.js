@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.applyCopilotBreakdown = exports.copilotChatStream = exports.taskCopilotChat = exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.explainTaskEstimation = exports.aiBreakdownTask = void 0;
+exports.reviewTaskExtension = exports.extendTaskDeadline = exports.applyCopilotBreakdown = exports.copilotChatStream = exports.taskCopilotChat = exports.clearAllScheduledTimes = exports.clearScheduledTime = exports.saveAISchedule = exports.updateTaskStatus = exports.deleteAllTasks = exports.deleteTasksBatch = exports.deleteTask = exports.updateTask = exports.listOverdueTasks = exports.listTasks = exports.getTaskById = exports.createTask = exports.explainTaskEstimation = exports.aiBreakdownTask = void 0;
 const task_service_1 = require("./task.service");
 const ai_schedule_service_1 = require("../ai-schedule/ai-schedule.service");
 const search_helper_1 = __importDefault(require("../../common/utils/search-helper"));
@@ -153,6 +153,11 @@ const parseStatus = (value) => {
         v === "cancelled")
         return v;
     return undefined;
+};
+const parseListStatus = (value) => {
+    if (value === "overdue")
+        return "overdue";
+    return parseStatus(value);
 };
 const parsePositiveInt = (value, defaultValue) => {
     if (value === undefined || value === null)
@@ -372,11 +377,13 @@ const createTask = async (_req, res) => {
         const meetingLink = _req.body?.meetingLink !== undefined
             ? String(_req.body.meetingLink)
             : undefined;
+        const status = parseStatus(_req.body?.status);
         const task = await task_service_1.taskService.create(userId, {
             title: String(_req.body?.title ?? ""),
             description: _req.body?.description !== undefined
                 ? String(_req.body.description)
                 : undefined,
+            status,
             startAt,
             deadline,
             priority: parsePriority(_req.body?.priority),
@@ -437,7 +444,7 @@ const listTasks = async (_req, res) => {
             res.status(401).json({ message: "Chưa đăng nhập" });
             return;
         }
-        const status = parseStatus(_req.query?.status);
+        const status = parseListStatus(_req.query?.status);
         const priority = parsePriority(_req.query?.priority);
         const deadlineQuery = _req.query?.deadline;
         const search = (0, search_helper_1.default)(_req.query);
@@ -719,6 +726,41 @@ const deleteTask = async (_req, res) => {
     }
 };
 exports.deleteTask = deleteTask;
+const deleteTasksBatch = async (req, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const { taskIds } = req.body;
+        if (!Array.isArray(taskIds) || taskIds.length === 0) {
+            res.status(400).json({ message: "Danh sách công việc cần xóa không hợp lệ" });
+            return;
+        }
+        const result = await task_service_1.taskService.deleteMany(userId, taskIds);
+        res.status(200).json(result);
+    }
+    catch (err) {
+        res.status(500).json({ message: err?.message || "Lỗi khi xóa các công việc đã chọn" });
+    }
+};
+exports.deleteTasksBatch = deleteTasksBatch;
+const deleteAllTasks = async (req, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const result = await task_service_1.taskService.deleteAll(userId);
+        res.status(200).json(result);
+    }
+    catch (err) {
+        res.status(500).json({ message: err?.message || "Lỗi khi xóa tất cả công việc" });
+    }
+};
+exports.deleteAllTasks = deleteAllTasks;
 /**
  * Quick update task status (for status dropdown)
  * PATCH /tasks/:id/status
@@ -1041,3 +1083,75 @@ const applyCopilotBreakdown = async (req, res) => {
     }
 };
 exports.applyCopilotBreakdown = applyCopilotBreakdown;
+const extendTaskDeadline = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const taskId = String(_req.params.id ?? "").trim();
+        const newDeadline = String(_req.body?.newDeadline ?? "").trim();
+        const reason = _req.body?.reason ? String(_req.body.reason).trim() : undefined;
+        if (!taskId || !newDeadline) {
+            res.status(400).json({ message: "Vui lòng cung cấp hạn chót mới" });
+            return;
+        }
+        const result = await task_service_1.taskService.extendDeadline(userId, taskId, {
+            newDeadline,
+            reason,
+        });
+        res.status(200).json(result);
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "TASK_NOT_FOUND") {
+            res.status(404).json({ message: "Không tìm thấy công việc" });
+            return;
+        }
+        if (message === "TASK_FORBIDDEN") {
+            res.status(403).json({ message: "Bạn không có quyền thực hiện trên công việc này" });
+            return;
+        }
+        if (message === "INVALID_DEADLINE") {
+            res.status(400).json({ message: "Hạn chót không hợp lệ" });
+            return;
+        }
+        res.status(500).json({ message: "Không thể gia hạn công việc", error: message });
+    }
+};
+exports.extendTaskDeadline = extendTaskDeadline;
+const reviewTaskExtension = async (_req, res) => {
+    try {
+        const userId = _req.user?.userId;
+        if (!userId) {
+            res.status(401).json({ message: "Chưa đăng nhập" });
+            return;
+        }
+        const taskId = String(_req.params.id ?? "").trim();
+        const action = _req.body?.action;
+        const newDeadline = _req.body?.newDeadline ? String(_req.body.newDeadline).trim() : undefined;
+        if (!taskId || (action !== "approve" && action !== "reject")) {
+            res.status(400).json({ message: "Hành động duyệt không hợp lệ" });
+            return;
+        }
+        const result = await task_service_1.taskService.reviewExtension(userId, taskId, {
+            action,
+            newDeadline,
+        });
+        res.status(200).json(result);
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : "UNKNOWN";
+        if (message === "LEADER_ONLY") {
+            res.status(403).json({ message: "Chỉ Trưởng nhóm/Chủ dự án mới có quyền duyệt gia hạn" });
+            return;
+        }
+        if (message === "NO_PENDING_EXTENSION") {
+            res.status(400).json({ message: "Không có yêu cầu gia hạn nào đang chờ duyệt" });
+            return;
+        }
+        res.status(500).json({ message: "Lỗi duyệt yêu cầu gia hạn", error: message });
+    }
+};
+exports.reviewTaskExtension = reviewTaskExtension;

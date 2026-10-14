@@ -187,7 +187,7 @@ async function scanAndNotifyScheduledTasks() {
             await notification_service_1.notificationService.create({
                 userId,
                 type: notification_model_1.NotificationType.SCHEDULED_TASK_ALERT,
-                title: `⏰ Task sắp bắt đầu: ${task.title}`,
+                title: `Task sắp bắt đầu: ${task.title}`,
                 content: `Task "${task.title}" sẽ bắt đầu sau ${reminderMinutes} phút (lúc ${startTimeStr})${endTimeStr ? ` - kết thúc ${endTimeStr}` : ""}. ${task.scheduledTime.reason || "Chuẩn bị sẵn sàng!"}`,
                 data: {
                     taskId,
@@ -304,7 +304,7 @@ async function scanAndNotifyAIScheduleTasks() {
                     await notification_service_1.notificationService.create({
                         userId,
                         type: notification_model_1.NotificationType.SCHEDULED_TASK_ALERT,
-                        title: `⏰ Task AI sắp bắt đầu: ${session.title}`,
+                        title: `Task AI sắp bắt đầu: ${session.title}`,
                         content: `Task "${session.title}" sẽ bắt đầu sau ${reminderMinutes} phút (lúc ${startTimeStr}) - kết thúc ${endTimeStr}. ${session.reason || "Chuẩn bị sẵn sàng!"}`,
                         data: {
                             taskId: sessionTaskId,
@@ -369,7 +369,7 @@ async function scanAndNotifyMissedTasks() {
             await notification_service_1.notificationService.create({
                 userId,
                 type: notification_model_1.NotificationType.SYSTEM,
-                title: `⚠️ Task bị bỏ lỡ: ${task.title}`,
+                title: `Task bị bỏ lỡ: ${task.title}`,
                 content: `Task "${task.title}" đã được lên lịch bắt đầu lúc ${scheduledStartStr} nhưng chưa được thực hiện. Bạn có muốn AI đề xuất lịch mới?`,
                 data: {
                     taskId,

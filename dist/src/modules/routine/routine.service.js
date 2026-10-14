@@ -26,6 +26,7 @@ exports.routineService = {
             daysOfWeek: dto.daysOfWeek || [1, 2, 3, 4, 5, 6, 7],
             category: dto.category || "personal",
             color: dto.color || "#10b981",
+            allowTaskOverlap: Boolean(dto.allowTaskOverlap),
             isActive: true,
         });
         return routine;
@@ -46,6 +47,15 @@ exports.routineService = {
             userId: new mongoose_1.Types.ObjectId(userId),
         });
         return !!res;
+    },
+    async clearAllRoutines(userId) {
+        if (!mongoose_1.Types.ObjectId.isValid(userId)) {
+            throw new Error("INVALID_USER_ID");
+        }
+        await routine_model_1.DailyRoutine.deleteMany({
+            userId: new mongoose_1.Types.ObjectId(userId),
+        });
+        return true;
     },
     /**
      * Khởi tạo bộ 7 thói quen sinh hoạt mẫu nếu người dùng chưa có
@@ -129,12 +139,13 @@ exports.routineService = {
             {
                 userId: userObjectId,
                 title: "Làm việc tại nhà & Tự học",
-                description: "Khung giờ vàng rảnh rỗi tập trung cao độ mỗi tối",
+                description: "Khung giờ vàng rảnh rỗi tập trung cao độ mỗi tối (AI được xếp việc vào đây)",
                 startTime: "21:00",
                 endTime: "23:30",
                 daysOfWeek: [1, 2, 3, 4, 5, 6, 7],
                 category: "study",
                 color: "#8b5cf6",
+                allowTaskOverlap: true,
                 isActive: true,
             },
         ];

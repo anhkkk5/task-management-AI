@@ -48,6 +48,7 @@ const DailyRoutineSchema = new mongoose_1.Schema({
     },
     category: { type: String, default: "personal" },
     color: { type: String, default: "#10b981" },
+    allowTaskOverlap: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true, index: true },
     excludedDates: {
         type: [String],

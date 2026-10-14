@@ -46,8 +46,9 @@ export const emailService = {
         return { success: false, error: "SMTP not configured" };
       }
 
+      const fromName = process.env.EMAIL_FROM_NAME || "Tank";
       const info = await transporter.sendMail({
-        from: `"Task Management" <${SMTP_FROM}>`,
+        from: `"${fromName}" <${SMTP_FROM}>`,
         to: options.to,
         subject: options.subject,
         text: options.text,
