@@ -5,14 +5,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mailService = exports.MailService = void 0;
 const nodemailer_1 = __importDefault(require("nodemailer"));
+const smtpHost = process.env.SMTP_HOST || "smtp-relay.brevo.com";
+const rawSmtpPort = parseInt(process.env.SMTP_PORT || "2525");
+const smtpPort = smtpHost.includes("brevo.com") && (rawSmtpPort === 587 || !process.env.SMTP_PORT)
+    ? 2525
+    : rawSmtpPort;
 const transporter = nodemailer_1.default.createTransport({
-    host: process.env.SMTP_HOST || "smtp.gmail.com",
-    port: parseInt(process.env.SMTP_PORT || "587"),
-    secure: false,
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
     auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
     },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
 });
 const senderEmail = process.env.EMAIL_FROM || process.env.SMTP_USER;
 const senderName = process.env.EMAIL_FROM_NAME || "TaskMind AI";

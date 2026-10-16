@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleAuthError = void 0;
 const handleAuthError = (err, res, map) => {
+    console.error("[AuthError]", err);
     const key = err instanceof Error ? err.message : "UNKNOWN";
     if (key.includes("Missing env SMTP")) {
         res.status(500).json({ message: "Thiếu cấu hình SMTP" });

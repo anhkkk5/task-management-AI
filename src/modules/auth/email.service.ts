@@ -2,9 +2,14 @@ import nodemailer from "nodemailer";
 
 const getSmtpConfig = () => {
   const host = process.env.SMTP_HOST;
-  const port = process.env.SMTP_PORT
+  const rawPort = process.env.SMTP_PORT
     ? Number(process.env.SMTP_PORT)
-    : undefined;
+    : 2525;
+  // Cổng 2525 là cổng thay thế chính thức của Brevo, không bị tường lửa Render chặn như cổng 587/465
+  const port =
+    host?.includes("brevo.com") && (rawPort === 587 || !process.env.SMTP_PORT)
+      ? 2525
+      : rawPort;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
 
@@ -39,6 +44,9 @@ export const emailService = {
         user: cfg.user,
         pass: cfg.pass,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
 
     await transporter.sendMail({
@@ -64,6 +72,9 @@ export const emailService = {
         user: cfg.user,
         pass: cfg.pass,
       },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
     });
 
     await transporter.sendMail({

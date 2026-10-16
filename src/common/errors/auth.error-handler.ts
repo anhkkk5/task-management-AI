@@ -7,6 +7,7 @@ export const handleAuthError = (
   res: Response,
   map: ErrorMap,
 ): void => {
+  console.error("[AuthError]", err);
   const key = err instanceof Error ? err.message : "UNKNOWN";
 
   if (key.includes("Missing env SMTP")) {
